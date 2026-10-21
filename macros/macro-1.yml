@@ -1203,10 +1203,11 @@ macroString: |-
                   {%- endif -%}
                   {%- if col.freshness is defined and col.freshness.parameters is defined -%}
                       {{ test_stage(col.name + ': freshness', columnContinueOnFailure) }}
-                      SELECT MAX(CAST({{ colName }} AS DATETIME)) AS `LATEST_VALUE`
+                      SELECT max(toDateTime64({{ colName }}, 3)) AS `LATEST_VALUE`
                       FROM {{ target }}
-                      HAVING MAX(CAST({{ colName }} AS DATETIME)) IS NULL
-                          OR MAX(CAST({{ colName }} AS DATETIME)) < DATEADD({{ col.freshness.parameters[1] | default('DAY', true) }}, -{{ col.freshness.parameters[0] }}, CURRENT_TIMESTAMP())
+                      HAVING count() = 0
+                          OR max(toDateTime64({{ colName }}, 3)) IS NULL
+                          OR max(toDateTime64({{ colName }}, 3)) < now64(3) - INTERVAL {{ col.freshness.parameters[0] }} {{ col.freshness.parameters[1] | default('DAY', true) }}
                   {%- endif -%}
                   {%- if col.relative_time is defined and col.relative_time.parameters is defined -%}
                       {%- set other = '`' + col.relative_time.parameters[1] + '`' -%}
