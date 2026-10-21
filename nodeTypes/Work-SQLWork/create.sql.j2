@@ -55,57 +55,53 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {%- if currentState is not defined or currentMatType != desiredMatType %}
 
             {# CreateSQL for Table. Work is an intermediate stage: plain MergeTree, sorted by @orderBy / @primaryKey (tuple() when neither),
-               with @partitionBy and @settings when set.
-               NULL / NOT NULL is skipped for a Nullable(...) type, which ClickHouse rejects. #}
+               with @partitionBy and @settings when set. #}
             {# Validate: @primaryKey must be the leading terms of @orderBy #}
             {{ validate_order_by() }}
 
             {{ stage('Create ' + desiredMatType) }}
             CREATE OR REPLACE TABLE {{ nsNodeVariables.desObjectNameFullPath }}
-            (
-                {%- for col in columns %}
-                    `{{ col.name }}` {{ col.dataType }}
-                    {%- if not (col.dataType | lower).startswith('nullable(') %}
-                        {%- if col.nullable == false %} NOT NULL{% else %} NULL{% endif %}
-                    {%- endif %}
-                    {%- if col.defaultValue %} DEFAULT {{ col.defaultValue }}{% endif %}
-                    {%- if col.description | trim | length > 0 %} COMMENT '{{ ch_string(col.description) }}'{% endif %}
-                    {%- if not loop.last -%}, {%- endif %}
-                {%- endfor %}
-            )
-            ENGINE = MergeTree
-            {{ ch_storage_clauses() }}
-            {%- if node.description | trim | length > 0 %}
-            COMMENT '{{ ch_string(node.description) }}'
-            {%- endif %}
+            {{ ch_table_definition_sql() }}
 
         {%- elif currentState is defined and currentState != desiredState and currentMatType == desiredMatType %}
 
-            {# Every alter runs on the clone (nsNodeVariables.alterObjectNameFullPath) #}
-            {%- set alterSql %}
+            {# Key / settings changes, or a renamed, retyped or dropped key column, cannot be ALTERed in ClickHouse:
+               the table is recreated (warning stage + CREATE OR REPLACE, existing data lost) instead of cloned and altered #}
+            {{ set_rebuild_reason() }}
+            {%- if nsNodeVariables.rebuildReason %}
 
-                {# Alter Column: data type, nullability, description, default (old column names) #}
-                {{ alter_modify_columns_sql() }}
+                {# Validate: @primaryKey must be the leading terms of @orderBy #}
+                {{ validate_order_by() }}
 
-                {# Add Column #}
-                {{ alter_add_columns_sql() }}
+                {# Warning: Table Recreated -> Recreate Table (-> Delete Table at the old path when renamed/moved) #}
+                {{ rebuild_table_sql() }}
 
-                {# Rename Column (matched by id; a column without @id has its name as id, so it is dropped + added instead) #}
-                {{ alter_rename_columns_sql() }}
+            {%- else %}
 
-                {# ORDER BY key: new key after adds/renames, before Delete Column so dropped columns have left it #}
-                {{ alter_order_by_sql() }}
+                {# Every alter runs on the clone (nsNodeVariables.alterObjectNameFullPath) #}
+                {%- set alterSql %}
 
-                {# Delete Column #}
-                {{ alter_drop_columns_sql() }}
+                    {# Alter Column: data type, nullability, description, default (old column names) #}
+                    {{ alter_modify_columns_sql() }}
 
-                {# Edit Table Description #}
-                {{ alter_description_sql() }}
+                    {# Add Column #}
+                    {{ alter_add_columns_sql() }}
 
-            {%- endset %}
+                    {# Rename Column (matched by id; a column without @id has its name as id, so it is dropped + added instead) #}
+                    {{ alter_rename_columns_sql() }}
 
-            {# Clone Table -> alters -> Swap Cloned Table (or Rename Table when renamed/moved) -> Delete Table #}
-            {{ alter_clone_swap_sql(alterSql) }}
+                    {# Delete Column #}
+                    {{ alter_drop_columns_sql() }}
+
+                    {# Edit Table Description #}
+                    {{ alter_description_sql() }}
+
+                {%- endset %}
+
+                {# Clone Table -> alters -> Swap Cloned Table (or Rename Table when renamed/moved) -> Delete Table #}
+                {{ alter_clone_swap_sql(alterSql) }}
+
+            {%- endif %}
 
             {# Nothing above altered the table: record a metadata-only change #}
             {{ alter_metadata_sql() }}

@@ -37,6 +37,7 @@ metadata:
               Ex. orderBy("`n_Nationkey`")
               Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)")
             • Without orderBy (and primaryKey) the table uses ORDER BY tuple(). Ignored on views.
+            • ⚠️ Changing orderBy (or a column used in it) on redeploy recreates the table — existing data is lost.
           isRequired: false
           parameters:
             - name: term
@@ -51,6 +52,7 @@ metadata:
               Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)") primaryKey("`n_Nationkey`", "`n_Name`")
             • Without orderBy, the primary key is also the sort key: primaryKey("`n_Nationkey`") → ORDER BY (`n_Nationkey`).
             • When it is the same as orderBy, it is not written separately. Ignored on views.
+            • ⚠️ Changing primaryKey (or a column used in it) on redeploy recreates the table — existing data is lost.
           isRequired: false
           parameters:
             - name: term
@@ -65,6 +67,7 @@ metadata:
               Ex. partitionBy("toYYYYMM(`order_Date`)", "`region`")
             • Keep it coarse (e.g. one partition per month): each partition is stored separately, and too many partitions slow inserts down and eventually make them fail.
             • Without partitionBy the table is not partitioned. Ignored on views.
+            • ⚠️ Changing partitionBy (or a column used in it) on redeploy recreates the table — existing data is lost.
           isRequired: false
           parameters:
             - name: term
@@ -79,6 +82,7 @@ metadata:
               Ex. settings("index_granularity = 8192", "min_bytes_for_wide_part = 0")
             • allow_nullable_key = 1 is added automatically when the table has an orderBy, primaryKey or partitionBy, so nullable columns can be key terms — set it here to override it.
             • Ignored on views.
+            • ⚠️ Changing settings on redeploy recreates the table — existing data is lost.
           isRequired: false
           parameters:
             - name: setting

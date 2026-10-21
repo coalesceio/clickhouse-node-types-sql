@@ -141,6 +141,13 @@ macroString: |-
       {{- collect_key_terms(currentState.config.orderBy, nsCurrentOrder) -}}
       {{- collect_key_terms(currentState.config.primaryKey, nsCurrentKey) -}}
       {%- set nsNodeVariables.currentOrderBy = nsCurrentOrder.items or nsCurrentKey.items -%}
+      {%- set nsNodeVariables.currentPrimaryKey = nsCurrentKey.items -%}
+      {%- set nsCurrentPartition = namespace(items=[]) -%}
+      {%- set nsCurrentSettings = namespace(items=[]) -%}
+      {{- collect_key_terms(currentState.config.partitionBy, nsCurrentPartition) -}}
+      {{- collect_key_terms(currentState.config.settings, nsCurrentSettings) -}}
+      {%- set nsNodeVariables.currentPartitionBy = nsCurrentPartition.items -%}
+      {%- set nsNodeVariables.currentSettings = nsCurrentSettings.items -%}
     {%- endif -%}
 
   {%- endmacro -%}
@@ -154,10 +161,12 @@ macroString: |-
       alterObjectNameFullPath               what alter_ macros change: clone (table) / view
       droppedColumns / renamedColumns       quoted current column names
       desired/currentOrderBy                ORDER BY terms from @orderBy (or @primaryKey when only that is set)
-      desiredPrimaryKey                     PRIMARY KEY terms from @primaryKey (leading terms of desiredOrderBy)
+      desired/currentPrimaryKey             PRIMARY KEY terms from @primaryKey (leading terms of desiredOrderBy)
       primaryKeyError                       why the primary key is invalid, '' when valid
-      desiredPartitionBy                    PARTITION BY terms from @partitionBy
-      desiredSettings                       "name = value" table settings from @settings
+      desired/currentPartitionBy            PARTITION BY terms from @partitionBy
+      desired/currentSettings               "name = value" table settings from @settings
+      rebuildReason                         why a table redeploy rebuilds instead of altering, '' when it alters
+                                            (set by set_rebuild_reason())
       metaDataChanged                      set by the redeploy macros
   ===========================================================================#}
   {%- set nsNodeVariables = namespace(desiredMatType = "",
@@ -172,8 +181,12 @@ macroString: |-
                                       desiredPrimaryKey = [],
                                       primaryKeyError = "",
                                       currentOrderBy = [],
+                                      currentPrimaryKey = [],
                                       desiredPartitionBy = [],
+                                      currentPartitionBy = [],
                                       desiredSettings = [],
+                                      currentSettings = [],
+                                      rebuildReason = "",
                                       metaDataChanged = false) -%}
   {{- initialize_node_variables(nsNodeVariables) -}}
 
@@ -887,6 +900,31 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
+    ch_table_definition_sql(): everything after CREATE ... TABLE <path> for the desired table:
+    the column list, ENGINE, the storage clauses and the table COMMENT. Used by the first
+    create and by the redeploy rebuild, so both write the same table.
+    NULL / NOT NULL is skipped for a Nullable(...) type, which ClickHouse rejects.
+  ===========================================================================#}
+  {%- macro ch_table_definition_sql() -%}
+      (
+          {%- for col in columns %}
+              `{{ col.name }}` {{ col.dataType }}
+              {%- if not (col.dataType | lower).startswith('nullable(') %}
+                  {%- if col.nullable == false %} NOT NULL{% else %} NULL{% endif %}
+              {%- endif %}
+              {%- if col.defaultValue %} DEFAULT {{ col.defaultValue }}{% endif %}
+              {%- if col.description | trim | length > 0 %} COMMENT '{{ ch_string(col.description) }}'{% endif %}
+              {%- if not loop.last -%}, {%- endif %}
+          {%- endfor %}
+      )
+      ENGINE = {{ ch_engine() }}
+      {{ ch_storage_clauses() }}
+      {%- if node.description | trim | length > 0 %}
+      COMMENT '{{ ch_string(node.description) }}'
+      {%- endif %}
+  {%- endmacro -%}
+
+  {#===========================================================================
     SECTION 6: Redeploy (advanced deploy strategy), in the order the stages run
   ===========================================================================#}
 
@@ -923,41 +961,64 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_modify_columns_sql(): "Alter Column" — one ALTER ( ... ) with every data type,
-    nullability, description and default change, using the old column names.
-    Call before alter_rename_columns_sql().
+    ch_column_type(col): the column's ClickHouse type with its nullability folded in, as the
+    CREATE writes it: a Nullable(...) type as-is, NOT NULL as the bare type, otherwise
+    Nullable(<type>) (the CREATE's "<type> NULL").
+  ===========================================================================#}
+  {%- macro ch_column_type(col) -%}
+      {%- if (col.dataType | lower).startswith('nullable(') or col.nullable == false -%}
+          {{- col.dataType -}}
+      {%- else -%}
+          Nullable({{ col.dataType }})
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    alter_modify_columns_sql(): "Alter Column" — one ALTER with a MODIFY COLUMN per changed
+    column: data type and nullability (ClickHouse folds NULL / NOT NULL into the type),
+    default and comment, using the old column names. Call before alter_rename_columns_sql().
   ===========================================================================#}
   {%- macro alter_modify_columns_sql() -%}
-      {%- set ns = namespace(actions=[]) -%}
+      {%- set ns = namespace(actions=[], removeDefaults=[]) -%}
       {%- for curCol in currentState.columns -%}
           {%- set matchingCols = columns | default([]) | selectattr('id', 'equalto', curCol.id) | list -%}
 
           {%- if matchingCols -%}
               {%- set desCol = matchingCols | first -%}
               {%- set colName = '`' + curCol.name + '`' -%}
-              {%- set currentNotNull = curCol.nullable == false -%}
+              {%- set currentType = ch_column_type(curCol) -%}
+              {%- set desiredType = ch_column_type(desCol) -%}
               {%- set currentDefaultValue = curCol.defaultValue if curCol.defaultValue else none -%}
               {%- set currentDescription = curCol.description if curCol.description | trim | length > 0 else '' -%}
-              {%- set desiredNotNull = desCol.nullable == false -%}
               {%- set desiredDefaultValue = desCol.defaultValue if desCol.defaultValue else none -%}
               {%- set desiredDescription = desCol.description if desCol.description | trim | length > 0 else '' -%}
 
-              {#- Collect an action per changed attribute #}
-              {%- if (curCol.dataType | upper | replace(' ', '')) != (desCol.dataType | upper | replace(' ', '')) -%}
-                  {%- set ns.actions = ns.actions + [colName ~ ' SET DATA TYPE ' ~ desCol.dataType] -%}
+              {#- One MODIFY COLUMN with the changed type / default / comment (ClickHouse keeps the
+                  parts that are not given); removing a default is its own REMOVE DEFAULT #}
+              {%- set parts = [] -%}
+              {%- set typeChanged = (currentType | upper | replace(' ', '')) != (desiredType | upper | replace(' ', '')) -%}
+              {#- Nullable -> non-Nullable needs a DEFAULT to fill the existing NULLs: the desired default,
+                  else the type's own default, removed again in a second ALTER #}
+              {%- set fillsNulls = typeChanged
+                                   and (currentType | lower).startswith('nullable(')
+                                   and not (desiredType | lower).startswith('nullable(') -%}
+              {%- if typeChanged -%}
+                  {%- set parts = parts + [desiredType] -%}
               {%- endif -%}
-              {%- if currentNotNull != desiredNotNull -%}
-                  {%- set ns.actions = ns.actions + [colName ~ (' SET NOT NULL' if desiredNotNull else ' DROP NOT NULL')] -%}
+              {%- if desiredDefaultValue != none and (currentDefaultValue != desiredDefaultValue or fillsNulls) -%}
+                  {%- set parts = parts + ['DEFAULT ' ~ desiredDefaultValue] -%}
+              {%- elif fillsNulls -%}
+                  {%- set parts = parts + ["DEFAULT defaultValueOfTypeName('" ~ ch_string(desiredType) ~ "')"] -%}
+                  {%- set ns.removeDefaults = ns.removeDefaults + ['MODIFY COLUMN ' ~ colName ~ ' REMOVE DEFAULT'] -%}
               {%- endif -%}
               {%- if currentDescription != desiredDescription -%}
-                  {%- set ns.actions = ns.actions + [colName ~ " COMMENT '" ~ (desiredDescription | escape) ~ "'"] -%}
+                  {%- set parts = parts + ["COMMENT '" ~ ch_string(desiredDescription) ~ "'"] -%}
               {%- endif -%}
-              {%- if currentDefaultValue != desiredDefaultValue -%}
-                  {%- if desiredDefaultValue == none -%}
-                      {%- set ns.actions = ns.actions + [colName ~ ' DROP DEFAULT'] -%}
-                  {%- else -%}
-                      {%- set ns.actions = ns.actions + [colName ~ ' SET DEFAULT ' ~ desiredDefaultValue] -%}
-                  {%- endif -%}
+              {%- if parts -%}
+                  {%- set ns.actions = ns.actions + ['MODIFY COLUMN ' ~ colName ~ ' ' ~ (parts | join(' '))] -%}
+              {%- endif -%}
+              {%- if desiredDefaultValue == none and currentDefaultValue != none -%}
+                  {%- set ns.actions = ns.actions + ['MODIFY COLUMN ' ~ colName ~ ' REMOVE DEFAULT'] -%}
               {%- endif -%}
           {%- endif -%}
       {%- endfor -%}
@@ -965,14 +1026,19 @@ macroString: |-
       {%- if ns.actions | length > 0 %}
           {{ stage('Alter Column') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          ALTER ( {{ ns.actions | join(', ') }} )
+          {{ ns.actions | join(', ') }}
           {%- set nsNodeVariables.metaDataChanged = true -%}
+      {%- endif %}
+      {%- if ns.removeDefaults | length > 0 %}
+          {{ stage('Alter Column: Remove Fill Default') }}
+          ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
+          {{ ns.removeDefaults | join(', ') }}
       {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_add_columns_sql(): "Add Column" — one ADD COLUMN for columns with a new id, with NOT NULL,
-    DEFAULT and comment. No identity: Snowflake only adds one to an empty table.
+    alter_add_columns_sql(): "Add Column" — one ALTER with an ADD COLUMN per column with a new id
+    (ClickHouse repeats the command for each column), with NOT NULL, DEFAULT and comment.
   ===========================================================================#}
   {%- macro alter_add_columns_sql() -%}
       {%- set ns = namespace(items=[]) -%}
@@ -986,9 +1052,8 @@ macroString: |-
       {%- if ns.items | length > 0 %}
           {{ stage('Add Column') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          ADD COLUMN
           {%- for desCol in ns.items %}
-              `{{ desCol.name }}` {{ desCol.dataType }}
+              ADD COLUMN `{{ desCol.name }}` {{ desCol.dataType }}
               {%- if desCol.nullable == false %} NOT NULL {%- endif %}
               {%- if desCol.defaultValue %} DEFAULT {{ desCol.defaultValue }} {%- endif %}
               {%- if desCol.description | trim | length > 0 %} COMMENT '{{ desCol.description | escape }}'{%- endif %}
@@ -1038,19 +1103,19 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_drop_columns_sql(): "Delete Column" — one ALTER ... DROP for removed columns.
+    alter_drop_columns_sql(): "Delete Column" — one ALTER with a DROP COLUMN per removed column.
   ===========================================================================#}
   {%- macro alter_drop_columns_sql() -%}
       {%- if nsNodeVariables.droppedColumns | length > 0 %}
           {{ stage('Delete Column') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          DROP {{ nsNodeVariables.droppedColumns | join(', ') }}
+          DROP COLUMN {{ nsNodeVariables.droppedColumns | join(', DROP COLUMN ') }}
           {%- set nsNodeVariables.metaDataChanged = true -%}
       {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_description_sql(): "Edit Table Description" — SET COMMENT on the clone when the
+    alter_description_sql(): "Edit Table Description" — MODIFY COMMENT on the clone when the
     node description changed (missing = empty). Tables only: a view is recreated instead.
   ===========================================================================#}
   {%- macro alter_description_sql() -%}
@@ -1059,13 +1124,81 @@ macroString: |-
       {%- if currentDescription != desiredDescription %}
           {{ stage('Edit Table Description') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          SET COMMENT = '{{ desiredDescription | escape }}'
+          MODIFY COMMENT '{{ ch_string(desiredDescription) }}'
           {%- set nsNodeVariables.metaDataChanged = true -%}
       {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_clone_swap_sql(alterSql): wraps the alters in Delete Clone Table -> Clone Table ->
+    set_rebuild_reason(): sets nsNodeVariables.rebuildReason when a table redeploy cannot be done
+    with ALTER, '' otherwise. ClickHouse cannot ALTER a table's sort, primary or partition key
+    (beyond narrow cases) or some MergeTree settings, nor rename / retype / drop a column used in
+    one of those keys. Rebuild when:
+      - @orderBy, @primaryKey, @partitionBy or @settings changed (compared ignoring spaces and backticks)
+      - a column used in a current key term is renamed, changes type (nullability included) or is dropped
+    The key-column check is a substring match on the term text, so a false match only costs a rebuild.
+    Call before choosing between rebuild_table_sql() and the alters.
+  ===========================================================================#}
+  {%- macro set_rebuild_reason() -%}
+      {%- set ns = namespace(reasons=[]) -%}
+      {%- set checks = [
+            ('ORDER BY', nsNodeVariables.currentOrderBy, nsNodeVariables.desiredOrderBy),
+            ('PRIMARY KEY', nsNodeVariables.currentPrimaryKey, nsNodeVariables.desiredPrimaryKey),
+            ('PARTITION BY', nsNodeVariables.currentPartitionBy, nsNodeVariables.desiredPartitionBy),
+            ('SETTINGS', nsNodeVariables.currentSettings, nsNodeVariables.desiredSettings)] -%}
+      {%- for label, cur, des in checks -%}
+          {%- set curText = cur | join(',') | replace(' ', '') | replace('`', '') | lower -%}
+          {%- set desText = des | join(',') | replace(' ', '') | replace('`', '') | lower -%}
+          {%- if curText != desText -%}
+              {%- set ns.reasons = ns.reasons + [label ~ ' changed'] -%}
+          {%- endif -%}
+      {%- endfor -%}
+
+      {%- set keyText = (nsNodeVariables.currentOrderBy + nsNodeVariables.currentPrimaryKey
+                         + nsNodeVariables.currentPartitionBy) | join(' ') | replace('`', '') -%}
+      {%- for curCol in currentState.columns if keyText and curCol.name in keyText -%}
+          {%- set matchingCols = columns | default([]) | selectattr('id', 'equalto', curCol.id) | list -%}
+          {%- if not matchingCols -%}
+              {%- set ns.reasons = ns.reasons + ['key column ' ~ curCol.name ~ ' dropped'] -%}
+          {%- elif (matchingCols | first).name != curCol.name -%}
+              {%- set ns.reasons = ns.reasons + ['key column ' ~ curCol.name ~ ' renamed'] -%}
+          {%- elif (ch_column_type(curCol) | upper | replace(' ', '')) != (ch_column_type(matchingCols | first) | upper | replace(' ', '')) -%}
+              {%- set ns.reasons = ns.reasons + ['key column ' ~ curCol.name ~ ' type changed'] -%}
+          {%- endif -%}
+      {%- endfor -%}
+      {%- set nsNodeVariables.rebuildReason = ns.reasons | join('; ') -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    rebuild_table_sql(): when set_rebuild_reason() found a reason —
+      "Warning: Table Recreated (<reason>)" — a non-failing test stage that records why;
+      "Recreate Table" — CREATE OR REPLACE the table with the desired definition. Its existing
+      data is NOT copied: the table is empty until the next run loads it;
+      "Delete Table" — when the node was renamed/moved, DROP the table at the old path.
+    No clone and no alters. '' when there is no reason.
+  ===========================================================================#}
+  {%- macro rebuild_table_sql() -%}
+      {%- if nsNodeVariables.rebuildReason %}
+          {{ test_stage('Warning: Table Recreated (' ~ nsNodeVariables.rebuildReason ~ ')', true) }}
+          -- {{ node.name }} cannot be altered in place ({{ nsNodeVariables.rebuildReason }}): ClickHouse cannot ALTER a table's ORDER BY / PRIMARY KEY / PARTITION BY / SETTINGS, or rename, retype or drop a column used in them.
+          -- The table is recreated with CREATE OR REPLACE. Its existing data is lost; it stays empty until the next run reloads it.
+          {{ fail_sql(false) }}
+
+          {{ stage('Recreate Table') }}
+          CREATE OR REPLACE TABLE {{ nsNodeVariables.desObjectNameFullPath }}
+          {{ ch_table_definition_sql() }}
+
+          {%- if nsNodeVariables.curObjectNameFullPath != nsNodeVariables.desObjectNameFullPath %}
+
+          {{ stage('Delete Table') }}
+          DROP TABLE IF EXISTS {{ nsNodeVariables.curObjectNameFullPath }}
+          {%- endif %}
+          {%- set nsNodeVariables.metaDataChanged = true -%}
+      {%- endif %}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    alter_clone_swap_sql(alterSql): wraps the alters in Clone Table (CREATE OR REPLACE ... CLONE AS) ->
     alterSql -> Swap Cloned Table + Delete Table, or Rename Table + Delete Table when
     renamed/moved. '' when there is nothing to alter and the path is unchanged.
     ClickHouse: CLONE AS copies schema + data (all partitions attached), no grants are copied;
@@ -1078,12 +1211,9 @@ macroString: |-
       {%- set pathChanged = currentPath != nsNodeVariables.desObjectNameFullPath -%}
 
       {%- if alterSql | trim | length > 0 or pathChanged %}
-          {#- A clone left by a failed redeploy would block CREATE ... CLONE AS #}
-          {{ stage('Delete Clone Table') }}
-          DROP TABLE IF EXISTS {{ clonePath }}
-
+          {#- OR REPLACE also replaces a clone left by a failed redeploy #}
           {{ stage('Clone Table') }}
-          CREATE TABLE {{ clonePath }}
+          CREATE OR REPLACE TABLE {{ clonePath }}
           CLONE AS {{ currentPath }}
 
           {{ alterSql }}
