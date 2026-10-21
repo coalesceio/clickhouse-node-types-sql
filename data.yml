@@ -1,0 +1,4 @@
+defaultStorageMapping: SRC
+fileVersion: 3
+projectID: 1c39a976-0f8d-425c-94b6-25d24f1e2345
+platformKind: tdbc-clickhouse
