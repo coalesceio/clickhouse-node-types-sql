@@ -66,6 +66,21 @@ metadata:
                 - CoalescingMergeTree
                 - GraphiteMergeTree
 
+        - name: partitionBy
+          description: |-
+            • The table's PARTITION BY key. Each argument is one term — a column or an expression, written as it should appear in the SQL; several terms are partitioned together.
+              Ex. partitionBy("toYYYYMM(`order_Date`)")
+              Ex. partitionBy("toYYYYMM(`order_Date`)", "`region`")
+            • Keep it coarse (e.g. one partition per month): each partition is stored separately, and too many partitions slow inserts down and eventually make them fail.
+            • Without partitionBy the table is not partitioned. Ignored on views.
+            • ⚠️ Changing partitionBy (or renaming / retyping a column used in it) on redeploy recreates the table — existing data is lost.
+          isRequired: false
+          parameters:
+            - name: term
+              type: string
+              isRequired: true
+              example: toYYYYMM(<col_name>)
+
         - name: orderBy
           description: |-
             • The table's ORDER BY (sort) key. Each argument is one term — a column or an expression, written as it should appear in the SQL.
@@ -94,21 +109,6 @@ metadata:
               type: string
               isRequired: true
               example: <col_name>
-
-        - name: partitionBy
-          description: |-
-            • The table's PARTITION BY key. Each argument is one term — a column or an expression, written as it should appear in the SQL; several terms are partitioned together.
-              Ex. partitionBy("toYYYYMM(`order_Date`)")
-              Ex. partitionBy("toYYYYMM(`order_Date`)", "`region`")
-            • Keep it coarse (e.g. one partition per month): each partition is stored separately, and too many partitions slow inserts down and eventually make them fail.
-            • Without partitionBy the table is not partitioned. Ignored on views.
-            • ⚠️ Changing partitionBy (or renaming / retyping a column used in it) on redeploy recreates the table — existing data is lost.
-          isRequired: false
-          parameters:
-            - name: term
-              type: string
-              isRequired: true
-              example: toYYYYMM(<col_name>)
 
         - name: settings
           description: |-

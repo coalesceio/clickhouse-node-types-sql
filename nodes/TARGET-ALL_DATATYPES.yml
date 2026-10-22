@@ -1,0 +1,1078 @@
+fileVersion: 1
+id: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+name: ALL_DATATYPES
+operation:
+  database: ""
+  deployEnabled: true
+  description: One column per ClickHouse data type
+  locationName: TARGET
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 7cc5c483-29f8-4b78-b90b-d96b0e1c8d23
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: id
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: bdf1b07b-4833-4476-a4a0-a07e82ee4e2a
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Int8
+        defaultValue: ""
+        description: ""
+        name: c_Int8
+        nativeType: Int8
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 74673810-8f82-47ef-b4f6-b3e2dec493df
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Int16
+        defaultValue: ""
+        description: ""
+        name: c_Int16
+        nativeType: Int16
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 4a3d4077-386d-44c0-be6d-63f6a90fc671
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Int32
+        defaultValue: ""
+        description: ""
+        name: c_Int32
+        nativeType: Int32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: dd26c7be-bac0-4b21-85d8-443a312150cc
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Int64
+        defaultValue: ""
+        description: ""
+        name: c_Int64
+        nativeType: Int64
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: ce6800c9-b88c-41b2-9d44-feb2557aeee4
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Int128
+        defaultValue: ""
+        description: ""
+        name: c_Int128
+        nativeType: Int128
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 19226859-057d-4e2a-b9ff-49a8c6fe2c9f
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Int256
+        defaultValue: ""
+        description: ""
+        name: c_Int256
+        nativeType: Int256
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: e633ead8-7e8a-4f31-99a5-17c841619cc7
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: UInt8
+        defaultValue: ""
+        description: ""
+        name: c_UInt8
+        nativeType: UInt8
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: ade969a5-fd96-42d9-aee1-64d02704fcdc
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: UInt16
+        defaultValue: ""
+        description: ""
+        name: c_UInt16
+        nativeType: UInt16
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: bcff02ed-4d75-41b4-979e-4b5469dc2168
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: c_UInt32
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 228305f5-c9fc-4f01-bd3a-221a3dbf3978
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: UInt64
+        defaultValue: ""
+        description: ""
+        name: c_UInt64
+        nativeType: UInt64
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: ef24e6f1-2832-4f93-8b05-c567a70426c3
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: UInt128
+        defaultValue: ""
+        description: ""
+        name: c_UInt128
+        nativeType: UInt128
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 46299ec5-f193-4cae-8697-958b596040d9
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: UInt256
+        defaultValue: ""
+        description: ""
+        name: c_UInt256
+        nativeType: UInt256
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: a3ca4b57-850f-4a34-8779-767eb53c50aa
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Float32
+        defaultValue: ""
+        description: ""
+        name: c_Float32
+        nativeType: Float32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 77443488-6920-4262-b28a-00dc386f9f1f
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Float64
+        defaultValue: ""
+        description: ""
+        name: c_Float64
+        nativeType: Float64
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 778e81d1-3b0b-462c-83eb-941019e2d8aa
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: BFloat16
+        defaultValue: ""
+        description: ""
+        name: c_BFloat16
+        nativeType: BFloat16
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 0bae615b-a322-4b5b-a998-678343bd37e5
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Decimal(18, 4)
+        defaultValue: ""
+        description: ""
+        name: c_Decimal
+        nativeType: Decimal(18, 4)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 4b2ca63b-fa11-4feb-8da9-7dd641b008d3
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Decimal(9, 4)
+        defaultValue: ""
+        description: ""
+        name: c_Decimal32
+        nativeType: Decimal(9, 4)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 09503abc-b217-44da-83f8-02004eea86bd
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Decimal(18, 6)
+        defaultValue: ""
+        description: ""
+        name: c_Decimal64
+        nativeType: Decimal(18, 6)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 1d30200f-e38f-457b-9067-88b85493193a
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Decimal(38, 10)
+        defaultValue: ""
+        description: ""
+        name: c_Decimal128
+        nativeType: Decimal(38, 10)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 8d6dd2f8-2cfa-4129-8bc1-2f812a4bdb41
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Decimal(76, 20)
+        defaultValue: ""
+        description: ""
+        name: c_Decimal256
+        nativeType: Decimal(76, 20)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 405dab05-cf64-401a-98c0-1d2deb06c3f5
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Bool
+        defaultValue: ""
+        description: ""
+        name: c_Bool
+        nativeType: Bool
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: f6891221-04ee-4828-b1ae-5dc0ac595294
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: c_String
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: b7a195fc-4bb8-4964-a780-1497154b2cfa
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: FixedString(10)
+        defaultValue: ""
+        description: ""
+        name: c_FixedString
+        nativeType: FixedString(10)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 5f7ae799-b9a9-4a09-bd4d-2fddb4648cc9
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Date
+        defaultValue: ""
+        description: ""
+        name: c_Date
+        nativeType: Date
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: f1eb3669-a675-4e09-92e1-94e2354f6309
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Date32
+        defaultValue: ""
+        description: ""
+        name: c_Date32
+        nativeType: Date32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 163b7f0c-1b2f-4e8c-8e78-f2e33e909780
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: DateTime
+        defaultValue: ""
+        description: ""
+        name: c_DateTime
+        nativeType: DateTime
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 8ad14b66-fd46-41ee-9bdf-7de474e0c225
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: DateTime('Asia/Kolkata')
+        defaultValue: ""
+        description: ""
+        name: c_DateTime_TZ
+        nativeType: DateTime('Asia/Kolkata')
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 8b395a88-03b4-47f5-8568-e636f7a083a8
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: DateTime64(3)
+        defaultValue: ""
+        description: ""
+        name: c_DateTime64
+        nativeType: DateTime64(3)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 165cb525-4251-4e81-a0f9-4e0170834476
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: DateTime64(6, 'UTC')
+        defaultValue: ""
+        description: ""
+        name: c_DateTime64_TZ
+        nativeType: DateTime64(6, 'UTC')
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 5da20099-db05-4ef1-8c3a-505b05111fe6
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Time
+        defaultValue: ""
+        description: ""
+        name: c_Time
+        nativeType: Time
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 73ebdd4a-f471-41f6-8d30-2bd053f54383
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Time64(3)
+        defaultValue: ""
+        description: ""
+        name: c_Time64
+        nativeType: Time64(3)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 7b68f075-a6f7-4cfe-9707-64a6485825c5
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: UUID
+        defaultValue: ""
+        description: ""
+        name: c_UUID
+        nativeType: UUID
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 1582ba0d-1227-4a2f-bfdc-d72aaa90eebd
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Enum8('red' = 1, 'green' = 2, 'blue' = 3)
+        defaultValue: ""
+        description: ""
+        name: c_Enum8
+        nativeType: Enum8('red' = 1, 'green' = 2, 'blue' = 3)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: df27f481-178f-4575-b778-0d50ab459065
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Enum16('small' = 100, 'large' = 1000)
+        defaultValue: ""
+        description: ""
+        name: c_Enum16
+        nativeType: Enum16('small' = 100, 'large' = 1000)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: fe5465e9-feb5-4bb4-a684-a27992ae86fa
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: LowCardinality(String)
+        defaultValue: ""
+        description: ""
+        name: c_LowCardinality
+        nativeType: LowCardinality(String)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 3a2f2a12-6943-43fc-82a9-deb6d5e1a6c6
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: LowCardinality(String)
+        defaultValue: ""
+        description: ""
+        name: c_LowCardinality_Nullable
+        nativeType: LowCardinality(Nullable(String))
+        nullable: true
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: b2bc4c0c-1ca1-4734-b2be-5faa8250147f
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Int32
+        defaultValue: ""
+        description: ""
+        name: c_Nullable_Int32
+        nativeType: Nullable(Int32)
+        nullable: true
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: ee6b6dbe-65c5-4f1a-98a7-5810dc0a4a40
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: c_Nullable_String
+        nativeType: Nullable(String)
+        nullable: true
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 1283fbe0-f091-43cb-9a55-5123ac526ebb
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Array(UInt32)
+        defaultValue: ""
+        description: ""
+        name: c_Array
+        nativeType: Array(UInt32)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: f30afcbc-b04a-48bf-97ab-d51f52fe5d87
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Array(Array(String))
+        defaultValue: ""
+        description: ""
+        name: c_Array_Of_Array
+        nativeType: Array(Array(String))
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 42d9dd18-6b19-4143-a38b-865e354982a5
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Tuple(UInt32, String)
+        defaultValue: ""
+        description: ""
+        name: c_Tuple
+        nativeType: Tuple(UInt32, String)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 67f97df4-c7c1-4ada-a348-055d483b8b26
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Tuple(code UInt32, name String)
+        defaultValue: ""
+        description: ""
+        name: c_Tuple_Named
+        nativeType: Tuple(code UInt32, name String)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 96f50c4a-7407-485d-a156-362dc3d56c7c
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Map(String, UInt64)
+        defaultValue: ""
+        description: ""
+        name: c_Map
+        nativeType: Map(String, UInt64)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: a6f1d2ae-d9ad-4e67-8c10-0cd7df003ec1
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Array(String)
+        defaultValue: ""
+        description: ""
+        name: c_Nested.item
+        nativeType: Array(String)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: ba97259f-38f3-4567-a72b-ca5d8650c372
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Array(UInt32)
+        defaultValue: ""
+        description: ""
+        name: c_Nested.qty
+        nativeType: Array(UInt32)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 147bd195-725e-41d2-be5d-dfd4e32c92d5
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: IPv4
+        defaultValue: ""
+        description: ""
+        name: c_IPv4
+        nativeType: IPv4
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: dc57ec10-656c-4810-9354-8b120d84949e
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: IPv6
+        defaultValue: ""
+        description: ""
+        name: c_IPv6
+        nativeType: IPv6
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 4b3016bf-d4c7-41ef-95c3-c39f99594435
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Point
+        defaultValue: ""
+        description: ""
+        name: c_Point
+        nativeType: Point
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 111164a2-8844-47f6-b15c-779b3f67c88f
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Ring
+        defaultValue: ""
+        description: ""
+        name: c_Ring
+        nativeType: Ring
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 8a14feff-9288-4258-bfb9-dbb909af23e0
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: LineString
+        defaultValue: ""
+        description: ""
+        name: c_LineString
+        nativeType: LineString
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 63d69891-d144-4dcb-9a27-a64a50f59da4
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: MultiLineString
+        defaultValue: ""
+        description: ""
+        name: c_MultiLineString
+        nativeType: MultiLineString
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 0a84ad06-e262-4f61-aa03-77d678b8fa0e
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Polygon
+        defaultValue: ""
+        description: ""
+        name: c_Polygon
+        nativeType: Polygon
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: b77da2ba-0402-4746-bbe0-f381adbc4919
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: MultiPolygon
+        defaultValue: ""
+        description: ""
+        name: c_MultiPolygon
+        nativeType: MultiPolygon
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 4af3d75b-bf22-4f11-b72c-2f1d80959c3e
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: JSON
+        defaultValue: ""
+        description: ""
+        name: c_JSON
+        nativeType: JSON
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 4d99ea6a-6771-4b84-95fc-42d3dd88aefb
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Dynamic
+        defaultValue: ""
+        description: ""
+        name: c_Dynamic
+        nativeType: Dynamic
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: c6062843-7b23-4de2-a0b8-976d8d535452
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: Variant(Array(UInt64), String, UInt64)
+        defaultValue: ""
+        description: ""
+        name: c_Variant
+        nativeType: Variant(Array(UInt64), String, UInt64)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 9ed61531-daed-4073-a824-f664906ce272
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: AggregateFunction(uniq, String)
+        defaultValue: ""
+        description: ""
+        name: c_AggregateFunction
+        nativeType: AggregateFunction(uniq, String)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 6f12e0f6-7b5c-4cc6-8f0c-b6c7ca865cc4
+          stepCounter: 978465b5-1695-4c8c-9c97-2d8d009fcc2e
+        config: {}
+        dataType: SimpleAggregateFunction(sum, UInt64)
+        defaultValue: ""
+        description: ""
+        name: c_SimpleAggregateFunction
+        nativeType: SimpleAggregateFunction(sum, UInt64)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: ALL_DATATYPES
+  schema: ""
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node

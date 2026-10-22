@@ -995,15 +995,13 @@ macroString: |-
     ch_table_definition_sql(): everything after CREATE ... TABLE <path> for the desired table:
     the column list, ENGINE, the storage clauses and the table COMMENT. Used by the first
     create and by the redeploy rebuild, so both write the same table.
-    NULL / NOT NULL is skipped for a Nullable(...) type, which ClickHouse rejects.
+    Column types come from ch_column_type(), with nullability as Nullable(...) rather than
+    NULL / NOT NULL keywords (which ClickHouse rejects on types that cannot be Nullable).
   ===========================================================================#}
   {%- macro ch_table_definition_sql() -%}
       (
           {%- for col in columns %}
-              `{{ col.name }}` {{ col.dataType }}
-              {%- if not (col.dataType | lower).startswith('nullable(') %}
-                  {%- if col.nullable == false %} NOT NULL{% else %} NULL{% endif %}
-              {%- endif %}
+              `{{ col.name }}` {{ ch_column_type(col) }}
               {%- if col.defaultValue %} DEFAULT {{ col.defaultValue }}{% endif %}
               {%- if col.description | trim | length > 0 %} COMMENT '{{ ch_string(col.description) }}'{% endif %}
               {%- if not loop.last -%}, {%- endif %}
@@ -1051,15 +1049,37 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    ch_column_type(col): the column's ClickHouse type with its nullability folded in, as the
-    CREATE writes it: a Nullable(...) type as-is, NOT NULL as the bare type, otherwise
-    Nullable(<type>) (the CREATE's "<type> NULL").
+    ch_column_type(col): the column's final ClickHouse type with its nullability folded in —
+    used by the CREATE, ADD COLUMN, MODIFY COLUMN and views, so they all agree.
+      - Coalesce infers SQL node columns as nullable and may wrap the type in Nullable(...);
+        a wrapped type counts as nullable unless the column is NOT NULL (@notNull).
+      - Types ClickHouse cannot put inside Nullable stay as they are: Array, Map, Tuple,
+        Nested, JSON / Object, Dynamic, Variant, (Simple)AggregateFunction and the geo types
+        (Point, Ring, LineString, MultiLineString, Polygon, MultiPolygon).
+      - LowCardinality takes the nullability inside: LowCardinality(Nullable(<type>)).
+      - Anything else: Nullable(<type>) when nullable, else <type>.
   ===========================================================================#}
   {%- macro ch_column_type(col) -%}
-      {%- if (col.dataType | lower).startswith('nullable(') or col.nullable == false -%}
-          {{- col.dataType -}}
+      {%- set dataType = col.dataType | trim -%}
+      {%- set isWrapped = (dataType | lower).startswith('nullable(') and dataType.endswith(')') -%}
+      {%- set baseType = dataType[9:-1] | trim if isWrapped else dataType -%}
+      {%- set isNullable = col.nullable != false -%}
+      {%- set family = baseType.split('(')[0] | trim | lower -%}
+      {%- if family in ['array', 'map', 'tuple', 'nested', 'json', 'object', 'dynamic', 'variant',
+                        'aggregatefunction', 'simpleaggregatefunction',
+                        'point', 'ring', 'linestring', 'multilinestring', 'polygon', 'multipolygon'] -%}
+          {{- baseType -}}
+      {%- elif family == 'lowcardinality' -%}
+          {%- set inner = baseType[15:-1] | trim -%}
+          {%- if isNullable and not (inner | lower).startswith('nullable(') -%}
+              LowCardinality(Nullable({{ inner }}))
+          {%- else -%}
+              {{- baseType -}}
+          {%- endif -%}
+      {%- elif isNullable -%}
+          Nullable({{ baseType }})
       {%- else -%}
-          Nullable({{ col.dataType }})
+          {{- baseType -}}
       {%- endif -%}
   {%- endmacro -%}
 
@@ -1143,8 +1163,7 @@ macroString: |-
           {{ stage('Add Column') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
           {%- for desCol in ns.items %}
-              ADD COLUMN `{{ desCol.name }}` {{ desCol.dataType }}
-              {%- if desCol.nullable == false %} NOT NULL {%- endif %}
+              ADD COLUMN `{{ desCol.name }}` {{ ch_column_type(desCol) }}
               {%- if desCol.defaultValue %} DEFAULT {{ desCol.defaultValue }} {%- endif %}
               {%- if desCol.description | trim | length > 0 %} COMMENT '{{ ch_string(desCol.description) }}'{%- endif %}
               {%- if not loop.last -%}, {%- endif %}
