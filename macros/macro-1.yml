@@ -916,7 +916,15 @@ macroString: |-
     bare or empty. Declared defaults are not applied to config, so the fallback lives here.
   ===========================================================================#}
   {%- macro ch_engine() -%}
-      {%- set engineParams = config.engine.parameters if config.engine is mapping else [] -%}
+      {{- ch_engine_of(config) -}}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    ch_engine_of(cfg): the engine expression for a state's config (cfg.engine), MergeTree when
+    absent — ch_engine() for the desired state, currentState.config for the current one.
+  ===========================================================================#}
+  {%- macro ch_engine_of(cfg) -%}
+      {%- set engineParams = cfg.engine.parameters if cfg.engine is mapping else [] -%}
       {{- (engineParams[0] if engineParams else '') | trim | default('MergeTree', true) -}}
   {%- endmacro -%}
 
@@ -1218,6 +1226,7 @@ macroString: |-
   {#===========================================================================
     set_rebuild_reason(): sets nsNodeVariables.rebuildReason when a table redeploy cannot be done
     with ALTER, '' otherwise. Verified against ClickHouse Cloud 26.6:
+      - ENGINE (@engine, Fact / Dimension): no ALTER exists             -> recreate
       - PARTITION BY: no ALTER exists                                   -> recreate
       - PRIMARY KEY: no ALTER exists. Without @primaryKey the primary
         key is the whole ORDER BY, so any ORDER BY change changes it    -> recreate
@@ -1226,6 +1235,8 @@ macroString: |-
         added in the same ALTER without a DEFAULT; anything else        -> recreate
       - rename or type change (nullability included) of a column used
         in a current key                                                -> recreate
+      - rename of a column used in an engine parameter (e.g. the
+        ReplacingMergeTree version column; retyping it is allowed)      -> recreate
       - SETTINGS: MODIFY / RESET SETTING always works                   -> alter_settings_sql()
       - dropping a key column: allowed once it has left the key (Modify
         Order By runs before Delete Column); a dropped column still used
@@ -1236,6 +1247,13 @@ macroString: |-
   {%- macro set_rebuild_reason() -%}
       {%- set ns = namespace(reasons=[]) -%}
       {%- set norm = namespace(cur=[], des=[]) -%}
+
+      {#- ENGINE (@engine on Fact / Dimension): no MODIFY ENGINE exists #}
+      {%- set currentEngine = ch_engine_of(currentState.config) -%}
+      {%- set desiredEngine = ch_engine_of(config) -%}
+      {%- if (currentEngine | replace(' ', '') | replace('`', '') | lower) != (desiredEngine | replace(' ', '') | replace('`', '') | lower) -%}
+          {%- set ns.reasons = ns.reasons + ['ENGINE changed'] -%}
+      {%- endif -%}
 
       {#- PARTITION BY #}
       {%- if (nsNodeVariables.currentPartitionBy | join(',') | replace(' ', '') | replace('`', '') | lower)
@@ -1280,14 +1298,19 @@ macroString: |-
           {%- endif -%}
       {%- endif -%}
 
-      {#- Renamed / retyped key columns #}
+      {#- Renamed / retyped key columns; engine parameter columns (e.g. ReplacingMergeTree's version
+          column) can be retyped but not renamed #}
       {%- set nsKeyIds = namespace(items=[]) -%}
+      {%- set nsEngineIds = namespace(items=[]) -%}
       {{- key_identifiers(nsNodeVariables.currentOrderBy + nsNodeVariables.currentPrimaryKey + nsNodeVariables.currentPartitionBy, nsKeyIds) -}}
-      {%- for curCol in currentState.columns if curCol.name in nsKeyIds.items -%}
+      {{- key_identifiers([currentEngine], nsEngineIds) -}}
+      {%- for curCol in currentState.columns if curCol.name in nsKeyIds.items or curCol.name in nsEngineIds.items -%}
           {%- set matchingCols = columns | default([]) | selectattr('id', 'equalto', curCol.id) | list -%}
+          {%- set what = 'key column ' if curCol.name in nsKeyIds.items else 'engine column ' -%}
           {%- if matchingCols and (matchingCols | first).name != curCol.name -%}
-              {%- set ns.reasons = ns.reasons + ['key column ' ~ curCol.name ~ ' renamed'] -%}
-          {%- elif matchingCols and (ch_column_type(curCol) | upper | replace(' ', '')) != (ch_column_type(matchingCols | first) | upper | replace(' ', '')) -%}
+              {%- set ns.reasons = ns.reasons + [what ~ curCol.name ~ ' renamed'] -%}
+          {%- elif matchingCols and curCol.name in nsKeyIds.items
+                  and (ch_column_type(curCol) | upper | replace(' ', '')) != (ch_column_type(matchingCols | first) | upper | replace(' ', '')) -%}
               {%- set ns.reasons = ns.reasons + ['key column ' ~ curCol.name ~ ' type changed'] -%}
           {%- endif -%}
       {%- endfor -%}
@@ -1301,7 +1324,7 @@ macroString: |-
   ===========================================================================#}
   {%- macro validate_key_columns() -%}
       {%- set nsIds = namespace(items=[]) -%}
-      {{- key_identifiers(nsNodeVariables.desiredOrderBy + nsNodeVariables.desiredPrimaryKey + nsNodeVariables.desiredPartitionBy, nsIds) -}}
+      {{- key_identifiers(nsNodeVariables.desiredOrderBy + nsNodeVariables.desiredPrimaryKey + nsNodeVariables.desiredPartitionBy + [ch_engine()], nsIds) -}}
       {%- set desiredNames = columns | map(attribute='name') | list -%}
       {%- set nsBad = namespace(items=[]) -%}
       {%- for curCol in currentState.columns if curCol.name in nsIds.items and curCol.name not in desiredNames -%}
@@ -1309,7 +1332,7 @@ macroString: |-
       {%- endfor -%}
       {%- if nsBad.items %}
           {{ test_stage('Invalid Key Column: ' + node.name, false) }}
-          -- Column(s) {{ nsBad.items | join(', ') }} no longer exist on {{ node.name }} (dropped or renamed) but are still used in @orderBy / @primaryKey / @partitionBy. Update those annotations.
+          -- Column(s) {{ nsBad.items | join(', ') }} no longer exist on {{ node.name }} (dropped or renamed) but are still used in @orderBy / @primaryKey / @partitionBy / @engine. Update those annotations.
           {{ fail_sql() }}
       {%- endif %}
   {%- endmacro -%}
@@ -1325,7 +1348,7 @@ macroString: |-
   {%- macro rebuild_table_sql() -%}
       {%- if nsNodeVariables.rebuildReason %}
           {{ test_stage('Warning: Table Recreated (' ~ nsNodeVariables.rebuildReason ~ ')', true) }}
-          -- {{ node.name }} cannot be altered in place ({{ nsNodeVariables.rebuildReason }}): ClickHouse cannot ALTER a table's PARTITION BY or PRIMARY KEY, changes ORDER BY only by removing trailing terms or adding new columns, and cannot rename or retype a column used in a key.
+          -- {{ node.name }} cannot be altered in place ({{ nsNodeVariables.rebuildReason }}): ClickHouse cannot ALTER a table's ENGINE, PARTITION BY or PRIMARY KEY, changes ORDER BY only by removing trailing terms or adding new columns, cannot rename or retype a column used in a key, and cannot rename a column used in an engine parameter.
           -- The table is recreated with CREATE OR REPLACE. Its existing data is lost; it stays empty until the next run reloads it.
           {{ fail_sql(false) }}
 

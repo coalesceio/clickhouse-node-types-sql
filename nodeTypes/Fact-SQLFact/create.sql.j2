@@ -57,58 +57,64 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
         {%- if currentState is not defined or currentMatType != desiredMatType %}
 
-            {# CreateSQL for Table. MergeTree sorted by @orderBy / @primaryKey (tuple() when neither),
-               with @partitionBy and @settings when set.
-               NULL / NOT NULL is skipped for a Nullable(...) type, which ClickHouse rejects. #}
+            {# CreateSQL for Table. @engine (MergeTree when absent) sorted by @orderBy / @primaryKey
+               (tuple() when neither), with @partitionBy and @settings when set. #}
             {# Validate: @primaryKey must be the leading terms of @orderBy #}
             {{ validate_order_by() }}
 
             {{ stage('Create ' + desiredMatType) }}
             CREATE OR REPLACE TABLE {{ nsNodeVariables.desObjectNameFullPath }}
-            (
-                {%- for col in columns %}
-                    `{{ col.name }}` {{ col.dataType }}
-                    {%- if not (col.dataType | lower).startswith('nullable(') %}
-                        {%- if col.nullable == false %} NOT NULL{% else %} NULL{% endif %}
-                    {%- endif %}
-                    {%- if col.defaultValue %} DEFAULT {{ col.defaultValue }}{% endif %}
-                    {%- if col.description | trim | length > 0 %} COMMENT '{{ ch_string(col.description) }}'{% endif %}
-                    {%- if not loop.last -%}, {%- endif %}
-                {%- endfor %}
-            )
-            ENGINE = {{ ch_engine() }}
-            {{ ch_storage_clauses() }}
-            {%- if node.description | trim | length > 0 %}
-            COMMENT '{{ ch_string(node.description) }}'
-            {%- endif %}
+            {{ ch_table_definition_sql() }}
 
         {%- elif currentState is defined and currentState != desiredState and currentMatType == desiredMatType %}
 
-            {# Every alter runs on the clone (nsNodeVariables.alterObjectNameFullPath) #}
-            {%- set alterSql %}
+            {# Validate: no dropped / renamed-away column may still be used in a key or @engine annotation #}
+            {{ validate_key_columns() }}
 
-                {# Alter Column: data type, nullability, description, default (old column names) #}
-                {{ alter_modify_columns_sql() }}
+            {# Engine / partition / primary key changes, ORDER BY changes beyond trailing removals and new columns,
+               and renamed or retyped key columns cannot be ALTERed in ClickHouse: the table is recreated
+               (warning stage + CREATE OR REPLACE, existing data lost) instead of cloned and altered #}
+            {{ set_rebuild_reason() }}
+            {%- if nsNodeVariables.rebuildReason %}
 
-                {# Add Column #}
-                {{ alter_add_columns_sql() }}
+                {# Validate: @primaryKey must be the leading terms of @orderBy #}
+                {{ validate_order_by() }}
 
-                {# Rename Column (matched by @id) #}
-                {{ alter_rename_columns_sql() }}
+                {# Warning: Table Recreated -> Recreate Table (-> Delete Table at the old path when renamed/moved) #}
+                {{ rebuild_table_sql() }}
 
-                {# ORDER BY key: new key after adds/renames, before Delete Column so dropped columns have left it #}
-                {{ alter_order_by_sql() }}
+            {%- else %}
 
-                {# Delete Column #}
-                {{ alter_drop_columns_sql() }}
+                {# Every alter runs on the clone (nsNodeVariables.alterObjectNameFullPath) #}
+                {%- set alterSql %}
 
-                {# Edit Table Description #}
-                {{ alter_description_sql() }}
+                    {# Alter Column: data type, nullability, description, default (old column names) #}
+                    {{ alter_modify_columns_sql() }}
 
-            {%- endset %}
+                    {# Add Column (with MODIFY ORDER BY when the sort key changed: new columns can only join it here) #}
+                    {{ alter_add_columns_sql() }}
 
-            {# Clone Table -> alters -> Swap Cloned Table (or Rename Table when renamed/moved) -> Delete Table #}
-            {{ alter_clone_swap_sql(alterSql) }}
+                    {# Rename Column (matched by @id) #}
+                    {{ alter_rename_columns_sql() }}
+
+                    {# Modify Order By (trailing terms removed): its own ALTER, before Delete Column #}
+                    {{ alter_order_by_sql() }}
+
+                    {# Delete Column #}
+                    {{ alter_drop_columns_sql() }}
+
+                    {# Modify Settings / Reset Settings #}
+                    {{ alter_settings_sql() }}
+
+                    {# Edit Table Description #}
+                    {{ alter_description_sql() }}
+
+                {%- endset %}
+
+                {# Clone Table -> alters -> Swap Cloned Table (or Rename Table when renamed/moved) -> Delete Table #}
+                {{ alter_clone_swap_sql(alterSql) }}
+
+            {%- endif %}
 
             {# Nothing above altered the table: record a metadata-only change #}
             {{ alter_metadata_sql() }}
