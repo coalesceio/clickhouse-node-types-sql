@@ -284,7 +284,8 @@ macroString: |-
       {%- if 'GEOGRAPHY' in dt or 'GEOMETRY' in dt -%}
           ST_ASWKB({{ src_expr }}) IS DISTINCT FROM ST_ASWKB({{ tgt_expr }})
       {%- else -%}
-          {{ src_expr }} IS DISTINCT FROM {{ tgt_expr }}
+          {#- ClickHouse has no IS DISTINCT FROM: values differ, or exactly one side is NULL -#}
+          ({{ src_expr }} != {{ tgt_expr }} OR ({{ src_expr }} IS NULL) != ({{ tgt_expr }} IS NULL))
       {%- endif -%}
 
   {%- endmacro -%}
