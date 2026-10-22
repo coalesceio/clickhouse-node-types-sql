@@ -15,6 +15,10 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 {%- set desiredMatType = nsNodeVariables.desiredMatType %}
 {%- set currentMatType = nsNodeVariables.currentMatType %}
 
+{#- Work tables leave out ENGINE = MergeTree and ORDER BY tuple(): ClickHouse Cloud adds them
+    (ENGINE = SharedMergeTree(...), ORDER BY tuple()) when they are not written #}
+{%- set nsNodeVariables.useCloudTableDefaults = true %}
+
 {%- if desiredState %}
 
     {# Validate: the materialization type must be table or view (ClickHouse has no transient tables) #}

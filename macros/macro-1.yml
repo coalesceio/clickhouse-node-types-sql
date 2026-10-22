@@ -175,6 +175,8 @@ macroString: |-
       rebuildReason                         why a table redeploy rebuilds instead of altering, '' when it alters
                                             (set by set_rebuild_reason())
       orderByChanged / orderByAltered       redeploy: the sort key changed / a MODIFY ORDER BY was emitted
+      useCloudTableDefaults                 set by a node type (Work) to leave out ENGINE = MergeTree and
+                                            ORDER BY tuple() when not annotated — ClickHouse Cloud adds them
       metaDataChanged                      set by the redeploy macros
   ===========================================================================#}
   {%- set nsNodeVariables = namespace(desiredMatType = "",
@@ -197,6 +199,7 @@ macroString: |-
                                       rebuildReason = "",
                                       orderByChanged = false,
                                       orderByAltered = false,
+                                      useCloudTableDefaults = false,
                                       metaDataChanged = false) -%}
   {{- initialize_node_variables(nsNodeVariables) -}}
 
@@ -918,7 +921,8 @@ macroString: |-
       ORDER BY (<terms>) [PRIMARY KEY (<terms>)]
     PRIMARY KEY is written only when it is shorter than ORDER BY (when they are the same, or only
     @primaryKey is set, ClickHouse uses ORDER BY as the primary key).
-    ORDER BY tuple() when neither annotation is set.
+    ORDER BY tuple() when neither annotation is set — omitted when nsNodeVariables.useCloudTableDefaults
+    is set (ClickHouse Cloud adds ORDER BY tuple() itself).
   ===========================================================================#}
   {%- macro ch_order_by() -%}
       {%- if nsNodeVariables.desiredOrderBy -%}
@@ -926,7 +930,7 @@ macroString: |-
           {%- if nsNodeVariables.desiredPrimaryKey and nsNodeVariables.desiredPrimaryKey | length < nsNodeVariables.desiredOrderBy | length %}
           PRIMARY KEY ({{ nsNodeVariables.desiredPrimaryKey | join(', ') }})
           {%- endif %}
-      {%- else -%}
+      {%- elif not nsNodeVariables.useCloudTableDefaults -%}
           ORDER BY tuple()
       {%- endif -%}
   {%- endmacro -%}
@@ -997,6 +1001,8 @@ macroString: |-
     create and by the redeploy rebuild, so both write the same table.
     Column types come from ch_column_type(), with nullability as Nullable(...) rather than
     NULL / NOT NULL keywords (which ClickHouse rejects on types that cannot be Nullable).
+    With nsNodeVariables.useCloudTableDefaults set (Work), ENGINE is written only when @engine is
+    set: ClickHouse Cloud adds ENGINE = SharedMergeTree(...) itself.
   ===========================================================================#}
   {%- macro ch_table_definition_sql() -%}
       (
@@ -1007,7 +1013,9 @@ macroString: |-
               {%- if not loop.last -%}, {%- endif %}
           {%- endfor %}
       )
+      {%- if not nsNodeVariables.useCloudTableDefaults or config.engine is mapping %}
       ENGINE = {{ ch_engine() }}
+      {%- endif %}
       {{ ch_storage_clauses() }}
       {%- if node.description | trim | length > 0 %}
       COMMENT '{{ ch_string(node.description) }}'
