@@ -65,8 +65,12 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
         {%- elif currentState is defined and currentState != desiredState and currentMatType == desiredMatType %}
 
-            {# Key / settings changes, or a renamed, retyped or dropped key column, cannot be ALTERed in ClickHouse:
-               the table is recreated (warning stage + CREATE OR REPLACE, existing data lost) instead of cloned and altered #}
+            {# Validate: no dropped / renamed-away column may still be used in a key annotation #}
+            {{ validate_key_columns() }}
+
+            {# Partition / primary key changes, ORDER BY changes beyond trailing removals and new columns,
+               and renamed or retyped key columns cannot be ALTERed in ClickHouse: the table is recreated
+               (warning stage + CREATE OR REPLACE, existing data lost) instead of cloned and altered #}
             {{ set_rebuild_reason() }}
             {%- if nsNodeVariables.rebuildReason %}
 
@@ -84,14 +88,20 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {# Alter Column: data type, nullability, description, default (old column names) #}
                     {{ alter_modify_columns_sql() }}
 
-                    {# Add Column #}
+                    {# Add Column (with MODIFY ORDER BY when the sort key changed: new columns can only join it here) #}
                     {{ alter_add_columns_sql() }}
 
                     {# Rename Column (matched by id; a column without @id has its name as id, so it is dropped + added instead) #}
                     {{ alter_rename_columns_sql() }}
 
+                    {# Modify Order By (trailing terms removed): its own ALTER, before Delete Column #}
+                    {{ alter_order_by_sql() }}
+
                     {# Delete Column #}
                     {{ alter_drop_columns_sql() }}
+
+                    {# Modify Settings: MODIFY / RESET SETTING #}
+                    {{ alter_settings_sql() }}
 
                     {# Edit Table Description #}
                     {{ alter_description_sql() }}

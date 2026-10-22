@@ -150,6 +150,13 @@ macroString: |-
       {%- set nsNodeVariables.currentSettings = nsCurrentSettings.items -%}
     {%- endif -%}
 
+    {#- Redeploy: did the sort key change (ignoring spaces, backticks and case)? #}
+    {%- if currentState is defined and currentState and desiredState is defined and desiredState -%}
+      {%- set nsNodeVariables.orderByChanged =
+            (nsNodeVariables.currentOrderBy | join(',') | replace(' ', '') | replace('`', '') | lower)
+            != (nsNodeVariables.desiredOrderBy | join(',') | replace(' ', '') | replace('`', '') | lower) -%}
+    {%- endif -%}
+
   {%- endmacro -%}
 
   {#===========================================================================
@@ -167,6 +174,7 @@ macroString: |-
       desired/currentSettings               "name = value" table settings from @settings
       rebuildReason                         why a table redeploy rebuilds instead of altering, '' when it alters
                                             (set by set_rebuild_reason())
+      orderByChanged / orderByAltered       redeploy: the sort key changed / a MODIFY ORDER BY was emitted
       metaDataChanged                      set by the redeploy macros
   ===========================================================================#}
   {%- set nsNodeVariables = namespace(desiredMatType = "",
@@ -187,6 +195,8 @@ macroString: |-
                                       desiredSettings = [],
                                       currentSettings = [],
                                       rebuildReason = "",
+                                      orderByChanged = false,
+                                      orderByAltered = false,
                                       metaDataChanged = false) -%}
   {{- initialize_node_variables(nsNodeVariables) -}}
 
@@ -866,17 +876,28 @@ macroString: |-
     or partition key (so nullable columns can be key terms) unless @settings sets it.
     A table COMMENT goes after these clauses.
   ===========================================================================#}
-  {%- macro ch_storage_clauses() -%}
-      {%- set partitionBy = nsNodeVariables.desiredPartitionBy -%}
-      {%- set nsSettings = namespace(items=nsNodeVariables.desiredSettings, nullableKeySet=false) -%}
-      {%- for setting in nsSettings.items -%}
+  {#===========================================================================
+    ch_effective_settings(settings, hasKey, ns): appends to ns.items the "name = value" settings a
+    table gets: @settings, with allow_nullable_key = 1 first when the table has a sort or partition
+    key (hasKey) and @settings does not set it. Used by the CREATE and by alter_settings_sql().
+  ===========================================================================#}
+  {%- macro ch_effective_settings(settings, hasKey, ns) -%}
+      {%- set nsSet = namespace(nullableKeySet=false) -%}
+      {%- for setting in settings -%}
           {%- if (setting | lower | replace(' ', '')).startswith('allow_nullable_key=') -%}
-              {%- set nsSettings.nullableKeySet = true -%}
+              {%- set nsSet.nullableKeySet = true -%}
           {%- endif -%}
       {%- endfor -%}
-      {%- if (nsNodeVariables.desiredOrderBy or partitionBy) and not nsSettings.nullableKeySet -%}
-          {%- set nsSettings.items = ['allow_nullable_key = 1'] + nsSettings.items -%}
+      {%- if hasKey and not nsSet.nullableKeySet -%}
+          {%- set ns.items = ns.items + ['allow_nullable_key = 1'] -%}
       {%- endif -%}
+      {%- set ns.items = ns.items + settings -%}
+  {%- endmacro -%}
+
+  {%- macro ch_storage_clauses() -%}
+      {%- set partitionBy = nsNodeVariables.desiredPartitionBy -%}
+      {%- set nsSettings = namespace(items=[]) -%}
+      {{- ch_effective_settings(nsNodeVariables.desiredSettings, nsNodeVariables.desiredOrderBy or partitionBy, nsSettings) -}}
 
       {%- if partitionBy | length == 1 -%}
           PARTITION BY {{ partitionBy[0] }}
@@ -1056,9 +1077,14 @@ macroString: |-
               ADD COLUMN `{{ desCol.name }}` {{ desCol.dataType }}
               {%- if desCol.nullable == false %} NOT NULL {%- endif %}
               {%- if desCol.defaultValue %} DEFAULT {{ desCol.defaultValue }} {%- endif %}
-              {%- if desCol.description | trim | length > 0 %} COMMENT '{{ desCol.description | escape }}'{%- endif %}
+              {%- if desCol.description | trim | length > 0 %} COMMENT '{{ ch_string(desCol.description) }}'{%- endif %}
               {%- if not loop.last -%}, {%- endif %}
           {%- endfor %}
+          {#- A new column can only join the sort key in the ALTER that adds it #}
+          {%- if nsNodeVariables.orderByChanged %},
+              MODIFY ORDER BY ({{ nsNodeVariables.desiredOrderBy | join(', ') }})
+              {%- set nsNodeVariables.orderByAltered = true -%}
+          {%- endif %}
           {%- set nsNodeVariables.metaDataChanged = true -%}
       {%- endif %}
   {%- endmacro -%}
@@ -1080,24 +1106,70 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_order_by_sql(): "Recluster Table" with the new key, or "Drop Cluster Key"
-    when it was removed. Call after column adds/renames and before Delete Column.
-    (Still Snowflake syntax — ClickHouse redeploy is pending.)
+    alter_order_by_sql(): "Modify Order By" — MODIFY ORDER BY with the new sort key, when it
+    changed and alter_add_columns_sql() did not already do it. Its own ALTER, after column
+    adds/renames and before Delete Column: ClickHouse refuses to drop a column in the same
+    ALTER that takes it out of the sort key. Only the changes set_rebuild_reason() lets through
+    (trailing terms removed, new columns added) reach here; others recreate the table.
   ===========================================================================#}
   {%- macro alter_order_by_sql() -%}
-      {#- Whitespace-insensitive, so trunc(a,-5) vs trunc(a, -5) is not a change #}
-      {%- set keyChanged = (nsNodeVariables.desiredOrderBy | map('replace', ' ', '') | list)
-                        != (nsNodeVariables.currentOrderBy | map('replace', ' ', '') | list) -%}
-
-      {%- if nsNodeVariables.desiredOrderBy | length > 0 and keyChanged %}
-          {{ stage('Recluster Table') }}
+      {%- if nsNodeVariables.orderByChanged and not nsNodeVariables.orderByAltered %}
+          {{ stage('Modify Order By') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          CLUSTER BY ({{ nsNodeVariables.desiredOrderBy | join(', ') }})
+          MODIFY ORDER BY ({{ nsNodeVariables.desiredOrderBy | join(', ') }})
+          {%- set nsNodeVariables.orderByAltered = true -%}
           {%- set nsNodeVariables.metaDataChanged = true -%}
-      {%- elif nsNodeVariables.desiredOrderBy | length == 0 and nsNodeVariables.currentOrderBy | length > 0 %}
-          {{ stage('Drop Cluster Key') }}
+      {%- endif %}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    alter_settings_sql(): "Modify Settings" — MODIFY SETTING for each setting added or changed, then
+    "Reset Settings" — RESET SETTING for each removed (two ALTERs: ClickHouse cannot parse both in
+    one), comparing the effective settings (ch_effective_settings(),
+    so the automatic allow_nullable_key = 1 counts). ClickHouse accepts both for every MergeTree
+    setting on an existing table.
+  ===========================================================================#}
+  {%- macro alter_settings_sql() -%}
+      {%- set nsCur = namespace(items=[]) -%}
+      {%- set nsDes = namespace(items=[]) -%}
+      {{- ch_effective_settings(nsNodeVariables.currentSettings, nsNodeVariables.currentOrderBy or nsNodeVariables.currentPartitionBy, nsCur) -}}
+      {{- ch_effective_settings(nsNodeVariables.desiredSettings, nsNodeVariables.desiredOrderBy or nsNodeVariables.desiredPartitionBy, nsDes) -}}
+
+      {#- Compare by setting name (case-insensitive); values ignoring spaces #}
+      {%- set nsMap = namespace(modify=[], reset=[]) -%}
+      {%- for d in nsDes.items if '=' in d -%}
+          {%- set dName = d.split('=')[0] | trim | lower -%}
+          {%- set dValue = d.split('=', 1)[1] | trim -%}
+          {%- set nsFind = namespace(value=none) -%}
+          {%- for c in nsCur.items if '=' in c and (c.split('=')[0] | trim | lower) == dName -%}
+              {%- set nsFind.value = c.split('=', 1)[1] | trim -%}
+          {%- endfor -%}
+          {%- if nsFind.value is none or (nsFind.value | replace(' ', '')) != (dValue | replace(' ', '')) -%}
+              {%- set nsMap.modify = nsMap.modify + [dName ~ ' = ' ~ dValue] -%}
+          {%- endif -%}
+      {%- endfor -%}
+      {%- for c in nsCur.items if '=' in c -%}
+          {%- set cName = c.split('=')[0] | trim | lower -%}
+          {%- set nsFind = namespace(found=false) -%}
+          {%- for d in nsDes.items if '=' in d and (d.split('=')[0] | trim | lower) == cName -%}
+              {%- set nsFind.found = true -%}
+          {%- endfor -%}
+          {%- if not nsFind.found and cName not in nsMap.reset -%}
+              {%- set nsMap.reset = nsMap.reset + [cName] -%}
+          {%- endif -%}
+      {%- endfor -%}
+
+      {#- Separate ALTERs: after MODIFY SETTING's list, ClickHouse cannot parse a following RESET SETTING #}
+      {%- if nsMap.modify %}
+          {{ stage('Modify Settings') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          DROP CLUSTERING KEY
+          MODIFY SETTING {{ nsMap.modify | join(', ') }}
+          {%- set nsNodeVariables.metaDataChanged = true -%}
+      {%- endif %}
+      {%- if nsMap.reset %}
+          {{ stage('Reset Settings') }}
+          ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
+          RESET SETTING {{ nsMap.reset | join(', ') }}
           {%- set nsNodeVariables.metaDataChanged = true -%}
       {%- endif %}
   {%- endmacro -%}
@@ -1130,43 +1202,116 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
+    key_identifiers(terms, ns): appends to ns.items every identifier in the key terms — the text
+    split on operators, brackets, quotes, commas and spaces, backticks removed — so a column is
+    matched as a whole word (n_Name does not match n_Name_New). Function names come out too;
+    they never equal a column name in practice.
+  ===========================================================================#}
+  {%- macro key_identifiers(terms, ns) -%}
+      {%- set nsText = namespace(value=terms | join(' ')) -%}
+      {%- for ch in ['`', '(', ')', ',', '+', '-', '*', '/', '%', '=', '<', '>', '!', "'", '"', '[', ']', '{', '}', ':', ';', '|', '&', '\n', '\t'] -%}
+          {%- set nsText.value = nsText.value | replace(ch, ' ') -%}
+      {%- endfor -%}
+      {%- set ns.items = ns.items + nsText.value.split() -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
     set_rebuild_reason(): sets nsNodeVariables.rebuildReason when a table redeploy cannot be done
-    with ALTER, '' otherwise. ClickHouse cannot ALTER a table's sort, primary or partition key
-    (beyond narrow cases) or some MergeTree settings, nor rename / retype / drop a column used in
-    one of those keys. Rebuild when:
-      - @orderBy, @primaryKey, @partitionBy or @settings changed (compared ignoring spaces and backticks)
-      - a column used in a current key term is renamed, changes type (nullability included) or is dropped
-    The key-column check is a substring match on the term text, so a false match only costs a rebuild.
-    Call before choosing between rebuild_table_sql() and the alters.
+    with ALTER, '' otherwise. Verified against ClickHouse Cloud 26.6:
+      - PARTITION BY: no ALTER exists                                   -> recreate
+      - PRIMARY KEY: no ALTER exists. Without @primaryKey the primary
+        key is the whole ORDER BY, so any ORDER BY change changes it    -> recreate
+      - ORDER BY (primary key unchanged): MODIFY ORDER BY only accepts
+        removing trailing terms and adding terms that use only columns
+        added in the same ALTER without a DEFAULT; anything else        -> recreate
+      - rename or type change (nullability included) of a column used
+        in a current key                                                -> recreate
+      - SETTINGS: MODIFY / RESET SETTING always works                   -> alter_settings_sql()
+      - dropping a key column: allowed once it has left the key (Modify
+        Order By runs before Delete Column); a dropped column still used
+        in a key is rejected by validate_key_columns()
+    Terms are compared ignoring spaces, backticks and case. Call before choosing between
+    rebuild_table_sql() and the alters.
   ===========================================================================#}
   {%- macro set_rebuild_reason() -%}
       {%- set ns = namespace(reasons=[]) -%}
-      {%- set checks = [
-            ('ORDER BY', nsNodeVariables.currentOrderBy, nsNodeVariables.desiredOrderBy),
-            ('PRIMARY KEY', nsNodeVariables.currentPrimaryKey, nsNodeVariables.desiredPrimaryKey),
-            ('PARTITION BY', nsNodeVariables.currentPartitionBy, nsNodeVariables.desiredPartitionBy),
-            ('SETTINGS', nsNodeVariables.currentSettings, nsNodeVariables.desiredSettings)] -%}
-      {%- for label, cur, des in checks -%}
-          {%- set curText = cur | join(',') | replace(' ', '') | replace('`', '') | lower -%}
-          {%- set desText = des | join(',') | replace(' ', '') | replace('`', '') | lower -%}
-          {%- if curText != desText -%}
-              {%- set ns.reasons = ns.reasons + [label ~ ' changed'] -%}
-          {%- endif -%}
-      {%- endfor -%}
+      {%- set norm = namespace(cur=[], des=[]) -%}
 
-      {%- set keyText = (nsNodeVariables.currentOrderBy + nsNodeVariables.currentPrimaryKey
-                         + nsNodeVariables.currentPartitionBy) | join(' ') | replace('`', '') -%}
-      {%- for curCol in currentState.columns if keyText and curCol.name in keyText -%}
+      {#- PARTITION BY #}
+      {%- if (nsNodeVariables.currentPartitionBy | join(',') | replace(' ', '') | replace('`', '') | lower)
+             != (nsNodeVariables.desiredPartitionBy | join(',') | replace(' ', '') | replace('`', '') | lower) -%}
+          {%- set ns.reasons = ns.reasons + ['PARTITION BY changed'] -%}
+      {%- endif -%}
+
+      {#- PRIMARY KEY, as ClickHouse sees it: @primaryKey, else the whole ORDER BY #}
+      {%- set curKey = nsNodeVariables.currentPrimaryKey or nsNodeVariables.currentOrderBy -%}
+      {%- set desKey = nsNodeVariables.desiredPrimaryKey or nsNodeVariables.desiredOrderBy -%}
+      {%- set keyChanged = (curKey | join(',') | replace(' ', '') | replace('`', '') | lower)
+                           != (desKey | join(',') | replace(' ', '') | replace('`', '') | lower) -%}
+      {%- if keyChanged -%}
+          {%- if not nsNodeVariables.currentPrimaryKey and not nsNodeVariables.desiredPrimaryKey -%}
+              {%- set ns.reasons = ns.reasons + ['ORDER BY changed without @primaryKey'] -%}
+          {%- else -%}
+              {%- set ns.reasons = ns.reasons + ['PRIMARY KEY changed'] -%}
+          {%- endif -%}
+
+      {#- ORDER BY with the primary key unchanged: drop the terms that use only new, DEFAULT-less
+          columns; what is left must be a prefix of the current ORDER BY #}
+      {%- elif nsNodeVariables.orderByChanged -%}
+          {%- set nsNew = namespace(names=[]) -%}
+          {%- for desCol in columns if not desCol.defaultValue
+                  and not (currentState.columns | selectattr('id', 'equalto', desCol.id) | list) -%}
+              {%- set nsNew.names = nsNew.names + [desCol.name] -%}
+          {%- endfor -%}
+          {%- set existingNames = currentState.columns | map(attribute='name') | list -%}
+          {%- set nsKept = namespace(terms=[]) -%}
+          {%- for term in nsNodeVariables.desiredOrderBy -%}
+              {%- set nsIds = namespace(items=[]) -%}
+              {{- key_identifiers([term], nsIds) -}}
+              {%- set usesNew = nsIds.items | select('in', nsNew.names) | list -%}
+              {%- set usesExisting = nsIds.items | select('in', existingNames) | list -%}
+              {%- if not (usesNew and not usesExisting) -%}
+                  {%- set nsKept.terms = nsKept.terms + [term | replace(' ', '') | replace('`', '') | lower] -%}
+              {%- endif -%}
+          {%- endfor -%}
+          {%- set curTerms = nsNodeVariables.currentOrderBy | map('replace', ' ', '') | map('replace', '`', '') | map('lower') | list -%}
+          {%- if nsKept.terms != curTerms[:nsKept.terms | length] -%}
+              {%- set ns.reasons = ns.reasons + ['ORDER BY changed'] -%}
+          {%- endif -%}
+      {%- endif -%}
+
+      {#- Renamed / retyped key columns #}
+      {%- set nsKeyIds = namespace(items=[]) -%}
+      {{- key_identifiers(nsNodeVariables.currentOrderBy + nsNodeVariables.currentPrimaryKey + nsNodeVariables.currentPartitionBy, nsKeyIds) -}}
+      {%- for curCol in currentState.columns if curCol.name in nsKeyIds.items -%}
           {%- set matchingCols = columns | default([]) | selectattr('id', 'equalto', curCol.id) | list -%}
-          {%- if not matchingCols -%}
-              {%- set ns.reasons = ns.reasons + ['key column ' ~ curCol.name ~ ' dropped'] -%}
-          {%- elif (matchingCols | first).name != curCol.name -%}
+          {%- if matchingCols and (matchingCols | first).name != curCol.name -%}
               {%- set ns.reasons = ns.reasons + ['key column ' ~ curCol.name ~ ' renamed'] -%}
-          {%- elif (ch_column_type(curCol) | upper | replace(' ', '')) != (ch_column_type(matchingCols | first) | upper | replace(' ', '')) -%}
+          {%- elif matchingCols and (ch_column_type(curCol) | upper | replace(' ', '')) != (ch_column_type(matchingCols | first) | upper | replace(' ', '')) -%}
               {%- set ns.reasons = ns.reasons + ['key column ' ~ curCol.name ~ ' type changed'] -%}
           {%- endif -%}
       {%- endfor -%}
       {%- set nsNodeVariables.rebuildReason = ns.reasons | join('; ') -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    validate_key_columns(): failing "Invalid Key Column" check on redeploy when a column that is
+    dropped, or renamed away, is still named in @orderBy, @primaryKey or @partitionBy — ClickHouse
+    would fail either way (missing column). Whole-word match (key_identifiers()).
+  ===========================================================================#}
+  {%- macro validate_key_columns() -%}
+      {%- set nsIds = namespace(items=[]) -%}
+      {{- key_identifiers(nsNodeVariables.desiredOrderBy + nsNodeVariables.desiredPrimaryKey + nsNodeVariables.desiredPartitionBy, nsIds) -}}
+      {%- set desiredNames = columns | map(attribute='name') | list -%}
+      {%- set nsBad = namespace(items=[]) -%}
+      {%- for curCol in currentState.columns if curCol.name in nsIds.items and curCol.name not in desiredNames -%}
+          {%- set nsBad.items = nsBad.items + [curCol.name] -%}
+      {%- endfor -%}
+      {%- if nsBad.items %}
+          {{ test_stage('Invalid Key Column: ' + node.name, false) }}
+          -- Column(s) {{ nsBad.items | join(', ') }} no longer exist on {{ node.name }} (dropped or renamed) but are still used in @orderBy / @primaryKey / @partitionBy. Update those annotations.
+          {{ fail_sql() }}
+      {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================
@@ -1180,7 +1325,7 @@ macroString: |-
   {%- macro rebuild_table_sql() -%}
       {%- if nsNodeVariables.rebuildReason %}
           {{ test_stage('Warning: Table Recreated (' ~ nsNodeVariables.rebuildReason ~ ')', true) }}
-          -- {{ node.name }} cannot be altered in place ({{ nsNodeVariables.rebuildReason }}): ClickHouse cannot ALTER a table's ORDER BY / PRIMARY KEY / PARTITION BY / SETTINGS, or rename, retype or drop a column used in them.
+          -- {{ node.name }} cannot be altered in place ({{ nsNodeVariables.rebuildReason }}): ClickHouse cannot ALTER a table's PARTITION BY or PRIMARY KEY, changes ORDER BY only by removing trailing terms or adding new columns, and cannot rename or retype a column used in a key.
           -- The table is recreated with CREATE OR REPLACE. Its existing data is lost; it stays empty until the next run reloads it.
           {{ fail_sql(false) }}
 
