@@ -10,14 +10,14 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
 {#- nsNodeVariables (object paths, metaDataChanged) is created and initialized in the shared macros #}
 
-{#- Desired/current materialization type, normalized ("Table " = "table"), including "transient table".
+{#- Desired/current materialization type, normalized ("Table " = "table").
     Empty string when the state is absent (first deploy has no currentState; delete has no desiredState). #}
 {%- set desiredMatType = nsNodeVariables.desiredMatType %}
 {%- set currentMatType = nsNodeVariables.currentMatType %}
 
 {%- if desiredState %}
 
-    {# Validate: the materialization type must be table, transient table or view #}
+    {# Validate: the materialization type must be table or view (ClickHouse has no transient tables) #}
     {{ validate_materialization_type() }}
 
     {%- if desiredMatType == 'view' %}
@@ -29,7 +29,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
            (description), or Metadata Update-Default — see view_redeploy_sql() #}
         {{ view_redeploy_sql() }}
 
-    {%- elif desiredMatType in ['table', 'transient table'] %}
+    {%- elif desiredMatType == 'table' %}
 
         {# Validate the Dimension's annotations (hard fail: CREATE does not fail a test stage on row count) #}
         {{ validate_dimension_requirements(true) }}

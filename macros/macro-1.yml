@@ -346,9 +346,10 @@ macroString: |-
 
   {#===========================================================================
     validate_materialization_type(allowedTypes): failing "Unsupported Materialization Type"
-    check when the normalized type is not allowed. Call first in create and run.
+    check when the normalized type is not allowed (ClickHouse has no transient tables, so
+    'transient table' fails here). Call first in create and run.
   ===========================================================================#}
-  {%- macro validate_materialization_type(allowedTypes=['table', 'transient table', 'view']) -%}
+  {%- macro validate_materialization_type(allowedTypes=['table', 'view']) -%}
       {%- if nsNodeVariables.desiredMatType not in allowedTypes %}
           {{ test_stage('Unsupported Materialization Type: ' + node.name, false) }}
           -- '{{ node.materializationType | default('', true) }}' is not supported on {{ node.name }}; use one of: {{ allowedTypes | join(', ') }}

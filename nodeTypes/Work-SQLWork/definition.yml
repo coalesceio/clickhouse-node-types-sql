@@ -18,17 +18,16 @@ metadata:
 
         - name: materializationType
           description: |-
-            • Controls node's materialization type — supports 𝘁𝗮𝗯𝗹𝗲, 𝘃𝗶𝗲𝘄, and 𝘁𝗿𝗮𝗻𝘀𝗶𝗲𝗻𝘁 𝘁𝗮𝗯𝗹𝗲.
+            • Controls node's materialization type — supports 𝘁𝗮𝗯𝗹𝗲 and 𝘃𝗶𝗲𝘄.
           isRequired: false
           parameters:
             - name: type
               type: string
               isRequired: true
               default: table
-              example: transient table
+              example: view
               options:
                 - table
-                - transient table
                 - view
 
         - name: orderBy
