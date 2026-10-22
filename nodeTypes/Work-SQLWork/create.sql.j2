@@ -22,30 +22,12 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
     {%- if desiredMatType == 'view' %}
 
-        {# Drop the current object if it was another type, or the view was renamed/moved #}
+        {# Drop the current object if it was another type #}
         {{ object_drop_sql() }}
 
-        {# Did the view DDL change? Render the view definition for both states and compare:
-           equal output means only metadata (nothing in the DDL) changed #}
-        {%- set viewDefinitionChanged = currentState is not defined
-                or (currentState != desiredState
-                    and view_definition_sql(currentState) != view_definition_sql(desiredState)) %}
-
-        {# CreateSQL for View #}
-        {%- if currentState is not defined
-                or currentMatType != desiredMatType
-                or nsNodeVariables.curObjectNameFullPath != nsNodeVariables.desObjectNameFullPath
-                or viewDefinitionChanged %}
-            {{ stage('Create ' + desiredMatType) }}
-            CREATE OR REPLACE {{ desiredMatType }} {{ nsNodeVariables.desObjectNameFullPath }}
-            {{ view_definition_sql(desiredState) }}
-
-        {%- elif currentState != desiredState %}
-
-            {# Definition unchanged: record a metadata-only change #}
-            {{ alter_metadata_sql() }}
-
-        {%- endif %}
+        {# Create View (definition changed / new), Rename View (only moved), Set View Comment
+           (description), or Metadata Update-Default — see view_redeploy_sql() #}
+        {{ view_redeploy_sql() }}
 
     {%- elif desiredMatType in ['table', 'transient table']  %}
 

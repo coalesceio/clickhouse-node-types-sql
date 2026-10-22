@@ -803,31 +803,105 @@ macroString: |-
   ===========================================================================#}
 
   {#===========================================================================
-    view_definition_sql(state): view column list, comments and AS SELECT for a state.
-    Surrogate key and system columns (Dimension/Fact) select CAST(NULL AS <type>).
+    view_definition_sql(state): everything after CREATE OR REPLACE VIEW <path> for a state —
+    a typed column list with the column COMMENTs, then AS SELECT. ClickHouse takes column
+    comments only in a typed list, and the view's own comment is set separately
+    (view_comment_sql()): a trailing COMMENT '...' after the SELECT is read as a table alias
+    when the FROM has none. Types come from ch_column_type() (nullability folded in).
+    Surrogate key and system columns (Dimension/Fact) select NULL, or the type's default value
+    when the column is not Nullable (ClickHouse cannot CAST NULL to a non-Nullable type).
   ===========================================================================#}
   {%- macro view_definition_sql(state) -%}
       (
           {%- for col in state.columns %}
-              `{{ col.name }}`
-              {%- if col.description | trim | length > 0 %} COMMENT '{{ col.description | escape }}'{% endif %}
+              `{{ col.name }}` {{ ch_column_type(col) }}
+              {%- if col.description | trim | length > 0 %} COMMENT '{{ ch_string(col.description) }}'{% endif %}
               {%- if not loop.last -%}, {%- endif %}
           {%- endfor %}
       )
-      {%- if state.node.description | trim | length > 0 %} COMMENT = '{{ state.node.description | escape }}'{% endif %}
       AS
       {{ state.sources[0].cteString }}
       SELECT {{ state.sources[0].selectModifier | default('', true) }}
       {%- for col in state.sources[0].columns %}
           {%- if col.isSurrogateKey or col.isSystemVersion or col.isSystemCurrentFlag
                   or col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemEndDate %}
-          CAST(NULL AS {{ col.dataType }}) AS `{{ col.name }}`
+              {%- set colType = ch_column_type(col) %}
+              {%- if (colType | lower).startswith('nullable(') %}
+          CAST(NULL AS {{ colType }}) AS `{{ col.name }}`
+              {%- else %}
+          defaultValueOfTypeName('{{ ch_string(colType) }}') AS `{{ col.name }}`
+              {%- endif %}
           {%- else %}
           {{ get_source_transform(col) }} AS `{{ col.name }}`
           {%- endif %}
           {%- if not loop.last -%}, {%- endif %}
       {%- endfor %}
       {{ state.sources[0].join }}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    view_comment_sql(path): "Set View Comment" — ALTER TABLE <view> MODIFY COMMENT with the node
+    description ('' clears it).
+  ===========================================================================#}
+  {%- macro view_comment_sql(path) -%}
+      {{ stage('Set View Comment') }}
+      ALTER TABLE {{ path }}
+      MODIFY COMMENT '{{ ch_string(node.description | default('', true)) }}'
+  {%- endmacro -%}
+
+  {#===========================================================================
+    view_redeploy_sql(): the view branch of create.sql.j2 for every node type, after
+    object_drop_sql() has dropped a current object of another type:
+      - first deploy, type changed, or definition changed -> (Drop View at the old path when
+        renamed/moved) + Create View (CREATE OR REPLACE VIEW) + Set View Comment when there is one
+      - only renamed/moved -> Rename View (RENAME TABLE), + Set View Comment if it changed
+      - only the description changed -> Set View Comment
+      - anything else changed (nothing in the view) -> Metadata Update-Default
+    The definition is compared by rendering view_definition_sql() for both states.
+  ===========================================================================#}
+  {%- macro view_redeploy_sql() -%}
+      {%- set desPath = nsNodeVariables.desObjectNameFullPath -%}
+      {%- set curPath = nsNodeVariables.curObjectNameFullPath -%}
+      {%- set isNewView = currentState is not defined or not currentState
+                          or nsNodeVariables.currentMatType != nsNodeVariables.desiredMatType -%}
+      {%- set pathChanged = not isNewView and curPath != desPath -%}
+      {%- set definitionChanged = isNewView or view_definition_sql(currentState) != view_definition_sql(desiredState) -%}
+      {%- set desiredDescription = node.description if node.description | trim | length > 0 else '' -%}
+      {%- set currentDescription = '' if isNewView
+                                   else (currentState.node.description if currentState.node.description | trim | length > 0 else '') -%}
+
+      {%- if definitionChanged %}
+          {%- if pathChanged %}
+              {{ stage('Drop View') }}
+              DROP VIEW IF EXISTS {{ curPath }}
+          {%- endif %}
+
+          {{ stage('Create View') }}
+          CREATE OR REPLACE VIEW {{ desPath }}
+          {{ view_definition_sql(desiredState) }}
+
+          {#- CREATE OR REPLACE resets the comment, so set it again even when unchanged #}
+          {%- if desiredDescription %}
+
+          {{ view_comment_sql(desPath) }}
+          {%- endif %}
+          {%- set nsNodeVariables.metaDataChanged = true -%}
+
+      {%- elif pathChanged or currentDescription != desiredDescription %}
+          {%- if pathChanged %}
+              {{ stage('Rename View') }}
+              RENAME TABLE {{ curPath }}
+              TO {{ desPath }}
+          {%- endif %}
+          {%- if currentDescription != desiredDescription %}
+
+          {{ view_comment_sql(desPath) }}
+          {%- endif %}
+          {%- set nsNodeVariables.metaDataChanged = true -%}
+
+      {%- elif currentState != desiredState %}
+          {{ alter_metadata_sql() }}
+      {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================
@@ -964,17 +1038,15 @@ macroString: |-
   ===========================================================================#}
 
   {#===========================================================================
-    object_drop_sql(): "Drop <type>" when the node is deleted, the type changed or a view
-    moved/renamed. A deleted table also drops its leftover clone ("Delete Table").
+    object_drop_sql(): "Drop <type>" when the node is deleted or the type changed. A deleted
+    table also drops its leftover clone ("Delete Table"). A view that moved/renamed is handled
+    by view_redeploy_sql() (renamed, or dropped and recreated).
   ===========================================================================#}
   {%- macro object_drop_sql() -%}
       {%- if currentState is defined and currentState -%}
           {%- set currentMatType = nsNodeVariables.currentMatType -%}
           {%- set nodeDeleted = desiredState is not defined or not desiredState -%}
-          {%- set dropCurrent = nodeDeleted
-                                or currentMatType != nsNodeVariables.desiredMatType
-                                or (nsNodeVariables.desiredMatType == 'view'
-                                    and nsNodeVariables.curObjectNameFullPath != nsNodeVariables.desObjectNameFullPath) -%}
+          {%- set dropCurrent = nodeDeleted or currentMatType != nsNodeVariables.desiredMatType -%}
 
           {%- if nodeDeleted and currentMatType != 'view' %}
               {{ stage('Delete Table') }}
