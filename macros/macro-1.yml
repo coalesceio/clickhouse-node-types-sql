@@ -219,25 +219,13 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    drop_materialization(materialization): DROP keyword for a type, e.g. 'TABLE IF EXISTS'.
+    drop_materialization(materialization): DROP keyword for a ClickHouse type — 'VIEW IF EXISTS'
+    for a view, 'TABLE IF EXISTS' for a table and anything else (including a table deployed
+    earlier with a type that is no longer offered).
   ===========================================================================#}
   {% macro drop_materialization(materialization) %}
-      {%- if materialization | lower in ['table', 'transient table','temporary table', 'hybrid table'] -%}
-          TABLE IF EXISTS
-      {%- elif materialization | lower in ['view', 'secure view', 'run view', 'cortex search service'] -%}
+      {%- if materialization | lower == 'view' -%}
           VIEW IF EXISTS
-      {%- elif materialization | lower in ['dynamic table','transient dynamic table', 'dynamic iceberg table'] -%}
-          DYNAMIC TABLE IF EXISTS
-      {%- elif materialization | lower == 'materialized view' -%}
-          MATERIALIZED VIEW IF EXISTS
-      {%- elif materialization | lower == 'external table' -%}
-          EXTERNAL TABLE IF EXISTS
-      {%- elif materialization | lower == 'iceberg table' -%}
-          ICEBERG TABLE IF EXISTS
-      {%- elif materialization | lower == 'interactive table' -%}
-          INTERACTIVE TABLE IF EXISTS
-      {%- elif materialization | lower == 'stream' -%}
-          STREAM IF EXISTS
       {%- else -%}
           TABLE IF EXISTS
       {%- endif %}
