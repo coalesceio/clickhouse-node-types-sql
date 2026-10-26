@@ -1,4 +1,4 @@
-# data.yml — root metadata for this Coalesce repo.
-fileVersion: 3
 defaultStorageMapping: null
+fileVersion: 3
 platformKind: tdbc-clickhouse
+projectID: db321fb3-4369-4037-8616-ec2cef25dc46
