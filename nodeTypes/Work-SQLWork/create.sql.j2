@@ -56,7 +56,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
             {# CreateSQL for Table. Work is an intermediate stage: plain MergeTree, sorted by @orderBy / @primaryKey (tuple() when neither),
                with @partitionBy and @settings when set.
-               NULL / NOT NULL is skipped for a Nullable(...) type, which ClickHouse rejects. #}
+               Types and nullability from ch_column_type() (@notNull unwraps a Nullable(...) type). #}
             {# Validate: @primaryKey must be the leading terms of @orderBy #}
             {{ validate_order_by() }}
 
@@ -64,10 +64,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             CREATE OR REPLACE TABLE {{ nsNodeVariables.desObjectNameFullPath }}
             (
                 {%- for col in columns %}
-                    `{{ col.name }}` {{ col.dataType }}
-                    {%- if not (col.dataType | lower).startswith('nullable(') %}
-                        {%- if col.nullable == false %} NOT NULL{% else %} NULL{% endif %}
-                    {%- endif %}
+                    `{{ col.name }}` {{ ch_column_type(col) }}
                     {%- if col.defaultValue %} DEFAULT {{ col.defaultValue }}{% endif %}
                     {%- if col.description | trim | length > 0 %} COMMENT '{{ ch_string(col.description) }}'{% endif %}
                     {%- if not loop.last -%}, {%- endif %}

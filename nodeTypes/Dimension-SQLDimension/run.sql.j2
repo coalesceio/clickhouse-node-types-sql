@@ -8,10 +8,12 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 {# == Node Type Description    : This node loads data into dimension table using options distinct and multi-source cte if specified == #}
 
 {#
-    ClickHouse has no MERGE, so every load below is an INSERT of the row set the MERGE would have applied.
-    An "update" re-inserts the same key with a newer SYSTEM_UPDATE_DATE; ReplacingMergeTree(SYSTEM_UPDATE_DATE)
-    (the default engine) keeps that latest row, so ORDER BY must be the business key (+ SYSTEM_VERSION for SCD2).
-    The target is read with FINAL so change detection sees the latest version of each row.
+    ClickHouse has no MERGE, so each load is INSERT + DELETE:
+    - INSERT the row set the MERGE would have applied. An "update" re-inserts the same key with a newer
+      SYSTEM_UPDATE_DATE (SCD2 expiry re-inserts the old version with SYSTEM_CURRENT_FLAG = 'N').
+    - DELETE the replaced copies: per business key (+ SYSTEM_VERSION for SCD2) only the row with the latest
+      SYSTEM_UPDATE_DATE is kept, so a plain SELECT is correct right after the run, on any MergeTree engine.
+    The target is read with FINAL (engines other than plain MergeTree) in case an earlier run left copies behind.
 #}
 
 {#- High date for an open SYSTEM_END_DATE, within the column type's range (DateTime64 ends in 2299, DateTime in 2106) #}
@@ -32,12 +34,13 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 {%- endmacro -%}
 
 {#- Value for a new row's surrogate key (ClickHouse has no identity): the column's @defaultValue when set,
-    otherwise the next numbers after the current max key #}
-{%- macro new_surrogate_key(col) -%}
+    otherwise the next numbers after the current max key. isNewRow is the condition that marks new rows;
+    the row number is counted within those rows only, so the keys have no gaps. #}
+{%- macro new_surrogate_key(col, isNewRow) -%}
     {%- if col.defaultValue -%}
         {{ col.defaultValue }}
     {%- else -%}
-        (SELECT greatest(ifNull(max(`{{ col.name }}`), 0), 0) FROM {{ ref_no_link(node.location.name, node.name) }}) + row_number() OVER ()
+        (SELECT greatest(ifNull(max(`{{ col.name }}`), 0), 0) FROM {{ ref_no_link(node.location.name, node.name) }}) + row_number() OVER (PARTITION BY {{ isNewRow }})
     {%- endif -%}
 {%- endmacro -%}
 
@@ -415,7 +418,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             SELECT
             {%- for col in columns %}
                 {%- if col.isSurrogateKey %}
-                if(`DML_OPERATION` IN ('INSERT_NEW_ROWS', 'INSERT_NEW_SCD2_ROWS'), {{ new_surrogate_key(col) }}, `TGT_{{ col.name }}`)
+                {%- set isNewRow = "`DML_OPERATION` IN ('INSERT_NEW_ROWS', 'INSERT_NEW_SCD2_ROWS')" %}
+                if({{ isNewRow }}, {{ new_surrogate_key(col, isNewRow) }}, `TGT_{{ col.name }}`)
                 {%- else %}
                 `{{ col.name }}`
                 {%- endif %}
@@ -457,7 +461,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             SELECT
             {%- for col in columns %}
                 {%- if col.isSurrogateKey %}
-                if(`TARGET_CURRENT`.`TGT_ROW_EXISTS` IS NULL, {{ new_surrogate_key(col) }}, `TARGET_CURRENT`.`TGT_{{ col.name }}`)
+                {%- set isNewRow = "`TARGET_CURRENT`.`TGT_ROW_EXISTS` IS NULL" %}
+                if({{ isNewRow }}, {{ new_surrogate_key(col, isNewRow) }}, `TARGET_CURRENT`.`TGT_{{ col.name }}`)
                 {%- elif col.isSystemCreateDate %}
                 if(`TARGET_CURRENT`.`TGT_ROW_EXISTS` IS NULL, `SOURCE_DATA`.`{{ col.name }}`, `TARGET_CURRENT`.`TGT_{{ col.name }}`)
                 {%- else %}
@@ -547,7 +552,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             SELECT
             {%- for col in columns %}
                 {%- if col.isSurrogateKey %}
-                if(`CHANGE_TYPE` = 'NEW', {{ new_surrogate_key(col) }}, `TGT_{{ col.name }}`)
+                {%- set isNewRow = "`CHANGE_TYPE` = 'NEW'" %}
+                if({{ isNewRow }}, {{ new_surrogate_key(col, isNewRow) }}, `TGT_{{ col.name }}`)
                 {%- elif col.isSystemVersion %}
                 if(`CHANGE_TYPE` = 'NEW', 1, `{{ col.name }}`)
                 {%- elif col.isSystemCurrentFlag %}
@@ -570,6 +576,22 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {%- endif %}
     {# Unmatched LEFT JOIN columns must be NULL (ClickHouse defaults them to 0 / '') for the NEW checks above #}
     SETTINGS join_use_nulls = 1
+
+    {# == Update: delete the copies the INSERT replaced (and the previous zero key record) — per business key
+          (+ SYSTEM_VERSION for SCD2) only the row with the latest SYSTEM_UPDATE_DATE is kept == #}
+    {%- set replaceKeyCols = (columns | selectattr("isBusinessKey") | map(attribute="name") | list)
+                             + (columns | selectattr("isSystemVersion") | map(attribute="name") | list if type2Dimension else []) %}
+    {%- set updateDateCols = columns | selectattr("isSystemUpdateDate") | map(attribute="name") | list %}
+    {%- if replaceKeyCols | length > 0 and updateDateCols | length > 0 %}
+        {%- set replaceKey = '`' ~ (replaceKeyCols | join('`, `')) ~ '`' %}
+        {{ stage('Load ' + materializationType + ' Using Merge - Delete Replaced Rows') }}
+        DELETE FROM {{ targetPath }}
+        WHERE ({{ replaceKey }}, `{{ updateDateCols[0] }}`) NOT IN (
+            SELECT {{ replaceKey }}, max(`{{ updateDateCols[0] }}`)
+            FROM {{ targetPath }}
+            GROUP BY {{ replaceKey }}
+        )
+    {%- endif %}
 
     {#== Post-SQL ==#}
     {{ run_pre_post_sql('Post') }}

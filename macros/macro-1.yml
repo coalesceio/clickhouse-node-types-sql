@@ -817,6 +817,25 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
+    ch_column_type(col): the column's type with its nullability, for CREATE / ADD COLUMN.
+    @notNull on a Nullable(T) column (Coalesce infers most ClickHouse columns as Nullable) gives
+    T NOT NULL; ClickHouse rejects NULL / NOT NULL after a Nullable(...) type, so that is left bare.
+  ===========================================================================#}
+  {%- macro ch_column_type(col) -%}
+      {%- set dataType = col.dataType | default('', true) | trim -%}
+      {%- set isNullableType = (dataType | lower).startswith('nullable(') and dataType.endswith(')') -%}
+      {%- if isNullableType and col.nullable == false -%}
+          {{- dataType[9:-1] | trim }} NOT NULL
+      {%- elif isNullableType -%}
+          {{- dataType -}}
+      {%- elif col.nullable == false -%}
+          {{- dataType }} NOT NULL
+      {%- else -%}
+          {{- dataType }} NULL
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
     validate_order_by(): failing "Invalid Primary Key" check when @primaryKey is not the
     leading terms of @orderBy (see primaryKeyError). Call before the CREATE.
   ===========================================================================#}
@@ -987,10 +1006,8 @@ macroString: |-
       {%- if ns.items | length > 0 %}
           {{ stage('Add Column') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          ADD COLUMN
           {%- for desCol in ns.items %}
-              `{{ desCol.name }}` {{ desCol.dataType }}
-              {%- if desCol.nullable == false %} NOT NULL {%- endif %}
+              ADD COLUMN `{{ desCol.name }}` {{ ch_column_type(desCol) }}
               {%- if desCol.defaultValue %} DEFAULT {{ desCol.defaultValue }} {%- endif %}
               {%- if desCol.description | trim | length > 0 %} COMMENT '{{ desCol.description | escape }}'{%- endif %}
               {%- if not loop.last -%}, {%- endif %}
