@@ -102,14 +102,13 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- endif %}
 
     {%- if config.zeroKey is defined and hasSurrogateKey %}
-        {%- set zeroKeySurrogateValue = config.zeroKey.parameters[0] if (config.zeroKey.parameters is defined and config.zeroKey.parameters | length > 0) else '0' %}
         {{ stage('Load ' + materializationType + ' Using Merge - Zero Key Record') }}
             MERGE INTO {{ ref_no_link(node.location.name, node.name) }} USING
             (
                 SELECT
                 {%- for col in source.columns %}
                     {%- if col.isSurrogateKey %}
-                        {{ zeroKeySurrogateValue }}
+                        {{ zero_key_surrogate_value(col) }}
                     {%- elif col.isSystemCurrentFlag %}
                         'Y'
                     {%- elif col.isSystemEndDate or col.isSystemUpdateDate or col.isSystemCreateDate %}
@@ -128,7 +127,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             ON
             {%- for col in columns if col.isSurrogateKey %}
                 {%- if not loop.first %} AND {%- endif %}
-                `{{ node.name }}`.`{{ col.name }}` = {{ zeroKeySurrogateValue }}
+                `{{ node.name }}`.`{{ col.name }}` = {{ zero_key_surrogate_value(col) }}
             {%- endfor %}
 
             {# SYSTEM_CREATE_DATE keeps the zero record's first-inserted value; everything else is refreshed. #}

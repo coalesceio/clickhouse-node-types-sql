@@ -1157,6 +1157,7 @@ macroString: |-
   {#===========================================================================
     alter_add_columns_sql(): "Add Column" — one ALTER with an ADD COLUMN per column with a new id
     (ClickHouse repeats the command for each column), with NOT NULL, DEFAULT and comment.
+    New columns with a DEFAULT are then materialized for the existing rows.
   ===========================================================================#}
   {%- macro alter_add_columns_sql() -%}
       {%- set ns = namespace(items=[]) -%}
@@ -1182,11 +1183,25 @@ macroString: |-
               {%- set nsNodeVariables.orderByAltered = true -%}
           {%- endif %}
           {%- set nsNodeVariables.metaDataChanged = true -%}
+
+          {#- Rows already in the table get a new column's DEFAULT computed on every read, so a
+              non-deterministic default (generateUUIDv4(), now64()) changes between queries.
+              MATERIALIZE COLUMN writes the values once. #}
+          {%- set withDefault = ns.items | selectattr('defaultValue') | list -%}
+          {%- if withDefault | length > 0 %}
+          {{ stage('Materialize Column Default') }}
+          ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
+          {%- for desCol in withDefault %}
+              MATERIALIZE COLUMN `{{ desCol.name }}`
+              {%- if not loop.last -%}, {%- endif %}
+          {%- endfor %}
+          SETTINGS mutations_sync = 2
+          {%- endif %}
       {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_rename_columns_sql(): "Rename Column" per column whose id is kept but name
+    alter_rename_columns_sql():"Rename Column" per column whose id is kept but name
     changed. A column without @id has its name as id, so renaming it drops and re-adds it.
   ===========================================================================#}
   {%- macro alter_rename_columns_sql() -%}
@@ -1637,6 +1652,21 @@ macroString: |-
               {{ sql.parameters[0] }}
           {%- endif %}
       {%- endfor %}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    zero_key_surrogate_value(col): the zero record's surrogate key — the nil UUID
+    00000000-0000-0000-0000-000000000000 for a UUID column, else the node-level
+    surrogateKeyValue (0 when not set).
+  ===========================================================================#}
+  {%- macro zero_key_surrogate_value(col) -%}
+      {%- if 'uuid' in (col.dataType | lower) -%}
+          toUUID('00000000-0000-0000-0000-000000000000')
+      {%- elif config.zeroKey.parameters is defined and config.zeroKey.parameters | length > 0 -%}
+          {{ config.zeroKey.parameters[0] }}
+      {%- else -%}
+          0
+      {%- endif -%}
   {%- endmacro -%}
 
   {#===========================================================================

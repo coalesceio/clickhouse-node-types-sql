@@ -39,6 +39,18 @@ ClickHouse writes an `INSERT ... SELECT` in blocks, so an insert that fails part
 earlier blocks in the table. A `not_null` test run before the load catches NULLs before
 anything is written.
 
+## UUID surrogate keys
+
+A UUID surrogate key is a `UUID` column with a default value of `generateUUIDv4()`; the
+Dimension load leaves the surrogate key out of its inserts, so each new row gets a new UUID.
+
+- **Zero key record:** a `UUID` surrogate key gets the nil UUID
+  `00000000-0000-0000-0000-000000000000`; other surrogate keys get `surrogateKeyValue`.
+- **Adding the column to an existing table:** ClickHouse computes a new column's `DEFAULT` on
+  read for rows already in the table, so `generateUUIDv4()` would give those rows a different
+  value on every query. The redeploy runs `MATERIALIZE COLUMN` after `ADD COLUMN` for every new
+  column with a default, so the values are written once.
+
 ## Known limitations
 
 ### `Variant` columns in SQL nodes

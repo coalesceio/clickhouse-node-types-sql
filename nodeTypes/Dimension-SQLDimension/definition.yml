@@ -197,7 +197,7 @@ metadata:
           parameters:
             - name: surrogateKeyValue
               type: number
-              description: Value used for the zero record's surrogate key column.
+              description: Value used for the zero record's surrogate key column. A UUID surrogate key always gets the nil UUID 00000000-0000-0000-0000-000000000000.
               isRequired: true
               example: 0
 
