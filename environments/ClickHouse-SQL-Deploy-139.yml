@@ -1,5 +1,11 @@
 fileVersion: 1
 id: "139"
-mappingDefinitions: {}
+mappingDefinitions:
+  SRC:
+    database: ""
+    schema: tpch
+  TARGET:
+    database: ""
+    schema: WORKSPACE_TANVI
 name: ClickHouse-SQL-Deploy
 type: Environment
