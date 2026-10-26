@@ -1,11 +1,11 @@
 fileVersion: 1
-id: ef2ded82-3fcf-4db9-bca0-810ad604dc2b
+id: 142b8811-8006-48e9-8e11-94a8287ab056
 name: Nation_Test
 operation:
   database: ""
   deployEnabled: true
   description: ""
-  locationName: TARGET
+  locationName: SRC
   metadata:
     columns:
       - acceptedValues:
@@ -13,8 +13,8 @@ operation:
           values: []
         appliedColumnTests: {}
         columnReference:
-          columnCounter: 7fde6800-a98b-4bc5-a0aa-b1b74e3ca8ff
-          stepCounter: ef2ded82-3fcf-4db9-bca0-810ad604dc2b
+          columnCounter: 53ee3494-90c0-4a1a-bd6a-62ac29b89804
+          stepCounter: 142b8811-8006-48e9-8e11-94a8287ab056
         config: {}
         dataType: UInt32
         defaultValue: ""
@@ -31,8 +31,8 @@ operation:
           values: []
         appliedColumnTests: {}
         columnReference:
-          columnCounter: 8cfdbcf6-fe21-4051-822a-5e80e928b498
-          stepCounter: ef2ded82-3fcf-4db9-bca0-810ad604dc2b
+          columnCounter: 22ec8534-5f4c-4ad0-b67f-f6584e72a544
+          stepCounter: 142b8811-8006-48e9-8e11-94a8287ab056
         config: {}
         dataType: FixedString(25)
         defaultValue: ""
@@ -49,8 +49,8 @@ operation:
           values: []
         appliedColumnTests: {}
         columnReference:
-          columnCounter: 8c079ae5-afb0-4295-bee2-e793a8b4c812
-          stepCounter: ef2ded82-3fcf-4db9-bca0-810ad604dc2b
+          columnCounter: 6b709e3d-1d6c-45e2-a1de-6c4ca7e8caef
+          stepCounter: 142b8811-8006-48e9-8e11-94a8287ab056
         config: {}
         dataType: UInt32
         defaultValue: ""
@@ -67,8 +67,8 @@ operation:
           values: []
         appliedColumnTests: {}
         columnReference:
-          columnCounter: fd4a81ca-74b4-400f-821c-3e12a148657e
-          stepCounter: ef2ded82-3fcf-4db9-bca0-810ad604dc2b
+          columnCounter: 76bfcc50-9923-4afc-bef3-d4e87d0ba3b4
+          stepCounter: 142b8811-8006-48e9-8e11-94a8287ab056
         config: {}
         dataType: String
         defaultValue: ""
@@ -85,8 +85,8 @@ operation:
           values: []
         appliedColumnTests: {}
         columnReference:
-          columnCounter: b30af00f-e437-4a55-ab19-6c1c412a317a
-          stepCounter: ef2ded82-3fcf-4db9-bca0-810ad604dc2b
+          columnCounter: 4cbd2232-7d4d-499b-b3c9-8ce770927167
+          stepCounter: 142b8811-8006-48e9-8e11-94a8287ab056
         config: {}
         dataType: DateTime64(3)
         defaultValue: ""

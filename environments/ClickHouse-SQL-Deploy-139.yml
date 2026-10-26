@@ -6,6 +6,6 @@ mappingDefinitions:
     schema: tpch
   TARGET:
     database: ""
-    schema: WORKSPACE_TANVI
+    schema: WORKSPACE_TANVI_QA
 name: ClickHouse-SQL-Deploy
 type: Environment

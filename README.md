@@ -1,17 +1,18 @@
 # clickhouse-node-types-sql
 Base node types sql-Clickhouse
 
-## ClickHouse Cloud defaults (Work)
+## ClickHouse Cloud defaults (Work, Fact, Dimension)
 
-Work tables are created without the clauses ClickHouse Cloud adds by itself:
+Tables are always MergeTree (there is no `@engine`) and are created without the clauses
+ClickHouse Cloud adds by itself:
 
-- `ENGINE = MergeTree` is not written (Work has no `@engine`); Cloud creates
+- `ENGINE = MergeTree` is not written; Cloud creates
   `ENGINE = SharedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')`.
 - `ORDER BY tuple()` is not written when the node has no `@orderBy` / `@primaryKey`; Cloud adds it.
 - `SETTINGS index_granularity = 8192` is never written unless `@settings` sets it; Cloud adds it.
 
 These rely on Cloud's `default_table_engine` and `create_table_empty_primary_key_by_default`
-settings. Fact and Dimension still write `ENGINE` (MergeTree, or `@engine`) and `ORDER BY tuple()`.
+settings.
 
 ## NULLs in non-nullable columns
 

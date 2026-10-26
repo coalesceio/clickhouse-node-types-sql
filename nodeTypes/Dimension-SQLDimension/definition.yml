@@ -31,41 +31,6 @@ metadata:
                 - table
                 - view
 
-        - name: engine
-          description: |-
-            • ClickHouse table engine (ENGINE = ...) — any MergeTree-family engine, with its parameters.
-            • If not specified, defaults to 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲.
-            • The table is sorted by the orderBy columns (ORDER BY tuple() when none). The Replacing, Summing,
-              Aggregating, Collapsing and Coalescing engines combine rows that share the ORDER BY key, so mark the key columns with orderBy.
-              Ex. engine("ReplacingMergeTree(SYSTEM_UPDATE_DATE)")
-            • Engines and parameters:
-              MergeTree
-              ReplacingMergeTree([ver [, is_deleted]])
-              SummingMergeTree([columns])
-              AggregatingMergeTree
-              CollapsingMergeTree(sign)
-              VersionedCollapsingMergeTree(sign, version)
-              CoalescingMergeTree([columns])
-              GraphiteMergeTree(config_section)
-            • Ignored on views.
-            • ⚠️ Changing engine (or renaming a column used in its parameters) on redeploy recreates the table — existing data is lost.
-          isRequired: false
-          parameters:
-            - name: engine
-              type: string
-              isRequired: true
-              default: MergeTree
-              example: ReplacingMergeTree(SYSTEM_UPDATE_DATE)
-              options:
-                - MergeTree
-                - ReplacingMergeTree
-                - SummingMergeTree
-                - AggregatingMergeTree
-                - CollapsingMergeTree
-                - VersionedCollapsingMergeTree
-                - CoalescingMergeTree
-                - GraphiteMergeTree
-
         - name: partitionBy
           description: |-
             • The table's PARTITION BY key. Each argument is one term — a column or an expression, written as it should appear in the SQL; several terms are partitioned together.
@@ -358,9 +323,12 @@ metadata:
             • Optional for SCD Type 1 — the merge logic joins and detects changes entirely off the business key.
             • Recommended for SCD Type 2 — a stable surrogate key per version is the standard way to support versioned business key. Not enforced — the merge itself doesn't require it.
             • 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱 𝗼𝗻𝗹𝘆 𝘄𝗵𝗲𝗻 the node-level @zeroKey is set, since the zero/ghost record is matched against the target by surrogate key value.
+            • New rows get the key from @defaultValue; rows that are re-inserted (expired or updated) keep theirs. Without @defaultValue new rows are numbered max(key) + 1 — a UUID key requires @defaultValue("generateUUIDv4()"), and validation fails without it.
 
             Expected expression:
-            0 AS "<NODE_NAME>_KEY" @isSurrogateKey    Ex. 0 AS "DIM_CUSTOMER_KEY" @isSurrogateKey
+            generateUUIDv4() AS "<NODE_NAME>_KEY" @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")
+            Ex. generateUUIDv4() AS "DIM_CUSTOMER_KEY" @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")
+            • Always created NOT NULL (a plain UUID, never Nullable(UUID)), with or without @notNull.
 
             Agentic creation only — manual creation adds this column automatically.
           isRequired: false
@@ -598,7 +566,7 @@ metadata:
           {%- endmacro -%}
           {%- set ns = namespace(items=[], lines=[]) -%}
           {%- set idAnnotation = '@id("<ID>") ' -%}
-          {%- set ns.items = ns.items + [{'expr': '0', 'alias': '"' ~ node.name ~ '_KEY"', 'annotation': idAnnotation ~ '@isSurrogateKey'}] -%}
+          {%- set ns.items = ns.items + [{'expr': 'generateUUIDv4()', 'alias': '"' ~ node.name ~ '_KEY"', 'annotation': idAnnotation ~ '@isSurrogateKey @notNull @defaultValue("generateUUIDv4()")'}] -%}
           {%- for dep in sources[0].dependencies -%}
             {%- for col in dep.columns -%}
               {%- set ns.items = ns.items + [{'expr': '"' ~ col.name ~ '"', 'alias': '"' ~ col.name ~ '"', 'annotation': idAnnotation.rstrip()}] -%}

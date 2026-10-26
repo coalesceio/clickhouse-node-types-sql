@@ -175,7 +175,7 @@ macroString: |-
       rebuildReason                         why a table redeploy rebuilds instead of altering, '' when it alters
                                             (set by set_rebuild_reason())
       orderByChanged / orderByAltered       redeploy: the sort key changed / a MODIFY ORDER BY was emitted
-      useCloudTableDefaults                 set by a node type (Work) to leave out ENGINE = MergeTree and
+      useCloudTableDefaults                 set by a node type (Work, Fact, Dimension) to leave out ENGINE = MergeTree and
                                             ORDER BY tuple() when not annotated — ClickHouse Cloud adds them
       metaDataChanged                      set by the redeploy macros
   ===========================================================================#}
@@ -533,10 +533,23 @@ macroString: |-
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': false,
               'annotation': '@isSurrogateKey',
-              'example': '0 AS `' ~ node.name ~ '_KEY` @isSurrogateKey',
+              'example': 'generateUUIDv4() AS `' ~ node.name ~ '_KEY` @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")',
               'reason': 'Recommended for SCD Type 2, to give tables a stable per-version join key. Ignore this warning if you are managing your own surrogate key logic (e.g. a sequence NEXTVAL) instead of using @isSurrogateKey.'
           }] -%}
       {%- endif -%}
+
+      {# New rows get the surrogate key's @defaultValue; without one the load numbers them max(key) + row_number(), which a UUID key cannot do. #}
+      {%- for col in columns if col.isSurrogateKey and not col.defaultValue -%}
+          {%- set isUuidKey = 'uuid' in (col.dataType | lower) -%}
+          {%- set missingSystemColumns.items = missingSystemColumns.items + [{
+              'required': isUuidKey,
+              'annotation': '@defaultValue on ' ~ col.name,
+              'example': 'generateUUIDv4() AS `' ~ col.name ~ '` @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")',
+              'reason': ('A UUID surrogate key needs @defaultValue("generateUUIDv4()"): new rows take their key from it, and the max(key) + 1 numbering used without one does not work on UUIDs.'
+                         if isUuidKey else
+                         'Without @defaultValue, new rows are numbered max(key) + row_number(), which reads the table on every load and is not safe for concurrent loads. @defaultValue("generateUUIDv4()") on a UUID column avoids both.')
+          }] -%}
+      {%- endfor -%}
 
       {%- set hasSystemCreateDate = columns | selectattr("isSystemCreateDate") | list | length > 0 -%}
       {%- if not isSimpleUpsert and not hasSystemCreateDate -%}
@@ -978,31 +991,13 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    ch_engine(): the table engine from @engine("<engine expression>"), written as-is
-    (e.g. ReplacingMergeTree(SYSTEM_UPDATE_DATE)); MergeTree when @engine is absent,
-    bare or empty. Declared defaults are not applied to config, so the fallback lives here.
-  ===========================================================================#}
-  {%- macro ch_engine() -%}
-      {{- ch_engine_of(config) -}}
-  {%- endmacro -%}
-
-  {#===========================================================================
-    ch_engine_of(cfg): the engine expression for a state's config (cfg.engine), MergeTree when
-    absent — ch_engine() for the desired state, currentState.config for the current one.
-  ===========================================================================#}
-  {%- macro ch_engine_of(cfg) -%}
-      {%- set engineParams = cfg.engine.parameters if cfg.engine is mapping else [] -%}
-      {{- (engineParams[0] if engineParams else '') | trim | default('MergeTree', true) -}}
-  {%- endmacro -%}
-
-  {#===========================================================================
     ch_table_definition_sql(): everything after CREATE ... TABLE <path> for the desired table:
     the column list, ENGINE, the storage clauses and the table COMMENT. Used by the first
     create and by the redeploy rebuild, so both write the same table.
     Column types come from ch_column_type(), with nullability as Nullable(...) rather than
     NULL / NOT NULL keywords (which ClickHouse rejects on types that cannot be Nullable).
-    With nsNodeVariables.useCloudTableDefaults set (Work), ENGINE is written only when @engine is
-    set: ClickHouse Cloud adds ENGINE = SharedMergeTree(...) itself.
+    With nsNodeVariables.useCloudTableDefaults set (Work, Fact, Dimension), ENGINE is not written:
+    ClickHouse Cloud adds ENGINE = SharedMergeTree(...) itself. Otherwise ENGINE = MergeTree.
   ===========================================================================#}
   {%- macro ch_table_definition_sql() -%}
       (
@@ -1013,8 +1008,8 @@ macroString: |-
               {%- if not loop.last -%}, {%- endif %}
           {%- endfor %}
       )
-      {%- if not nsNodeVariables.useCloudTableDefaults or config.engine is mapping %}
-      ENGINE = {{ ch_engine() }}
+      {%- if not nsNodeVariables.useCloudTableDefaults %}
+      ENGINE = MergeTree
       {%- endif %}
       {{ ch_storage_clauses() }}
       {%- if node.description | trim | length > 0 %}
@@ -1061,6 +1056,7 @@ macroString: |-
     used by the CREATE, ADD COLUMN, MODIFY COLUMN and views, so they all agree.
       - Coalesce infers SQL node columns as nullable and may wrap the type in Nullable(...);
         a wrapped type counts as nullable unless the column is NOT NULL (@notNull).
+      - A surrogate key (@isSurrogateKey) is never Nullable: every row gets a key.
       - Types ClickHouse cannot put inside Nullable stay as they are: Array, Map, Tuple,
         Nested, JSON / Object, Dynamic, Variant, (Simple)AggregateFunction and the geo types
         (Point, Ring, LineString, MultiLineString, Polygon, MultiPolygon).
@@ -1071,7 +1067,7 @@ macroString: |-
       {%- set dataType = col.dataType | trim -%}
       {%- set isWrapped = (dataType | lower).startswith('nullable(') and dataType.endswith(')') -%}
       {%- set baseType = dataType[9:-1] | trim if isWrapped else dataType -%}
-      {%- set isNullable = col.nullable != false -%}
+      {%- set isNullable = col.nullable != false and not col.isSurrogateKey -%}
       {%- set family = baseType.split('(')[0] | trim | lower -%}
       {%- if family in ['array', 'map', 'tuple', 'nested', 'json', 'object', 'dynamic', 'variant',
                         'aggregatefunction', 'simpleaggregatefunction',
@@ -1160,11 +1156,14 @@ macroString: |-
     New columns with a DEFAULT are then materialized for the existing rows.
   ===========================================================================#}
   {%- macro alter_add_columns_sql() -%}
-      {%- set ns = namespace(items=[]) -%}
+      {%- set ns = namespace(items=[], withDefault=[]) -%}
       {%- for desCol in columns -%}
           {%- set idAlreadyCurrent = currentState.columns | default([]) | selectattr('id', 'equalto', desCol.id) | list -%}
           {%- if not idAlreadyCurrent -%}
               {%- set ns.items = ns.items + [desCol] -%}
+              {%- if desCol.defaultValue -%}
+                  {%- set ns.withDefault = ns.withDefault + [desCol] -%}
+              {%- endif -%}
           {%- endif -%}
       {%- endfor -%}
 
@@ -1187,11 +1186,10 @@ macroString: |-
           {#- Rows already in the table get a new column's DEFAULT computed on every read, so a
               non-deterministic default (generateUUIDv4(), now64()) changes between queries.
               MATERIALIZE COLUMN writes the values once. #}
-          {%- set withDefault = ns.items | selectattr('defaultValue') | list -%}
-          {%- if withDefault | length > 0 %}
+          {%- if ns.withDefault | length > 0 %}
           {{ stage('Materialize Column Default') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          {%- for desCol in withDefault %}
+          {%- for desCol in ns.withDefault %}
               MATERIALIZE COLUMN `{{ desCol.name }}`
               {%- if not loop.last -%}, {%- endif %}
           {%- endfor %}
@@ -1329,7 +1327,6 @@ macroString: |-
   {#===========================================================================
     set_rebuild_reason(): sets nsNodeVariables.rebuildReason when a table redeploy cannot be done
     with ALTER, '' otherwise. Verified against ClickHouse Cloud 26.6:
-      - ENGINE (@engine, Fact / Dimension): no ALTER exists             -> recreate
       - PARTITION BY: no ALTER exists                                   -> recreate
       - PRIMARY KEY: no ALTER exists. Without @primaryKey the primary
         key is the whole ORDER BY, so any ORDER BY change changes it    -> recreate
@@ -1338,8 +1335,6 @@ macroString: |-
         added in the same ALTER without a DEFAULT; anything else        -> recreate
       - rename or type change (nullability included) of a column used
         in a current key                                                -> recreate
-      - rename of a column used in an engine parameter (e.g. the
-        ReplacingMergeTree version column; retyping it is allowed)      -> recreate
       - SETTINGS: MODIFY / RESET SETTING always works                   -> alter_settings_sql()
       - dropping a key column: allowed once it has left the key (Modify
         Order By runs before Delete Column); a dropped column still used
@@ -1350,13 +1345,6 @@ macroString: |-
   {%- macro set_rebuild_reason() -%}
       {%- set ns = namespace(reasons=[]) -%}
       {%- set norm = namespace(cur=[], des=[]) -%}
-
-      {#- ENGINE (@engine on Fact / Dimension): no MODIFY ENGINE exists #}
-      {%- set currentEngine = ch_engine_of(currentState.config) -%}
-      {%- set desiredEngine = ch_engine_of(config) -%}
-      {%- if (currentEngine | replace(' ', '') | replace('`', '') | lower) != (desiredEngine | replace(' ', '') | replace('`', '') | lower) -%}
-          {%- set ns.reasons = ns.reasons + ['ENGINE changed'] -%}
-      {%- endif -%}
 
       {#- PARTITION BY #}
       {%- if (nsNodeVariables.currentPartitionBy | join(',') | replace(' ', '') | replace('`', '') | lower)
@@ -1401,18 +1389,14 @@ macroString: |-
           {%- endif -%}
       {%- endif -%}
 
-      {#- Renamed / retyped key columns; engine parameter columns (e.g. ReplacingMergeTree's version
-          column) can be retyped but not renamed #}
+      {#- Renamed / retyped key columns #}
       {%- set nsKeyIds = namespace(items=[]) -%}
-      {%- set nsEngineIds = namespace(items=[]) -%}
       {{- key_identifiers(nsNodeVariables.currentOrderBy + nsNodeVariables.currentPrimaryKey + nsNodeVariables.currentPartitionBy, nsKeyIds) -}}
-      {{- key_identifiers([currentEngine], nsEngineIds) -}}
-      {%- for curCol in currentState.columns if curCol.name in nsKeyIds.items or curCol.name in nsEngineIds.items -%}
+      {%- for curCol in currentState.columns if curCol.name in nsKeyIds.items -%}
           {%- set matchingCols = columns | default([]) | selectattr('id', 'equalto', curCol.id) | list -%}
-          {%- set what = 'key column ' if curCol.name in nsKeyIds.items else 'engine column ' -%}
           {%- if matchingCols and (matchingCols | first).name != curCol.name -%}
-              {%- set ns.reasons = ns.reasons + [what ~ curCol.name ~ ' renamed'] -%}
-          {%- elif matchingCols and curCol.name in nsKeyIds.items
+              {%- set ns.reasons = ns.reasons + ['key column ' ~ curCol.name ~ ' renamed'] -%}
+          {%- elif matchingCols
                   and (ch_column_type(curCol) | upper | replace(' ', '')) != (ch_column_type(matchingCols | first) | upper | replace(' ', '')) -%}
               {%- set ns.reasons = ns.reasons + ['key column ' ~ curCol.name ~ ' type changed'] -%}
           {%- endif -%}
@@ -1427,7 +1411,7 @@ macroString: |-
   ===========================================================================#}
   {%- macro validate_key_columns() -%}
       {%- set nsIds = namespace(items=[]) -%}
-      {{- key_identifiers(nsNodeVariables.desiredOrderBy + nsNodeVariables.desiredPrimaryKey + nsNodeVariables.desiredPartitionBy + [ch_engine()], nsIds) -}}
+      {{- key_identifiers(nsNodeVariables.desiredOrderBy + nsNodeVariables.desiredPrimaryKey + nsNodeVariables.desiredPartitionBy, nsIds) -}}
       {%- set desiredNames = columns | map(attribute='name') | list -%}
       {%- set nsBad = namespace(items=[]) -%}
       {%- for curCol in currentState.columns if curCol.name in nsIds.items and curCol.name not in desiredNames -%}
@@ -1435,7 +1419,7 @@ macroString: |-
       {%- endfor -%}
       {%- if nsBad.items %}
           {{ test_stage('Invalid Key Column: ' + node.name, false) }}
-          -- Column(s) {{ nsBad.items | join(', ') }} no longer exist on {{ node.name }} (dropped or renamed) but are still used in @orderBy / @primaryKey / @partitionBy / @engine. Update those annotations.
+          -- Column(s) {{ nsBad.items | join(', ') }} no longer exist on {{ node.name }} (dropped or renamed) but are still used in @orderBy / @primaryKey / @partitionBy. Update those annotations.
           {{ fail_sql() }}
       {%- endif %}
   {%- endmacro -%}
@@ -1451,7 +1435,7 @@ macroString: |-
   {%- macro rebuild_table_sql() -%}
       {%- if nsNodeVariables.rebuildReason %}
           {{ test_stage('Warning: Table Recreated (' ~ nsNodeVariables.rebuildReason ~ ')', true) }}
-          -- {{ node.name }} cannot be altered in place ({{ nsNodeVariables.rebuildReason }}): ClickHouse cannot ALTER a table's ENGINE, PARTITION BY or PRIMARY KEY, changes ORDER BY only by removing trailing terms or adding new columns, cannot rename or retype a column used in a key, and cannot rename a column used in an engine parameter.
+          -- {{ node.name }} cannot be altered in place ({{ nsNodeVariables.rebuildReason }}): ClickHouse cannot ALTER a table's PARTITION BY or PRIMARY KEY, changes ORDER BY only by removing trailing terms or adding new columns, and cannot rename or retype a column used in a key.
           -- The table is recreated with CREATE OR REPLACE. Its existing data is lost; it stays empty until the next run reloads it.
           {{ fail_sql(false) }}
 

@@ -1,78 +1,612 @@
+{#
+    Copyright (c) 2026 Coalesce. All rights reserved.
+This script and its associated documentation are confidential and proprietary to Coalesce.
+Unauthorized reproduction, distribution, or disclosure of this material is strictly prohibited.
+Coalesce permits you to copy and modify this script for the purposes of using with Coalesce but does not permit copying or modification for any other purpose.
+#}
+{# == Node Type Name           : Dimension  == #}
+{# == Node Type Description    : This node loads data into dimension table using options distinct and multi-source cte if specified == #}
 
-{% for test in node.tests if config.testsEnabled %}
-    {% if test.runOrder == 'Before' %}
-        {{ test_stage(test.name, test.continueOnFailure) }}
-        {{ test.templateString }}
-    {% endif %}
-{% endfor %}
+{#
+    ClickHouse has no MERGE, so each load is INSERT + DELETE:
+    - INSERT the row set the MERGE would have applied. An "update" re-inserts the same key with a newer
+      SYSTEM_UPDATE_DATE (SCD2 expiry re-inserts the old version with SYSTEM_CURRENT_FLAG = 'N').
+    - DELETE the replaced copies: per business key (+ SYSTEM_VERSION for SCD2) only the row with the latest
+      SYSTEM_UPDATE_DATE is kept, so a plain SELECT is correct right after the run, on any MergeTree engine.
+    The target is read with FINAL (engines other than plain MergeTree) in case an earlier run left copies behind.
+#}
 
-{% if node.materializationType == 'table' %}
-    {% if config.preSQL %}
-        {{ stage('Pre-SQL') }}
-        {{ config.preSQL }}
-    {% endif %}
+{#- High date for an open SYSTEM_END_DATE, within the column type's range (DateTime64 ends in 2299, DateTime in 2106) #}
+{%- macro ch_high_date(col) -%}
+    {%- set dt = col.dataType | default('', true) | lower | replace(' ', '') -%}
+    {%- set dt = dt[9:-1] if dt.startswith('nullable(') else dt -%}
+    {%- if dt.startswith('datetime64') -%}
+        toDateTime64('2299-12-31 00:00:00', 6)
+    {%- elif dt.startswith('datetime') -%}
+        toDateTime('2105-12-31 00:00:00')
+    {%- elif dt.startswith('date32') -%}
+        toDate32('2299-12-31')
+    {%- elif dt.startswith('date') -%}
+        toDate('2149-06-06')
+    {%- else -%}
+        '2999-12-31 00:00:00'
+    {%- endif -%}
+{%- endmacro -%}
 
-    {% if config.truncateBefore %}
-        {{ stage('Truncate Fact Table') }}
-        TRUNCATE TABLE {{ ref_no_link(node.location.name, node.name) }}
-    {% endif %}
+{#- Value for a new row's surrogate key (ClickHouse has no identity): the column's @defaultValue when set
+    (e.g. generateUUIDv4()), otherwise the value the node's SELECT gives it (SOURCE_DATA's SRC_<name>).
+    Existing rows always keep their key. #}
+{%- macro new_surrogate_key(col) -%}
+    {%- if col.defaultValue -%}
+        {{ col.defaultValue }}
+    {%- else -%}
+        `SRC_{{ col.name }}`
+    {%- endif -%}
+{%- endmacro -%}
 
-    {% if config.insertStrategy in ['UNION', 'UNION ALL'] %}
-        {{ stage( config.insertStrategy + ' Sources' | string ) }}
-        INSERT INTO {{ ref_no_link(node.location.name, node.name) }}
-        (
-            {% for col in columns %}
-                `{{ col.name | escape_identifier }}`
-                {%- if not loop.last -%},{% endif %}
-            {% endfor %}
-        )
-    {% endif %}
+{# == Validate: the materialization type must be table, transient table or view == #}
+{{ validate_materialization_type() }}
 
-    {% for source in sources %}
-        {% if config.insertStrategy == 'INSERT' %}
-            {{ stage('Insert ' + source.name | string ) }}
-            
-            INSERT INTO {{ ref_no_link(node.location.name, node.name) }}
+{# == Materialization type from the node, normalised (case and spaces): table / transient table / view == #}
+{%- set materializationType = get_materialization_type(node.materializationType) %}
+
+{# == To run data quality tests before data insertion == #}
+{{ run_tests('Before') }}
+
+{%- if materializationType in ['table', 'transient table'] %}
+
+    {{ validate_dimension_requirements() }}
+
+    {%- set hasBusinessKey = columns | selectattr("isBusinessKey") | list | length > 0 | default(false) %}
+    {%- set hasSurrogateKey = columns | selectattr("isSurrogateKey") | list | length > 0 %}
+    {%- set lastModifiedCount = columns | selectattr("lastModifiedTracking") | list | length %}
+    {%- set changeTrackingCount = columns | selectattr("isChangeTracking") | list | length %}
+
+    {%- set mergeStrategyExplicit = config.mergeStrategy is defined and config.mergeStrategy.parameters is defined and config.mergeStrategy.parameters | length > 0 %}
+    {%- if mergeStrategyExplicit %}
+        {# Matched case-insensitively; an unrecognised value is rejected by validate_dimension_requirements before any load runs. #}
+        {%- set mergeStrategy = config.mergeStrategy.parameters[0] | string | trim | lower %}
+    {%- else %}
+        {# No @mergeStrategy given — always default to changeTracking, regardless of which tracking columns are present (must match validate_dimension_requirements). #}
+        {%- set mergeStrategy = 'changetracking' %}
+    {%- endif %}
+    {%- set isSimpleUpsert = mergeStrategy == 'upsert' %}
+    {%- set isLastModifiedStrategy = mergeStrategy == 'lastmodified' %}
+    {%- set isChangeTrackingStrategy = mergeStrategy == 'changetracking' %}
+
+    {# lastModified with a tracking column present — the no-column case is rejected by validate_dimension_requirements, and there'd be nothing to compare. #}
+    {%- set lastModifiedComparison = isLastModifiedStrategy and lastModifiedCount > 0 %}
+    {%- if lastModifiedComparison %}
+        {%- set lastModifiedCol = columns | selectattr("lastModifiedTracking") | first %}
+        {%- set lastModifiedColName = lastModifiedCol.name %}
+    {%- endif %}
+    {%- if hasBusinessKey %}
+        {%- if lastModifiedComparison %}
+            {# A bare @lastModifiedTracking (no scdType) comes through as `true`, not a mapping — guard for that and default scdType to 1. #}
+            {%- set lastModifiedTrackingParams = lastModifiedCol.lastModifiedTracking.parameters if (lastModifiedCol.lastModifiedTracking is mapping and lastModifiedCol.lastModifiedTracking.parameters is defined) else [] %}
+            {%- set scdType = lastModifiedTrackingParams[0] | default(1, true) | string %}
+            {%- set type2Dimension = scdType == '2' %}
+        {%- else %}
+            {%- set type2Dimension = changeTrackingCount > 0 %}
+        {%- endif %}
+    {%- else %}
+        {%- set type2Dimension = false %}
+    {%- endif %}
+
+    {%- if isSimpleUpsert %}
+        {# @upsert always forces plain SCD1, no matter what @lastModifiedTracking/@isChangeTracking say. #}
+        {%- set type2Dimension = false %}
+    {%- endif %}
+
+    {%- set source = sources[0] %}
+    {%- set joinclause = source.join %}
+    {# The node's own CTEs (source.cteString) already open a WITH clause; the load's CTEs must continue it with a comma, since a second WITH is invalid SQL. #}
+    {%- set sourceDataCteOpen = ', ' if (source.cteString | default('', true) | trim | length > 0) else 'WITH ' %}
+
+    {# Target path, FINAL for engines that combine rows (plain MergeTree rejects it), and one load timestamp (now64 is constant within a query) #}
+    {%- set targetPath = ref_no_link(node.location.name, node.name) %}
+    {%- set engineName = (ch_engine() | trim).split('(')[0] | trim | replace('Replicated', '') | replace('Shared', '') %}
+    {%- set targetFinal = '' if engineName == 'MergeTree' else ' FINAL' %}
+    {%- set loadTimestamp = 'now64(6)' %}
+
+    {%- if lastModifiedComparison %}
+        {# Test stage for checking NULL values in source - last modified column (any datatype: a NULL date/time or numeric value can never compare as newer, so the row would never be picked up as changed) #}
+        {{ test_stage('Check NULL values for ' ~ lastModifiedColName ~ ' column', false) }}
+        /* If NULL values are detected, this stage will fail and execution will be terminated */
+        {%- set ns = namespace(first=true) %}
+        {%- for col in source.columns if col.name == lastModifiedColName %}
+            {%- set col_transform = get_source_transform(col) %}
+            {%- if col_transform is not none and col_transform != 'NULL' %}
+                {{- source.cteString }}
+                SELECT 1
+                FROM (
+                    SELECT {{ get_source_transform(col) }} AS `CHECK_COL`
+                    {{ source.join }}
+                ) `T`
+                WHERE `T`.`CHECK_COL` IS NULL
+            {%- endif %}
+        {%- endfor %}
+    {%- endif %}
+
+    {#== Pre-SQL ==#}
+    {{ run_pre_post_sql('Pre') }}
+
+    {# == Determine write mode: truncateInsert or append(default) == #}
+    {%- if config.writeMode is defined and config.writeMode.parameters is defined and config.writeMode.parameters | length > 0 %}
+        {%- set writeMode = config.writeMode.parameters[0] | trim %}
+    {%- else %}
+        {%- set writeMode = 'append' %}
+    {%- endif %}
+
+	{# == Truncate data before data insertion  == #}
+    {%- if writeMode | lower != "append" -%}
+        {{ stage('Truncate ' + materializationType) }}
+        TRUNCATE IF EXISTS {{ targetPath }}
+    {%- endif %}
+
+    {%- if config.zeroKey is defined and hasSurrogateKey %}
+        {%- set zeroKeySurrogateValue = config.zeroKey.parameters[0] if (config.zeroKey.parameters is defined and config.zeroKey.parameters | length > 0) else '0' %}
+        {%- set zeroKeyCreateDateCols = columns | selectattr("isSystemCreateDate") | list %}
+        {{ stage('Load ' + materializationType + ' Using Merge - Zero Key Record') }}
+            {# Re-inserted on every run: the newer SYSTEM_UPDATE_DATE replaces the previous zero record.
+               SYSTEM_CREATE_DATE keeps the zero record's first-inserted value; everything else is refreshed. #}
+            INSERT INTO {{ targetPath }}
             (
-                {% for col in source.columns %}
-                    `{{ col.name | escape_identifier }}`
-                    {%- if not loop.last -%},{% endif %}
-                {% endfor %}
+                {%- for col in columns %}
+                    `{{ col.name }}`
+                    {%- if not loop.last %}, {%- endif %}
+                {%- endfor %}
             )
-        {% endif %}
+            SELECT
+            {%- for col in columns %}
+                {%- if col.isSystemCreateDate %}
+                if(`EXISTING_ZERO`.`ZERO_KEY_EXISTS` > 0, `EXISTING_ZERO`.`{{ col.name }}`, `SOURCE_ZERO`.`{{ col.name }}`)
+                {%- else %}
+                `SOURCE_ZERO`.`{{ col.name }}`
+                {%- endif %}
+                AS `{{ col.name }}`
+                {%- if not loop.last %}, {%- endif %}
+            {%- endfor %}
+            FROM
+            (
+                SELECT
+                {%- for col in source.columns %}
+                    {%- if col.isSurrogateKey %}
+                        {{ zeroKeySurrogateValue }}
+                    {%- elif col.isSystemCurrentFlag %}
+                        'Y'
+                    {%- elif col.isSystemEndDate or col.isSystemUpdateDate or col.isSystemCreateDate %}
+                        {{ get_source_transform(col) }}
+                    {%- elif col.isSystemVersion %}
+                        1
+                    {%- else %}
+                        {{ resolve_zero_key(col) }}
+                    {%- endif %}
+                    AS `{{ col.name }}`
+                    {%- if not loop.last %}, {%- endif %}
+                {%- endfor %}
+            ) AS `SOURCE_ZERO`
+            CROSS JOIN
+            (
+                {# Always one row: count() is 0 when there is no zero record yet #}
+                SELECT
+                    count() AS `ZERO_KEY_EXISTS`
+                    {%- for col in zeroKeyCreateDateCols %},
+                    min(`{{ col.name }}`) AS `{{ col.name }}`
+                    {%- endfor %}
+                FROM {{ targetPath }}{{ targetFinal }}
+                WHERE
+                {%- for col in columns if col.isSurrogateKey %}
+                    {%- if not loop.first %} AND {%- endif %}
+                    `{{ col.name }}` = {{ zeroKeySurrogateValue }}
+                {%- endfor %}
+            ) AS `EXISTING_ZERO`
+    {%- endif %}
 
-        {{ source.cteString }}
-        SELECT{% if source.selectModifier %} {{ source.selectModifier }}{% endif %}
-        {% for col in source.columns %}
-            {{ get_source_transform(col) }} AS `{{ col.name | escape_identifier }}`
-            {%- if not loop.last -%}, {% endif %}
-        {% endfor %}
+    {%- if isSimpleUpsert %}
+        {{ stage('Load ' + materializationType + ' Using Merge - Upsert') }}
+    {%- elif lastModifiedComparison %}
+        {#== Last Modified SCD ==#}
+        {%- if type2Dimension %}
+            {{ stage('Load ' + materializationType + ' Using Merge - Last Modified Comparison - SCD2') }}
+        {%- else %}
+            {{ stage('Load ' + materializationType + ' Using Merge - Last Modified Comparison - SCD1') }}
+        {%- endif %}
+    {%- else %}
+        {#== Change Tracking SCD ==#}
+        {%- if type2Dimension %}
+            {{ stage('Load ' + materializationType + ' Using Merge - Change Tracking - SCD2') }}
+        {%- else %}
+            {{ stage('Load ' + materializationType + ' Using Merge - Change Tracking - SCD1') }}
+        {%- endif %}
+    {%- endif %}
 
-        {{ source.join }}
+    INSERT INTO {{ targetPath }}
+    (
+        {%- for col in columns %}
+            `{{ col.name }}`
+            {%- if not loop.last %}, {%- endif %}
+        {%- endfor %}
+    )
+        {{- source.cteString }}
+        {%- if type2Dimension -%}
+            {# SCD Type 2: classifies each source row as NEW/CHANGED/NOCHANGE, then unions the three row shapes (new key, new version, expire old version). #}
+            {%- set sysVersionCol = get_value_by_column_attribute("isSystemVersion") %}
+            {%- set sysCurrentFlagCol = get_value_by_column_attribute("isSystemCurrentFlag") %}
+            {%- set sysCreateDateCol = get_value_by_column_attribute("isSystemCreateDate") %}
+            {%- set sysUpdateDateCol = get_value_by_column_attribute("isSystemUpdateDate") %}
+            {%- set sysEndDateCol = get_value_by_column_attribute("isSystemEndDate") %}
 
-        {% if config.insertStrategy in ['UNION', 'UNION ALL'] and not loop.last %}
-            {{ 'UNION DISTINCT' if config.insertStrategy == 'UNION' else config.insertStrategy }}
-        {% endif %}
-    {% endfor %}
+            {{ sourceDataCteOpen }}`SOURCE_DATA` AS (
+                /* Incoming source rows, transformed and aliased to the target column names */
+                SELECT {{ source.selectModifier | default('', true) }}
+                {%- for col in source.columns if not (col.isSurrogateKey or col.isSystemVersion or col.isSystemCurrentFlag or col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemEndDate) %}
+                    {{ get_source_transform(col) }} AS `{{ col.name }}`
+                    {%- if not loop.last %}, {%- endif %}
+                {%- endfor %}
+                {%- for col in source.columns if col.isSurrogateKey %},
+                    {{ get_source_transform(col) }} AS `SRC_{{ col.name }}`
+                {%- endfor %}
+                {{ joinclause }}
+            ),
 
-    {% if config.postSQL %}
-        {{ stage('Post-SQL') }}
-        {{ config.postSQL }}
-    {% endif %}
-{% endif %}
+            `TARGET_CURRENT` AS (
+                /* Only the current (SYSTEM_CURRENT_FLAG = 'Y') version of each business key —
+                   history rows are irrelevant for change detection */
+                SELECT
+                {%- for col in columns %}
+                    {%- if col.isSurrogateKey %}
+                    `{{ col.name }}` AS `TGT_{{ col.name }}`
+                    {%- elif col.isBusinessKey or col.isSystemVersion or col.isSystemCurrentFlag or col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemEndDate %}
+                    `{{ col.name }}`
+                    {%- else %}
+                    `{{ col.name }}` AS `TGT_{{ col.name }}`
+                    {%- endif %}
+                    {%- if not loop.last %}, {%- endif %}
+                {%- endfor %}
+                FROM {{ targetPath }}{{ targetFinal }}
+                WHERE `{{ sysCurrentFlagCol }}` = 'Y'
+            ),
 
-{% if config.testsEnabled %}
-    {% for test in node.tests %}
-        {% if test.runOrder == 'After' %}
-            {{ test_stage(test.name, test.continueOnFailure) }}
-            {{ test.templateString }}
-        {% endif %}
-    {% endfor %}
+            `CHANGE_DETECTION` AS (
+                /* Classify each source row as NEW / CHANGED / NOCHANGE / UPDATE_NON_TYPE2 against
+                   the current target row */
+                SELECT
+                    `SOURCE_DATA`.*,
+                    `TARGET_CURRENT`.`{{ sysVersionCol }}` AS `{{ sysVersionCol }}`,
+                    `TARGET_CURRENT`.`{{ sysCreateDateCol }}` AS `{{ sysCreateDateCol }}`,
+                    `TARGET_CURRENT`.`{{ sysUpdateDateCol }}` AS `{{ sysUpdateDateCol }}`,
+                    {%- for col in columns if not (col.isBusinessKey or col.isSystemVersion or col.isSystemCurrentFlag or col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemEndDate) %}
+                    `TARGET_CURRENT`.`TGT_{{ col.name }}` AS `TGT_{{ col.name }}`,
+                    {%- endfor %}
+                    CASE
+                        -- No matching business key in the target at all — this is a brand-new dimension member
+                        WHEN `TARGET_CURRENT`.`{{ sysVersionCol }}` IS NULL THEN 'NEW'
+                        {%- if lastModifiedComparison %}
+                        -- Last-modified-driven: a newer source timestamp than the current target row means a change
+                        WHEN `SOURCE_DATA`.`{{ lastModifiedColName }}` > `TARGET_CURRENT`.`TGT_{{ lastModifiedColName }}` THEN 'CHANGED'
+                        {%- else %}
+                        -- Change-tracking-driven: any @isChangeTracking column differing means a change
+                        WHEN (
+                            {%- for col in columns if col.isChangeTracking %}
+                            {%- if not loop.first %} OR {%- endif %}
+                            {{ safe_compare('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`TGT_' ~ col.name ~ '`', col.dataType) }}
+                            {%- endfor %}
+                        ) THEN 'CHANGED'
+                        {%- set nonType2AttrCount = columns | rejectattr("isBusinessKey") | rejectattr("isSurrogateKey") | rejectattr("isSystemVersion") | rejectattr("isSystemCurrentFlag") | rejectattr("isSystemCreateDate") | rejectattr("isSystemUpdateDate") | rejectattr("isSystemEndDate") | rejectattr("isChangeTracking") | list | length %}
+                        {%- if nonType2AttrCount > 0 %}
+                        -- A plain (non-@isChangeTracking) attribute column differing does NOT trigger
+                        -- a new version — it's updated in place on the current row instead.
+                        WHEN (
+                            {%- for col in columns if not (col.isBusinessKey or col.isSurrogateKey or col.isSystemVersion or col.isSystemCurrentFlag or col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemEndDate or col.isChangeTracking) %}
+                            {%- if not loop.first %} OR {%- endif %}
+                            {{ safe_compare('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`TGT_' ~ col.name ~ '`', col.dataType) }}
+                            {%- endfor %}
+                        ) THEN 'UPDATE_NON_TYPE2'
+                        {%- endif %}
+                        {%- endif %}
+                        ELSE 'NOCHANGE'
+                    END AS `CHANGE_TYPE`
+                FROM `SOURCE_DATA`
+                LEFT JOIN `TARGET_CURRENT` ON
+                {%- for col in columns if col.isBusinessKey %}
+                    {%- if not loop.first %} AND {%- endif %}
+                    {{ safe_equals('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`' ~ col.name ~ '`', col.dataType) }}
+                {%- endfor %}
+            ),
 
-    {% for column in columns %}
-        {% for test in column.tests %}
-            {{ test_stage(column.name + ": " + test.name) }}
-            {{ test.templateString }}
-        {% endfor %}
-    {% endfor %}
-{% endif %}
+            `MERGE_ROWS` AS (
+                /* Union of the three (or four) SCD2 row shapes: a fresh insert for a brand-new key,
+                   a new current version for a changed key, the prior version expired, and — when
+                   applicable — an in-place update for a changed plain attribute that doesn't warrant
+                   a new version. Expire and in-place update re-insert an existing (key, version) with a
+                   newer SYSTEM_UPDATE_DATE, which replaces the old row. */
+
+                /* New business keys not yet present in the target */
+                SELECT
+                {%- for col in columns %}
+                    {%- if col.isSurrogateKey %}
+                    {{ new_surrogate_key(col) }}
+                    {%- elif col.isSystemVersion %}
+                    1
+                    {%- elif col.isSystemCurrentFlag %}
+                    'Y'
+                    {%- elif col.isSystemCreateDate or col.isSystemUpdateDate %}
+                    {{ loadTimestamp }}
+                    {%- elif col.isSystemEndDate %}
+                    {{ ch_high_date(col) }}
+                    {%- else %}
+                    `{{ col.name }}`
+                    {%- endif %}
+                    AS `{{ 'TGT_' if col.isSurrogateKey else '' }}{{ col.name }}`,
+                {%- endfor %}
+                'INSERT_NEW_ROWS' AS `DML_OPERATION`
+                FROM `CHANGE_DETECTION`
+                WHERE `CHANGE_TYPE` = 'NEW'
+
+                UNION ALL
+
+                /* New current version for rows with a detected change */
+                SELECT
+                {%- for col in columns %}
+                    {%- if col.isSurrogateKey %}
+                    {{ new_surrogate_key(col) }}
+                    {%- elif col.isSystemVersion %}
+                    `{{ col.name }}` + 1
+                    {%- elif col.isSystemCurrentFlag %}
+                    'Y'
+                    {%- elif col.isSystemCreateDate or col.isSystemUpdateDate %}
+                    {{ loadTimestamp }}
+                    {%- elif col.isSystemEndDate %}
+                    {{ ch_high_date(col) }}
+                    {%- else %}
+                    `{{ col.name }}`
+                    {%- endif %}
+                    AS `{{ 'TGT_' if col.isSurrogateKey else '' }}{{ col.name }}`,
+                {%- endfor %}
+                'INSERT_NEW_SCD2_ROWS' AS `DML_OPERATION`
+                FROM `CHANGE_DETECTION`
+                WHERE `CHANGE_TYPE` = 'CHANGED'
+
+                UNION ALL
+
+                /* Expire the prior current version — expiring is an update, so SYSTEM_UPDATE_DATE is stamped with the load time */
+                SELECT
+                {%- for col in columns %}
+                    {%- if col.isSurrogateKey %}
+                    `TGT_{{ col.name }}`
+                    {%- elif col.isBusinessKey or col.isSystemVersion or col.isSystemCreateDate %}
+                    `{{ col.name }}`
+                    {%- elif col.isSystemUpdateDate %}
+                    {{ loadTimestamp }}
+                    {%- elif col.isSystemCurrentFlag %}
+                    'N'
+                    {%- elif col.isSystemEndDate %}
+                    {{ loadTimestamp }} - toIntervalMillisecond(1)
+                    {%- else %}
+                    `TGT_{{ col.name }}`
+                    {%- endif %}
+                    AS `{{ 'TGT_' if col.isSurrogateKey else '' }}{{ col.name }}`,
+                {%- endfor %}
+                'UPDATE_OLD_SCD2_ROWS' AS `DML_OPERATION`
+                FROM `CHANGE_DETECTION`
+                WHERE `CHANGE_TYPE` = 'CHANGED'
+
+                {%- if not lastModifiedComparison and nonType2AttrCount > 0 %}
+                UNION ALL
+
+                /* Rows whose plain attribute columns changed but no @isChangeTracking column did —
+                   updated in place on the current version, no new version is inserted */
+                SELECT
+                {%- for col in columns %}
+                    {%- if col.isSurrogateKey %}
+                    `TGT_{{ col.name }}`
+                    {%- elif col.isSystemCurrentFlag %}
+                    'Y'
+                    {%- elif col.isSystemUpdateDate %}
+                    {{ loadTimestamp }}
+                    {%- elif col.isSystemEndDate %}
+                    {{ ch_high_date(col) }}
+                    {%- else %}
+                    `{{ col.name }}`
+                    {%- endif %}
+                    AS `{{ 'TGT_' if col.isSurrogateKey else '' }}{{ col.name }}`,
+                {%- endfor %}
+                'UPDATE_NON_TYPE2_ROWS' AS `DML_OPERATION`
+                FROM `CHANGE_DETECTION`
+                WHERE `CHANGE_TYPE` = 'UPDATE_NON_TYPE2'
+                {%- endif %}
+            )
+            -- Final SCD2 row set; new rows and new versions get a new surrogate key, re-inserted rows keep theirs
+            SELECT
+            {%- for col in columns %}
+                {%- if col.isSurrogateKey %}
+                `TGT_{{ col.name }}`
+                {%- else %}
+                `{{ col.name }}`
+                {%- endif %}
+                AS `{{ col.name }}`
+                {%- if not loop.last %}, {%- endif %}
+            {%- endfor %}
+            FROM `MERGE_ROWS`
+        {%- else -%}
+            {# SCD Type 1: one row per business key, classified NEW/CHANGED/NOCHANGE off the business key (version/current-flag/end-date columns are optional here). #}
+            {%- set sysCreateDateCol = get_value_by_column_attribute("isSystemCreateDate") %}
+            {# No @isBusinessKey column is already caught by validate_dimension_requirements()'s "Missing Business Key" test above —
+               guard here too so a missing key fails that test with a clear message instead of crashing template rendering outright. #}
+            {%- set firstBizKeyCol = (columns | selectattr("isBusinessKey") | first).name if hasBusinessKey else none %}
+
+            {%- if isSimpleUpsert %}
+            {# @upsert: every source row is written as-is — system columns included, using whatever the SELECT/CTE put in them.
+               Only the target lookup is needed to keep an existing row's surrogate key and SYSTEM_CREATE_DATE. #}
+            {{ sourceDataCteOpen }}`SOURCE_DATA` AS (
+                SELECT {{ source.selectModifier | default('', true) }}
+                {%- for col in source.columns if not col.isSurrogateKey %}
+                    {{ get_source_transform(col) }} AS `{{ col.name }}`
+                    {%- if not loop.last %}, {%- endif %}
+                {%- endfor %}
+                {%- for col in source.columns if col.isSurrogateKey %},
+                    {{ get_source_transform(col) }} AS `SRC_{{ col.name }}`
+                {%- endfor %}
+                {{ joinclause }}
+            ),
+
+            `TARGET_CURRENT` AS (
+                SELECT
+                    1 AS `TGT_ROW_EXISTS`
+                {%- for col in columns if col.isBusinessKey %},
+                    `{{ col.name }}`
+                {%- endfor %}
+                {%- for col in columns if col.isSurrogateKey or col.isSystemCreateDate %},
+                    `{{ col.name }}` AS `TGT_{{ col.name }}`
+                {%- endfor %}
+                FROM {{ targetPath }}{{ targetFinal }}
+            )
+
+            SELECT
+            {%- for col in columns %}
+                {%- if col.isSurrogateKey %}
+                if(`TARGET_CURRENT`.`TGT_ROW_EXISTS` IS NULL, {{ new_surrogate_key(col) }}, `TARGET_CURRENT`.`TGT_{{ col.name }}`)
+                {%- elif col.isSystemCreateDate %}
+                if(`TARGET_CURRENT`.`TGT_ROW_EXISTS` IS NULL, `SOURCE_DATA`.`{{ col.name }}`, `TARGET_CURRENT`.`TGT_{{ col.name }}`)
+                {%- else %}
+                `SOURCE_DATA`.`{{ col.name }}`
+                {%- endif %}
+                AS `{{ col.name }}`
+                {%- if not loop.last %}, {%- endif %}
+            {%- endfor %}
+            FROM `SOURCE_DATA`
+            LEFT JOIN `TARGET_CURRENT` ON
+            {%- for col in columns if col.isBusinessKey %}
+                {%- if not loop.first %} AND {%- endif %}
+                {{ safe_equals('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`' ~ col.name ~ '`', col.dataType) }}
+            {%- endfor %}
+            {%- else %}
+
+            {{ sourceDataCteOpen }}`SOURCE_DATA` AS (
+                /* Incoming source rows, transformed and aliased to the target column names */
+                SELECT {{ source.selectModifier | default('', true) }}
+                {%- for col in source.columns if not (col.isSurrogateKey or col.isSystemVersion or col.isSystemCurrentFlag or col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemEndDate) %}
+                    {{ get_source_transform(col) }} AS `{{ col.name }}`
+                    {%- if not loop.last %}, {%- endif %}
+                {%- endfor %}
+                {%- for col in source.columns if col.isSurrogateKey %},
+                    {{ get_source_transform(col) }} AS `SRC_{{ col.name }}`
+                {%- endfor %}
+                {{ joinclause }}
+            ),
+
+            `TARGET_CURRENT` AS (
+                /* SCD1 = one row per key, so no current-flag filter is needed here. SYSTEM_VERSION,
+                   if present at all, rides along but is never used to detect a NEW row. */
+                SELECT
+                {%- for col in columns if not (col.isSystemCurrentFlag or col.isSystemUpdateDate or col.isSystemEndDate) %}
+                    {%- if col.isBusinessKey or col.isSystemVersion or col.isSystemCreateDate %}
+                    `{{ col.name }}`
+                    {%- else %}
+                    `{{ col.name }}` AS `TGT_{{ col.name }}`
+                    {%- endif %}
+                    {%- if not loop.last %}, {%- endif %}
+                {%- endfor %}
+                FROM {{ targetPath }}{{ targetFinal }}
+            ),
+
+            `CHANGE_DETECTION` AS (
+                /* Classify each source row as NEW / CHANGED / NOCHANGE against the current target row */
+                SELECT
+                    `SOURCE_DATA`.*,
+                    {%- for col in columns if col.isSystemVersion %}
+                    `TARGET_CURRENT`.`{{ col.name }}` AS `{{ col.name }}`,
+                    {%- endfor %}
+                    `TARGET_CURRENT`.`{{ sysCreateDateCol }}` AS `{{ sysCreateDateCol }}`,
+                    {%- for col in columns if not (col.isBusinessKey or col.isSystemVersion or col.isSystemCurrentFlag or col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemEndDate) %}
+                    `TARGET_CURRENT`.`TGT_{{ col.name }}` AS `TGT_{{ col.name }}`,
+                    {%- endfor %}
+                    CASE
+                        -- NEW is detected off the business key match, not SYSTEM_VERSION — SCD1 works
+                        -- the same whether SYSTEM_VERSION exists on this node or not.
+                        WHEN `TARGET_CURRENT`.`{{ firstBizKeyCol }}` IS NULL THEN 'NEW'
+                        {%- if lastModifiedComparison %}
+                        -- Last-modified-driven: a newer source timestamp than the current target row means a change
+                        WHEN `SOURCE_DATA`.`{{ lastModifiedColName }}` > `TARGET_CURRENT`.`TGT_{{ lastModifiedColName }}` THEN 'CHANGED'
+                        {%- else %}
+                        -- Change-tracking-driven, SCD1: no column can be marked @isChangeTracking here —
+                        -- that annotation is exactly what makes a dimension type2 — so SCD1 instead
+                        -- compares every plain attribute column for a difference.
+                        {%- set scd1AttrCols = columns | rejectattr("isBusinessKey") | rejectattr("isSurrogateKey") | rejectattr("isSystemVersion") | rejectattr("isSystemCurrentFlag") | rejectattr("isSystemCreateDate") | rejectattr("isSystemUpdateDate") | rejectattr("isSystemEndDate") | list %}
+                        {%- if scd1AttrCols | length > 0 %}
+                        WHEN (
+                            {%- for col in scd1AttrCols %}
+                            {%- if not loop.first %} OR {%- endif %}
+                            {{ safe_compare('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`TGT_' ~ col.name ~ '`', col.dataType) }}
+                            {%- endfor %}
+                        ) THEN 'CHANGED'
+                        {%- else %}
+                        -- No plain attribute columns (key-only dimension): an existing key has nothing that can change.
+                        {%- endif %}
+                        {%- endif %}
+                        ELSE 'NOCHANGE'
+                    END AS `CHANGE_TYPE`
+                FROM `SOURCE_DATA`
+                LEFT JOIN `TARGET_CURRENT` ON
+                {%- for col in columns if col.isBusinessKey %}
+                    {%- if not loop.first %} AND {%- endif %}
+                    {{ safe_equals('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`' ~ col.name ~ '`', col.dataType) }}
+                {%- endfor %}
+            )
+            /* Final SCD1 row set: NEW rows are inserted; CHANGED rows are re-inserted with a newer
+               SYSTEM_UPDATE_DATE and keep their surrogate key, SYSTEM_VERSION and SYSTEM_CREATE_DATE */
+            SELECT
+            {%- for col in columns %}
+                {%- if col.isSurrogateKey %}
+                if(`CHANGE_TYPE` = 'NEW', {{ new_surrogate_key(col) }}, `TGT_{{ col.name }}`)
+                {%- elif col.isSystemVersion %}
+                if(`CHANGE_TYPE` = 'NEW', 1, `{{ col.name }}`)
+                {%- elif col.isSystemCurrentFlag %}
+                'Y'
+                {%- elif col.isSystemCreateDate %}
+                if(`CHANGE_TYPE` = 'NEW', {{ loadTimestamp }}, `{{ sysCreateDateCol }}`)
+                {%- elif col.isSystemUpdateDate %}
+                {{ loadTimestamp }}
+                {%- elif col.isSystemEndDate %}
+                {{ ch_high_date(col) }}
+                {%- else %}
+                `{{ col.name }}`
+                {%- endif %}
+                AS `{{ col.name }}`
+                {%- if not loop.last %}, {%- endif %}
+            {%- endfor %}
+            FROM `CHANGE_DETECTION`
+            WHERE `CHANGE_TYPE` IN ('NEW', 'CHANGED')
+            {%- endif %}
+        {%- endif %}
+    {# Unmatched LEFT JOIN columns must be NULL (ClickHouse defaults them to 0 / '') for the NEW checks above #}
+    SETTINGS join_use_nulls = 1
+
+    {# == Update: delete the copies the INSERT replaced (and the previous zero key record) — per business key
+          (+ SYSTEM_VERSION for SCD2) only the row with the latest SYSTEM_UPDATE_DATE is kept == #}
+    {%- set replaceKeyCols = (columns | selectattr("isBusinessKey") | map(attribute="name") | list)
+                             + (columns | selectattr("isSystemVersion") | map(attribute="name") | list if type2Dimension else []) %}
+    {%- set updateDateCols = columns | selectattr("isSystemUpdateDate") | map(attribute="name") | list %}
+    {%- if replaceKeyCols | length > 0 and updateDateCols | length > 0 %}
+        {%- set replaceKey = '`' ~ (replaceKeyCols | join('`, `')) ~ '`' %}
+        {{ stage('Load ' + materializationType + ' Using Merge - Delete Replaced Rows') }}
+        DELETE FROM {{ targetPath }}
+        WHERE ({{ replaceKey }}, `{{ updateDateCols[0] }}`) NOT IN (
+            SELECT {{ replaceKey }}, max(`{{ updateDateCols[0] }}`)
+            FROM {{ targetPath }}
+            GROUP BY {{ replaceKey }}
+        )
+    {%- endif %}
+
+    {#== Post-SQL ==#}
+    {{ run_pre_post_sql('Post') }}
+
+{%- elif materializationType == 'view' %}
+	{{ stage('Load Skipped for View') }}
+	-- The node {{node.name}} is materialized as View. Therefore, a Load operation is not supported.
+	SELECT 1 AS INFO_MESSAGE WHERE FALSE
+{%- endif %}
+
+{# == To run data quality tests after data insertion == #}
+{{ run_tests('After') }}
