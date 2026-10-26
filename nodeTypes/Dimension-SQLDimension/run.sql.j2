@@ -33,14 +33,14 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- endif -%}
 {%- endmacro -%}
 
-{#- Value for a new row's surrogate key (ClickHouse has no identity): the column's @defaultValue when set,
-    otherwise the next numbers after the current max key. isNewRow is the condition that marks new rows;
-    the row number is counted within those rows only, so the keys have no gaps. #}
-{%- macro new_surrogate_key(col, isNewRow) -%}
+{#- Value for a new row's surrogate key (ClickHouse has no identity): the column's @defaultValue when set
+    (e.g. generateUUIDv4()), otherwise the value the node's SELECT gives it (SOURCE_DATA's SRC_<name>).
+    Existing rows always keep their key. #}
+{%- macro new_surrogate_key(col) -%}
     {%- if col.defaultValue -%}
         {{ col.defaultValue }}
     {%- else -%}
-        (SELECT greatest(ifNull(max(`{{ col.name }}`), 0), 0) FROM {{ ref_no_link(node.location.name, node.name) }}) + row_number() OVER (PARTITION BY {{ isNewRow }})
+        `SRC_{{ col.name }}`
     {%- endif -%}
 {%- endmacro -%}
 
@@ -244,6 +244,9 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {{ get_source_transform(col) }} AS `{{ col.name }}`
                     {%- if not loop.last %}, {%- endif %}
                 {%- endfor %}
+                {%- for col in source.columns if col.isSurrogateKey %},
+                    {{ get_source_transform(col) }} AS `SRC_{{ col.name }}`
+                {%- endfor %}
                 {{ joinclause }}
             ),
 
@@ -323,7 +326,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 SELECT
                 {%- for col in columns %}
                     {%- if col.isSurrogateKey %}
-                    `TGT_{{ col.name }}`
+                    {{ new_surrogate_key(col) }}
                     {%- elif col.isSystemVersion %}
                     1
                     {%- elif col.isSystemCurrentFlag %}
@@ -347,7 +350,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 SELECT
                 {%- for col in columns %}
                     {%- if col.isSurrogateKey %}
-                    `TGT_{{ col.name }}`
+                    {{ new_surrogate_key(col) }}
                     {%- elif col.isSystemVersion %}
                     `{{ col.name }}` + 1
                     {%- elif col.isSystemCurrentFlag %}
@@ -418,8 +421,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             SELECT
             {%- for col in columns %}
                 {%- if col.isSurrogateKey %}
-                {%- set isNewRow = "`DML_OPERATION` IN ('INSERT_NEW_ROWS', 'INSERT_NEW_SCD2_ROWS')" %}
-                if({{ isNewRow }}, {{ new_surrogate_key(col, isNewRow) }}, `TGT_{{ col.name }}`)
+                `TGT_{{ col.name }}`
                 {%- else %}
                 `{{ col.name }}`
                 {%- endif %}
@@ -443,6 +445,9 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {{ get_source_transform(col) }} AS `{{ col.name }}`
                     {%- if not loop.last %}, {%- endif %}
                 {%- endfor %}
+                {%- for col in source.columns if col.isSurrogateKey %},
+                    {{ get_source_transform(col) }} AS `SRC_{{ col.name }}`
+                {%- endfor %}
                 {{ joinclause }}
             ),
 
@@ -461,8 +466,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             SELECT
             {%- for col in columns %}
                 {%- if col.isSurrogateKey %}
-                {%- set isNewRow = "`TARGET_CURRENT`.`TGT_ROW_EXISTS` IS NULL" %}
-                if({{ isNewRow }}, {{ new_surrogate_key(col, isNewRow) }}, `TARGET_CURRENT`.`TGT_{{ col.name }}`)
+                if(`TARGET_CURRENT`.`TGT_ROW_EXISTS` IS NULL, {{ new_surrogate_key(col) }}, `TARGET_CURRENT`.`TGT_{{ col.name }}`)
                 {%- elif col.isSystemCreateDate %}
                 if(`TARGET_CURRENT`.`TGT_ROW_EXISTS` IS NULL, `SOURCE_DATA`.`{{ col.name }}`, `TARGET_CURRENT`.`TGT_{{ col.name }}`)
                 {%- else %}
@@ -485,6 +489,9 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 {%- for col in source.columns if not (col.isSurrogateKey or col.isSystemVersion or col.isSystemCurrentFlag or col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemEndDate) %}
                     {{ get_source_transform(col) }} AS `{{ col.name }}`
                     {%- if not loop.last %}, {%- endif %}
+                {%- endfor %}
+                {%- for col in source.columns if col.isSurrogateKey %},
+                    {{ get_source_transform(col) }} AS `SRC_{{ col.name }}`
                 {%- endfor %}
                 {{ joinclause }}
             ),
@@ -552,8 +559,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             SELECT
             {%- for col in columns %}
                 {%- if col.isSurrogateKey %}
-                {%- set isNewRow = "`CHANGE_TYPE` = 'NEW'" %}
-                if({{ isNewRow }}, {{ new_surrogate_key(col, isNewRow) }}, `TGT_{{ col.name }}`)
+                if(`CHANGE_TYPE` = 'NEW', {{ new_surrogate_key(col) }}, `TGT_{{ col.name }}`)
                 {%- elif col.isSystemVersion %}
                 if(`CHANGE_TYPE` = 'NEW', 1, `{{ col.name }}`)
                 {%- elif col.isSystemCurrentFlag %}
