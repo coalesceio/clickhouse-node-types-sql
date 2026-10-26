@@ -1,5 +1,5 @@
 fileVersion: 1
-id: 7fe7c30d-3e59-4a56-8927-f8ccb4dbb09d
+id: ef2ded82-3fcf-4db9-bca0-810ad604dc2b
 name: Nation_Test
 operation:
   database: ""
@@ -13,8 +13,8 @@ operation:
           values: []
         appliedColumnTests: {}
         columnReference:
-          columnCounter: b2eff1ca-4105-4897-9160-f827947ce4b7
-          stepCounter: 7fe7c30d-3e59-4a56-8927-f8ccb4dbb09d
+          columnCounter: 7fde6800-a98b-4bc5-a0aa-b1b74e3ca8ff
+          stepCounter: ef2ded82-3fcf-4db9-bca0-810ad604dc2b
         config: {}
         dataType: UInt32
         defaultValue: ""
@@ -31,8 +31,8 @@ operation:
           values: []
         appliedColumnTests: {}
         columnReference:
-          columnCounter: d94900e0-10a4-41be-9817-4dc8d05a089c
-          stepCounter: 7fe7c30d-3e59-4a56-8927-f8ccb4dbb09d
+          columnCounter: 8cfdbcf6-fe21-4051-822a-5e80e928b498
+          stepCounter: ef2ded82-3fcf-4db9-bca0-810ad604dc2b
         config: {}
         dataType: FixedString(25)
         defaultValue: ""
@@ -49,8 +49,8 @@ operation:
           values: []
         appliedColumnTests: {}
         columnReference:
-          columnCounter: d9ff8024-5b2c-493b-a96b-a4e65d1c52ff
-          stepCounter: 7fe7c30d-3e59-4a56-8927-f8ccb4dbb09d
+          columnCounter: 8c079ae5-afb0-4295-bee2-e793a8b4c812
+          stepCounter: ef2ded82-3fcf-4db9-bca0-810ad604dc2b
         config: {}
         dataType: UInt32
         defaultValue: ""
@@ -67,15 +67,15 @@ operation:
           values: []
         appliedColumnTests: {}
         columnReference:
-          columnCounter: abedb9da-5633-4816-a551-64a354ca3afe
-          stepCounter: 7fe7c30d-3e59-4a56-8927-f8ccb4dbb09d
+          columnCounter: fd4a81ca-74b4-400f-821c-3e12a148657e
+          stepCounter: ef2ded82-3fcf-4db9-bca0-810ad604dc2b
         config: {}
         dataType: String
         defaultValue: ""
         description: ""
         name: n_Comment
-        nativeType: String
-        nullable: false
+        nativeType: Nullable(String)
+        nullable: true
         sourceColumnReferences:
           - columnReferences: []
             transform: ""
@@ -85,8 +85,8 @@ operation:
           values: []
         appliedColumnTests: {}
         columnReference:
-          columnCounter: b49c73ca-1707-468f-b0da-fd2f849ecb54
-          stepCounter: 7fe7c30d-3e59-4a56-8927-f8ccb4dbb09d
+          columnCounter: b30af00f-e437-4a55-ab19-6c1c412a317a
+          stepCounter: ef2ded82-3fcf-4db9-bca0-810ad604dc2b
         config: {}
         dataType: DateTime64(3)
         defaultValue: ""
