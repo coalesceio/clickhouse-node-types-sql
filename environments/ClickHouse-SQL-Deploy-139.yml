@@ -6,7 +6,7 @@ mappingDefinitions:
     schema: WORKSPACE_TANVI_SOURCE
   SRC2:
     database: ""
-    schema: WORKSPACE_TANVI_SOURCE
+    schema: WORKSPACE_TANVI_SOURCE2
   TARGET:
     database: ""
     schema: WORKSPACE_TANVI_QA
