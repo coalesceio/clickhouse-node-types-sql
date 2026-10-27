@@ -1093,7 +1093,7 @@ macroString: |-
     default and comment, using the old column names. Call before alter_rename_columns_sql().
   ===========================================================================#}
   {%- macro alter_modify_columns_sql() -%}
-      {%- set ns = namespace(actions=[], removeDefaults=[]) -%}
+      {%- set ns = namespace(actions=[]) -%}
       {%- for curCol in currentState.columns -%}
           {%- set matchingCols = columns | default([]) | selectattr('id', 'equalto', curCol.id) | list -%}
 
@@ -1111,19 +1111,11 @@ macroString: |-
                   parts that are not given); removing a default is its own REMOVE DEFAULT #}
               {%- set parts = [] -%}
               {%- set typeChanged = (currentType | upper | replace(' ', '')) != (desiredType | upper | replace(' ', '')) -%}
-              {#- Nullable -> non-Nullable needs a DEFAULT to fill the existing NULLs: the desired default,
-                  else the type's own default, removed again in a second ALTER #}
-              {%- set fillsNulls = typeChanged
-                                   and (currentType | lower).startswith('nullable(')
-                                   and not (desiredType | lower).startswith('nullable(') -%}
               {%- if typeChanged -%}
                   {%- set parts = parts + [desiredType] -%}
               {%- endif -%}
-              {%- if desiredDefaultValue != none and (currentDefaultValue != desiredDefaultValue or fillsNulls) -%}
+              {%- if desiredDefaultValue != none and currentDefaultValue != desiredDefaultValue -%}
                   {%- set parts = parts + ['DEFAULT ' ~ desiredDefaultValue] -%}
-              {%- elif fillsNulls -%}
-                  {%- set parts = parts + ["DEFAULT defaultValueOfTypeName('" ~ ch_string(desiredType) ~ "')"] -%}
-                  {%- set ns.removeDefaults = ns.removeDefaults + ['MODIFY COLUMN ' ~ colName ~ ' REMOVE DEFAULT'] -%}
               {%- endif -%}
               {%- if currentDescription != desiredDescription -%}
                   {%- set parts = parts + ["COMMENT '" ~ ch_string(desiredDescription) ~ "'"] -%}
@@ -1137,16 +1129,15 @@ macroString: |-
           {%- endif -%}
       {%- endfor -%}
 
+      {#- A type change rewrites the column as a mutation; mutations_sync = 2 waits for it, so a
+          failed conversion (e.g. NULLs into a non-Nullable type) fails this stage with
+          ClickHouse's own error #}
       {%- if ns.actions | length > 0 %}
           {{ stage('Alter Column') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
           {{ ns.actions | join(', ') }}
+          SETTINGS mutations_sync = 2
           {%- set nsNodeVariables.metaDataChanged = true -%}
-      {%- endif %}
-      {%- if ns.removeDefaults | length > 0 %}
-          {{ stage('Alter Column: Remove Fill Default') }}
-          ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          {{ ns.removeDefaults | join(', ') }}
       {%- endif %}
   {%- endmacro -%}
 

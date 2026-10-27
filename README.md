@@ -52,6 +52,30 @@ Dimension load leaves the surrogate key out of its inserts, so each new row gets
   value on every query. The redeploy runs `MATERIALIZE COLUMN` after `ADD COLUMN` for every new
   column with a default, so the values are written once.
 
+## Sort key changes and `@primaryKey`
+
+ClickHouse cannot change a table's `PRIMARY KEY` or `PARTITION BY` in place. Without
+`@primaryKey`, the primary key is the whole `@orderBy`, so **any** change to `@orderBy` is a
+primary key change.
+
+On redeploy:
+
+| Change | Result |
+|---|---|
+| `@orderBy` changed, no `@primaryKey` | Table recreated |
+| `@primaryKey` changed | Table recreated |
+| `@partitionBy` changed | Table recreated |
+| Key column renamed or its type changed | Table recreated |
+| `@primaryKey` unchanged, trailing `@orderBy` terms removed | Altered in place (`MODIFY ORDER BY`) |
+| `@primaryKey` unchanged, new columns added at the end of `@orderBy` | Altered in place (`ADD COLUMN` + `MODIFY ORDER BY`) |
+
+A recreated table is created with `CREATE OR REPLACE` and its existing data is **not kept**:
+it is empty until the next run reloads it. The deploy shows a
+`Warning: Table Recreated (<reason>)` stage when this happens.
+
+To keep later sort-key changes cheap, set `@primaryKey` to the leading column(s) of
+`@orderBy` when the node is first created.
+
 ## Known limitations
 
 ### `Variant` columns in SQL nodes
