@@ -7,5 +7,5 @@ SELECT
      `T_W02_ORDER`.`n_Name` AS `w02_Name`,
      `T_W02_ORDER`.`last_Modified` AS `w02_last_Modified`
 FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`
-LEFT JOIN {{ ref('TARGET', 'T_W02_ORDER') }} `T_W02_ORDER`
+LEFT JOIN {{ ref('TARGET2', 'T_W02_ORDER') }} `T_W02_ORDER`
     ON `Nation_Test`.`n_Nationkey` = `T_W02_ORDER`.`n_Nationkey`
