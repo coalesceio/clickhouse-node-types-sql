@@ -142,7 +142,6 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- endif %}
 
     {%- if config.zeroKey is defined and hasSurrogateKey %}
-        {%- set zeroKeySurrogateValue = config.zeroKey.parameters[0] if (config.zeroKey.parameters is defined and config.zeroKey.parameters | length > 0) else '0' %}
         {%- set zeroKeyCreateDateCols = columns | selectattr("isSystemCreateDate") | list %}
         {{ stage('Load ' + materializationType + ' Using Merge - Zero Key Record') }}
             {# Re-inserted on every run: the newer SYSTEM_UPDATE_DATE replaces the previous zero record.
@@ -169,7 +168,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 SELECT
                 {%- for col in source.columns %}
                     {%- if col.isSurrogateKey %}
-                        {{ zeroKeySurrogateValue }}
+                        {{ zero_key_surrogate_value(col) }}
                     {%- elif col.isSystemCurrentFlag %}
                         'Y'
                     {%- elif col.isSystemEndDate or col.isSystemUpdateDate or col.isSystemCreateDate %}
@@ -195,7 +194,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 WHERE
                 {%- for col in columns if col.isSurrogateKey %}
                     {%- if not loop.first %} AND {%- endif %}
-                    `{{ col.name }}` = {{ zeroKeySurrogateValue }}
+                    `{{ col.name }}` = {{ zero_key_surrogate_value(col) }}
                 {%- endfor %}
             ) AS `EXISTING_ZERO`
     {%- endif %}
@@ -599,8 +598,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             )
             {%- if config.zeroKey is defined and hasSurrogateKey %}
             OR (
-                {%- for colName in surrogateKeyCols %}
-                {%- if not loop.first %} AND {%- endif %} `{{ colName }}` = {{ zeroKeySurrogateValue }}
+                {%- for col in columns if col.isSurrogateKey %}
+                {%- if not loop.first %} AND {%- endif %} `{{ col.name }}` = {{ zero_key_surrogate_value(col) }}
                 {%- endfor %})
             {%- endif %})
         {%- endset %}

@@ -97,3 +97,21 @@ toString(`c_Variant`) AS `c_Variant`,
 ```
 
 or leave the column out of the node.
+
+### Array and Map columns show as changed on every deploy
+
+Coalesce marks every column of a SQL node as nullable. ClickHouse cannot make `Array` or `Map`
+columns `Nullable`, so the node types create them as plain `Array(...)` / `Map(...)`, and
+after a deploy the deployed state records those columns as not nullable.
+
+The next plan compares the workspace (`nullable: true`) with the deployed state
+(`nullable: false`), so it lists the node as changed on every deploy, for example:
+
+```
+columns > c_array > nullable : false → true
+columns > c_map   > nullable : false → true
+```
+
+The redeploy finds nothing to alter in ClickHouse and runs only `Metadata Update-Default`, so
+the table is not affected. Until Coalesce stops marking these columns as nullable, add
+`@notNull` to `Array` and `Map` columns so the workspace matches the deployed state.
