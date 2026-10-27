@@ -140,6 +140,37 @@ the latest `SYSTEM_UPDATE_DATE` is kept).
 
 A Fact with no `@isBusinessKey` column and no `@mergeStrategy` is loaded as a plain insert.
 
+## Unique business keys (Fact and Dimension)
+
+The `@isBusinessKey` column(s) must be unique in the node's source: one row per business key
+per load. Making sure of this is the user's responsibility; the node types do not check it.
+
+If the source returns the same business key more than once, ClickHouse does not fail the load
+(Snowflake's `MERGE` would fail with *Duplicate row detected during DML action*). Both rows
+are inserted with the same `SYSTEM_UPDATE_DATE`, the clean-up keeps the row(s) with the latest
+`SYSTEM_UPDATE_DATE` per key, and so **both copies stay in the target**.
+
+De-duplicate the data before it is loaded, for example:
+
+- In the node's SELECT, with `QUALIFY` or `LIMIT 1 BY`:
+
+  ```sql
+  SELECT ...
+  FROM {{ ref('SRC', 'ORDERS') }} `ORDERS`
+  QUALIFY row_number() OVER (PARTITION BY `order_id` ORDER BY `last_modified` DESC) = 1
+  ```
+
+  ```sql
+  SELECT ...
+  FROM {{ ref('SRC', 'ORDERS') }} `ORDERS`
+  ORDER BY `order_id`, `last_modified` DESC
+  LIMIT 1 BY `order_id`
+  ```
+
+- With a uniqueness test on the business key column, run before the load, so the run fails
+  instead of loading duplicates.
+- With a duplicate check or clean-up in `@preSQL`.
+
 `upsert` is not supported: without `MERGE` there is no separate upsert behaviour in ClickHouse.
 Use `changeTracking`.
 
