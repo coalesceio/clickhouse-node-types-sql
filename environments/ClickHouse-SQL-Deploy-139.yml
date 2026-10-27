@@ -12,6 +12,6 @@ mappingDefinitions:
     schema: WORKSPACE_TANVI_QA
   TARGET2:
     database: ""
-    schema: WORKSPACE_TANVI_QA
+    schema: WORKSPACE_TANVI_QA2
 name: ClickHouse-SQL-Deploy
 type: Environment
