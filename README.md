@@ -40,10 +40,24 @@ ClickHouse writes an `INSERT ... SELECT` in blocks, so an insert that fails part
 earlier blocks in the table. A `not_null` test run before the load catches NULLs before
 anything is written.
 
-## UUID surrogate keys
+## Surrogate keys (Dimension)
 
-A UUID surrogate key is a `UUID` column with a default value of `generateUUIDv4()`; the
-Dimension load leaves the surrogate key out of its inserts, so each new row gets a new UUID.
+ClickHouse has no identity columns. The surrogate key is a plain column (never `Nullable`), and
+the Dimension load gives a **new row or a new SCD Type 2 version** its key from the column's
+`@defaultValue`. Rows that are re-inserted by the load (an expired version, an in-place update)
+keep the key they already have.
+
+The recommended key is a UUID, which is what a new Dimension's generated SELECT uses:
+
+```sql
+generateUUIDv4() AS `DIM_CUSTOMER_KEY` @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")
+```
+
+- A `UUID` surrogate key **must** have `@defaultValue("generateUUIDv4()")`; the deploy and run
+  fail validation without it.
+- Any other surrogate key without `@defaultValue` takes the value the SELECT computes for it, so
+  the SELECT must give every new row (and every new SCD Type 2 version) a unique key. A
+  validation warning is shown.
 
 - **Zero key record:** a `UUID` surrogate key gets the nil UUID
   `00000000-0000-0000-0000-000000000000`; other surrogate keys get `surrogateKeyValue`.
@@ -78,9 +92,16 @@ To keep later sort-key changes cheap, set `@primaryKey` to the leading column(s)
 
 `@orderBy` and `@primaryKey` are written to ClickHouse as given and are not checked by the
 node types. ClickHouse itself rejects invalid keys, for example a `@primaryKey` that is not the
-leading terms of `@orderBy`, or a key that names a column the node no longer has. A rejected
-create or redeploy leaves the existing table unchanged (a redeploy fails on the clone or on
-`CREATE OR REPLACE`, before anything replaces the live table).
+leading terms of `@orderBy`, or a key that names a column the node no longer has. What a
+rejected key leaves behind:
+
+- **Table redeploy, altered in place:** the error happens on the clone, so the live table is
+  unchanged.
+- **Table redeploy, recreated:** `CREATE OR REPLACE` fails, so the existing table and its data
+  are kept. The `Warning: Table Recreated` stage still shows, because it runs before the
+  recreate.
+- **View changed to a table:** the view is dropped first, so after a failed `CREATE` the node
+  has no object until the key is fixed and redeployed.
 
 ## Column type changes
 

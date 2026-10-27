@@ -421,23 +421,15 @@ macroString: |-
           {# No @mergeStrategy given — always default to changeTracking, regardless of which tracking columns are present. #}
           {%- set mergeStrategy = 'changetracking' -%}
       {%- endif -%}
-      {%- set isSimpleUpsert = mergeStrategy == 'upsert' -%}
       {%- set isLastModifiedStrategy = mergeStrategy == 'lastmodified' -%}
       {%- set isChangeTrackingStrategy = mergeStrategy == 'changetracking' %}
 
       {# An unrecognised strategy would otherwise fall through to change tracking without any warning. #}
-      {%- if not (isSimpleUpsert or isLastModifiedStrategy or isChangeTrackingStrategy) %}
-          {%- set reason = '@mergeStrategy("' ~ mergeStrategyRaw ~ '") is not a recognised strategy. Use "changeTracking", "lastModified" or "upsert".' %}
+      {%- if not (isLastModifiedStrategy or isChangeTrackingStrategy) %}
+          {%- set reason = '@mergeStrategy("' ~ mergeStrategyRaw ~ '") is not a recognised strategy. Use "changeTracking" or "lastModified".' %}
           {{ test_stage('Invalid configuration: mergeStrategy', false) }}
           -- {{ reason }}
           {{ fail_sql(hardFail, 'Invalid configuration: mergeStrategy') }}
-      {%- endif -%}
-
-      {# These cross-checks only apply when @mergeStrategy is set explicitly, since an inferred strategy can't conflict with itself. #}
-      {%- if mergeStrategyExplicit and isSimpleUpsert and (lastModifiedCount > 0 or changeTrackingCount > 0) %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
-          -- @mergeStrategy("upsert") performs no change detection, so @isChangeTracking/@lastModifiedTracking columns are never read. Remove them, or switch mergeStrategy to "changeTracking"/"lastModified" to use them.
-          SELECT 1
       {%- endif -%}
 
       {%- if isChangeTrackingStrategy and lastModifiedCount > 0 %}
@@ -491,10 +483,6 @@ macroString: |-
           {%- endif -%}
       {%- else -%}
           {%- set type2Dimension = false -%}
-      {%- endif -%}
-      {%- if isSimpleUpsert %}
-          {# @upsert always forces plain SCD1, no matter what @lastModifiedTracking/@isChangeTracking say. #}
-          {%- set type2Dimension = false -%}
       {%- endif %}
 
       {# Collect every missing/misconfigured system column here so one run reports them all together instead of one at a time. #}
@@ -518,21 +506,21 @@ macroString: |-
           }] -%}
       {%- endif -%}
 
-      {# New rows get the surrogate key's @defaultValue; without one the load numbers them max(key) + row_number(), which a UUID key cannot do. #}
+      {# New rows get the surrogate key's @defaultValue; without one they take the value the SELECT computes for the key column. #}
       {%- for col in columns if col.isSurrogateKey and not col.defaultValue -%}
           {%- set isUuidKey = 'uuid' in (col.dataType | lower) -%}
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': isUuidKey,
               'annotation': '@defaultValue on ' ~ col.name,
               'example': 'generateUUIDv4() AS `' ~ col.name ~ '` @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")',
-              'reason': ('A UUID surrogate key needs @defaultValue("generateUUIDv4()"): new rows take their key from it, and the max(key) + 1 numbering used without one does not work on UUIDs.'
+              'reason': ('A UUID surrogate key needs @defaultValue("generateUUIDv4()"): new rows and new SCD Type 2 versions take their key from it.'
                          if isUuidKey else
-                         'Without @defaultValue, new rows are numbered max(key) + row_number(), which reads the table on every load and is not safe for concurrent loads. @defaultValue("generateUUIDv4()") on a UUID column avoids both.')
+                         'Without @defaultValue, new rows and new SCD Type 2 versions take the value the SELECT computes for ' ~ col.name ~ ', so the SELECT must give every new row a unique key. @defaultValue("generateUUIDv4()") on a UUID column does this for you.')
           }] -%}
       {%- endfor -%}
 
       {%- set hasSystemCreateDate = columns | selectattr("isSystemCreateDate") | list | length > 0 -%}
-      {%- if not isSimpleUpsert and not hasSystemCreateDate -%}
+      {%- if not hasSystemCreateDate -%}
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': true,
               'annotation': '@isSystemCreateDate',
@@ -543,7 +531,7 @@ macroString: |-
 
       {# SYSTEM_UPDATE_DATE is required for both SCD Type 1 and Type 2. #}
       {%- set hasSystemUpdateDate = columns | selectattr("isSystemUpdateDate") | list | length > 0 -%}
-      {%- if not isSimpleUpsert and not hasSystemUpdateDate -%}
+      {%- if not hasSystemUpdateDate -%}
           {%- if type2Dimension -%}
               {%- set missingSystemColumns.items = missingSystemColumns.items + [{
                   'required': true,
@@ -671,22 +659,21 @@ macroString: |-
           {# No @mergeStrategy given — always default to changeTracking, regardless of which tracking columns are present. #}
           {%- set mergeStrategy = 'changetracking' -%}
       {%- endif -%}
-      {%- set isSimpleUpsert = mergeStrategy == 'upsert' -%}
       {%- set isLastModifiedStrategy = mergeStrategy == 'lastmodified' -%}
       {%- set isChangeTrackingStrategy = mergeStrategy == 'changetracking' -%}
       {%- set isAllColumnMatch = mergeStrategy == 'allcolumnmatch' %}
 
       {# An unrecognised strategy would otherwise fall through to change tracking without any warning. #}
-      {%- if not (isSimpleUpsert or isLastModifiedStrategy or isChangeTrackingStrategy or isAllColumnMatch) %}
-          {%- set reason = '@mergeStrategy("' ~ mergeStrategyRaw ~ '") is not a recognised strategy. Use "changeTracking", "lastModified", "upsert" or "allColumnMatch".' %}
+      {%- if not (isLastModifiedStrategy or isChangeTrackingStrategy or isAllColumnMatch) %}
+          {%- set reason = '@mergeStrategy("' ~ mergeStrategyRaw ~ '") is not a recognised strategy. Use "changeTracking", "lastModified" or "allColumnMatch".' %}
           {{ test_stage('Invalid configuration: mergeStrategy', false) }}
           -- {{ reason }}
           {{ fail_sql(hardFail, 'Invalid configuration: mergeStrategy') }}
       {%- endif -%}
 
-      {# @mergeStrategy always takes priority. An explicit changeTracking/lastModified/upsert merges on the business key, so a missing @isBusinessKey stops the load.
+      {# @mergeStrategy always takes priority. An explicit changeTracking/lastModified merges on the business key, so a missing @isBusinessKey stops the load.
          Not for allColumnMatch, which needs no @isBusinessKey — every column is the match key. An unrecognised value is already flagged above. #}
-      {%- if not hasBusinessKey and mergeStrategyExplicit and (isSimpleUpsert or isLastModifiedStrategy or isChangeTrackingStrategy) %}
+      {%- if not hasBusinessKey and mergeStrategyExplicit and (isLastModifiedStrategy or isChangeTrackingStrategy) %}
           {%- set reason = '@mergeStrategy("' ~ mergeStrategyRaw ~ '") merges on the business key, but no column is marked @isBusinessKey. Mark the business key column(s) with @isBusinessKey, or remove @mergeStrategy to load the node as a plain insert.' %}
           {{ test_stage('Invalid configuration: No Business Key', false) }}
           -- {{ reason }}
@@ -710,13 +697,6 @@ macroString: |-
       {%- if isAllColumnMatch and lastModifiedCount > 0 %}
           {{ test_stage('Invalid configuration: mergeStrategy', true) }}
           -- @mergeStrategy("allColumnMatch") performs no change detection, so @lastModifiedTracking columns are never read. Remove them, or switch mergeStrategy to "lastModified" to use them.
-          SELECT 1
-      {%- endif -%}
-
-      {# These cross-checks only apply when @mergeStrategy is set explicitly, since an inferred strategy can't conflict with itself. #}
-      {%- if hasBusinessKey and mergeStrategyExplicit and isSimpleUpsert and lastModifiedCount > 0 %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
-          -- @mergeStrategy("upsert") performs no change detection, so @lastModifiedTracking columns are never read. Remove them, or switch mergeStrategy to "lastModified" to use them.
           SELECT 1
       {%- endif -%}
 
@@ -745,7 +725,7 @@ macroString: |-
       {%- set missingSystemColumns = namespace(items=[]) %}
 
       {%- set hasSystemCreateDate = columns | selectattr("isSystemCreateDate") | list | length > 0 -%}
-      {%- if hasBusinessKey and not isSimpleUpsert and not isAllColumnMatch and not hasSystemCreateDate -%}
+      {%- if hasBusinessKey and not isAllColumnMatch and not hasSystemCreateDate -%}
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': true,
               'annotation': '@isSystemCreateDate',
@@ -755,7 +735,7 @@ macroString: |-
       {%- endif %}
 
       {%- set hasSystemUpdateDate = columns | selectattr("isSystemUpdateDate") | list | length > 0 -%}
-      {%- if hasBusinessKey and not isSimpleUpsert and not isAllColumnMatch and not hasSystemUpdateDate -%}
+      {%- if hasBusinessKey and not isAllColumnMatch and not hasSystemUpdateDate -%}
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': true,
               'annotation': '@isSystemUpdateDate',
