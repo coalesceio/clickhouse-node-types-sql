@@ -63,7 +63,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 {# Validate: @primaryKey must be the leading terms of @orderBy #}
                 {{ validate_order_by() }}
 
-                {# Warning: Table Recreated -> Recreate Table (-> Delete Table at the old path when renamed/moved) #}
+                {# Warning: Table Recreated -> Recreate Table (-> Drop Table at the old path when renamed/moved) #}
                 {{ rebuild_table_sql() }}
 
             {%- else %}
@@ -80,10 +80,10 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {# Rename Column (matched by id; a column without @id has its name as id, so it is dropped + added instead) #}
                     {{ alter_rename_columns_sql() }}
 
-                    {# Modify Order By (trailing terms removed): its own ALTER, before Delete Column #}
+                    {# Modify Order By (trailing terms removed): its own ALTER, before Drop Column #}
                     {{ alter_order_by_sql() }}
 
-                    {# Delete Column #}
+                    {# Drop Column #}
                     {{ alter_drop_columns_sql() }}
 
                     {# Modify Settings: MODIFY / RESET SETTING #}
@@ -94,7 +94,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
                 {%- endset %}
 
-                {# Clone Table -> alters -> Swap Cloned Table (or Rename Table when renamed/moved) -> Delete Table #}
+                {# Clone Table -> alters -> Swap Cloned Table -> Drop Cloned Table (or Rename Table -> Drop Table when renamed/moved) #}
                 {{ alter_clone_swap_sql(alterSql) }}
 
             {%- endif %}

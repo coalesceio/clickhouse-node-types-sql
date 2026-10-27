@@ -1023,13 +1023,13 @@ macroString: |-
 
   {#===========================================================================
     Table redeploy (base Work clone pattern): Clone Table -> alter_ stages on the clone
-    -> Swap Cloned Table (or Rename Table when renamed/moved) -> Delete Table.
+    -> Swap Cloned Table + Drop Cloned Table (or Rename Table + Drop Table when renamed/moved).
     Views are recreated when their definition changes.
   ===========================================================================#}
 
   {#===========================================================================
-    object_drop_sql(): "Drop <type>" when the node is deleted or the type changed. A deleted
-    table also drops its leftover clone ("Delete Table"). A view that moved/renamed is handled
+    object_drop_sql(): "Drop Table" / "Drop View" when the node is deleted or the type changed. A
+    deleted table also drops its leftover clone ("Drop Cloned Table"). A view that moved/renamed is handled
     by view_redeploy_sql() (renamed, or dropped and recreated).
   ===========================================================================#}
   {%- macro object_drop_sql() -%}
@@ -1039,12 +1039,12 @@ macroString: |-
           {%- set dropCurrent = nodeDeleted or currentMatType != nsNodeVariables.desiredMatType -%}
 
           {%- if nodeDeleted and currentMatType != 'view' %}
-              {{ stage('Delete Table') }}
+              {{ stage('Drop Cloned Table') }}
               DROP TABLE IF EXISTS {{ nsNodeVariables.cloneObjectNameFullPath }}
           {%- endif %}
 
           {%- if dropCurrent %}
-              {{ stage('Drop ' + currentMatType) }}
+              {{ stage('Drop ' + (currentMatType | capitalize)) }}
               DROP {{ drop_materialization(currentMatType) }} {{ nsNodeVariables.curObjectNameFullPath }}
               {%- set nsNodeVariables.metaDataChanged = true -%}
           {%- endif %}
@@ -1208,7 +1208,7 @@ macroString: |-
   {#===========================================================================
     alter_order_by_sql(): "Modify Order By" — MODIFY ORDER BY with the new sort key, when it
     changed and alter_add_columns_sql() did not already do it. Its own ALTER, after column
-    adds/renames and before Delete Column: ClickHouse refuses to drop a column in the same
+    adds/renames and before Drop Column: ClickHouse refuses to drop a column in the same
     ALTER that takes it out of the sort key. Only the changes set_rebuild_reason() lets through
     (trailing terms removed, new columns added) reach here; others recreate the table.
   ===========================================================================#}
@@ -1275,11 +1275,11 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_drop_columns_sql(): "Delete Column" — one ALTER with a DROP COLUMN per removed column.
+    alter_drop_columns_sql(): "Drop Column" — one ALTER with a DROP COLUMN per removed column.
   ===========================================================================#}
   {%- macro alter_drop_columns_sql() -%}
       {%- if nsNodeVariables.droppedColumns | length > 0 %}
-          {{ stage('Delete Column') }}
+          {{ stage('Drop Column') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
           DROP COLUMN {{ nsNodeVariables.droppedColumns | join(', DROP COLUMN ') }}
           {%- set nsNodeVariables.metaDataChanged = true -%}
@@ -1328,7 +1328,7 @@ macroString: |-
         in a current key                                                -> recreate
       - SETTINGS: MODIFY / RESET SETTING always works                   -> alter_settings_sql()
       - dropping a key column: allowed once it has left the key (Modify
-        Order By runs before Delete Column); a dropped column still used
+        Order By runs before Drop Column); a dropped column still used
         in a key is rejected by validate_key_columns()
     Terms are compared ignoring spaces, backticks and case. Call before choosing between
     rebuild_table_sql() and the alters.
@@ -1420,7 +1420,7 @@ macroString: |-
       "Warning: Table Recreated (<reason>)" — a non-failing test stage that records why;
       "Recreate Table" — CREATE OR REPLACE the table with the desired definition. Its existing
       data is NOT copied: the table is empty until the next run loads it;
-      "Delete Table" — when the node was renamed/moved, DROP the table at the old path.
+      "Drop Table" — when the node was renamed/moved, DROP the table at the old path.
     No clone and no alters. '' when there is no reason.
   ===========================================================================#}
   {%- macro rebuild_table_sql() -%}
@@ -1436,7 +1436,7 @@ macroString: |-
 
           {%- if nsNodeVariables.curObjectNameFullPath != nsNodeVariables.desObjectNameFullPath %}
 
-          {{ stage('Delete Table') }}
+          {{ stage('Drop Table') }}
           DROP TABLE IF EXISTS {{ nsNodeVariables.curObjectNameFullPath }}
           {%- endif %}
           {%- set nsNodeVariables.metaDataChanged = true -%}
@@ -1445,7 +1445,7 @@ macroString: |-
 
   {#===========================================================================
     alter_clone_swap_sql(alterSql): wraps the alters in Clone Table (CREATE OR REPLACE ... CLONE AS) ->
-    alterSql -> Swap Cloned Table + Delete Table, or Rename Table + Delete Table when
+    alterSql -> Swap Cloned Table + Drop Cloned Table, or Rename Table + Drop Table when
     renamed/moved. '' when there is nothing to alter and the path is unchanged.
     ClickHouse: CLONE AS copies schema + data (all partitions attached), no grants are copied;
     EXCHANGE TABLES is atomic on Atomic/Shared databases; CLONE AS is not supported in a
@@ -1469,14 +1469,14 @@ macroString: |-
               RENAME TABLE {{ clonePath }}
               TO {{ nsNodeVariables.desObjectNameFullPath }}
 
-              {{ stage('Delete Table') }}
+              {{ stage('Drop Table') }}
               DROP TABLE IF EXISTS {{ currentPath }}
           {%- else %}
               {{ stage('Swap Cloned Table') }}
               EXCHANGE TABLES {{ clonePath }}
               AND {{ currentPath }}
 
-              {{ stage('Delete Table') }}
+              {{ stage('Drop Cloned Table') }}
               DROP TABLE IF EXISTS {{ clonePath }}
           {%- endif %}
           {%- set nsNodeVariables.metaDataChanged = true -%}
