@@ -158,8 +158,6 @@ macroString: |-
       rebuildReason                         why a table redeploy rebuilds instead of altering, '' when it alters
                                             (set by set_rebuild_reason())
       orderByChanged / orderByAltered       redeploy: the sort key changed / a MODIFY ORDER BY was emitted
-      useCloudTableDefaults                 set by a node type (Work, Fact, Dimension) to leave out ENGINE = MergeTree and
-                                            ORDER BY tuple() when not annotated — ClickHouse Cloud adds them
       metaDataChanged                      set by the redeploy macros
   ===========================================================================#}
   {%- set nsNodeVariables = namespace(desiredMatType = "",
@@ -181,7 +179,6 @@ macroString: |-
                                       rebuildReason = "",
                                       orderByChanged = false,
                                       orderByAltered = false,
-                                      useCloudTableDefaults = false,
                                       metaDataChanged = false) -%}
   {{- initialize_node_variables(nsNodeVariables) -}}
 
@@ -901,39 +898,10 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    ch_order_by(): the ClickHouse sort/primary key clauses from the node-level @orderBy / @primaryKey:
-      ORDER BY (<terms>) [PRIMARY KEY (<terms>)]
-    PRIMARY KEY is written whenever @primaryKey differs from ORDER BY (when they are the same, or
-    only @primaryKey is set, ClickHouse uses ORDER BY as the primary key). It is written as given:
-    a primary key that is not the leading terms of ORDER BY is rejected by ClickHouse itself.
-    ORDER BY tuple() when neither annotation is set — omitted when nsNodeVariables.useCloudTableDefaults
-    is set (ClickHouse Cloud adds ORDER BY tuple() itself).
-  ===========================================================================#}
-  {%- macro ch_order_by() -%}
-      {%- if nsNodeVariables.desiredOrderBy -%}
-          ORDER BY ({{ nsNodeVariables.desiredOrderBy | join(', ') }})
-          {%- if nsNodeVariables.desiredPrimaryKey
-                 and (nsNodeVariables.desiredPrimaryKey | join(',') | replace(' ', '') | replace('`', '') | lower)
-                     != (nsNodeVariables.desiredOrderBy | join(',') | replace(' ', '') | replace('`', '') | lower) %}
-          PRIMARY KEY ({{ nsNodeVariables.desiredPrimaryKey | join(', ') }})
-          {%- endif %}
-      {%- elif not nsNodeVariables.useCloudTableDefaults -%}
-          ORDER BY tuple()
-      {%- endif -%}
-  {%- endmacro -%}
-
-  {#===========================================================================
-    ch_storage_clauses(): the MergeTree clauses after ENGINE, in the order ClickHouse requires:
-      [PARTITION BY <term> | (<terms>)]  ORDER BY ... [PRIMARY KEY ...]  [SETTINGS <settings>]
-    PARTITION BY from @partitionBy (one term as-is, several as a tuple); ORDER BY / PRIMARY KEY
-    from ch_order_by(). SETTINGS from @settings, plus allow_nullable_key = 1 when there is a sort
-    or partition key (so nullable columns can be key terms) unless @settings sets it.
-    A table COMMENT goes after these clauses.
-  ===========================================================================#}
-  {#===========================================================================
     ch_effective_settings(settings, hasKey, ns): appends to ns.items the "name = value" settings a
     table gets: @settings, with allow_nullable_key = 1 first when the table has a sort or partition
-    key (hasKey) and @settings does not set it. Used by the CREATE and by alter_settings_sql().
+    key (hasKey, so nullable columns can be key terms) and @settings does not set it. Used by the
+    CREATE in each node type's create template and by alter_settings_sql().
   ===========================================================================#}
   {%- macro ch_effective_settings(settings, hasKey, ns) -%}
       {%- set nsSet = namespace(nullableKeySet=false) -%}
@@ -946,49 +914,6 @@ macroString: |-
           {%- set ns.items = ns.items + ['allow_nullable_key = 1'] -%}
       {%- endif -%}
       {%- set ns.items = ns.items + settings -%}
-  {%- endmacro -%}
-
-  {%- macro ch_storage_clauses() -%}
-      {%- set partitionBy = nsNodeVariables.desiredPartitionBy -%}
-      {%- set nsSettings = namespace(items=[]) -%}
-      {{- ch_effective_settings(nsNodeVariables.desiredSettings, nsNodeVariables.desiredOrderBy or partitionBy, nsSettings) -}}
-
-      {%- if partitionBy | length == 1 -%}
-          PARTITION BY {{ partitionBy[0] }}
-      {% elif partitionBy | length > 1 -%}
-          PARTITION BY ({{ partitionBy | join(', ') }})
-      {% endif -%}
-      {{ ch_order_by() }}
-      {%- if nsSettings.items %}
-          SETTINGS {{ nsSettings.items | join(', ') }}
-      {%- endif -%}
-  {%- endmacro -%}
-
-  {#===========================================================================
-    ch_table_definition_sql(): everything after CREATE ... TABLE <path> for the desired table:
-    the column list, ENGINE, the storage clauses and the table COMMENT. Used by the first
-    create and by the redeploy rebuild, so both write the same table.
-    Column types come from ch_column_type(), with nullability as Nullable(...) rather than
-    NULL / NOT NULL keywords (which ClickHouse rejects on types that cannot be Nullable).
-    With nsNodeVariables.useCloudTableDefaults set (Work, Fact, Dimension), ENGINE is not written:
-    ClickHouse Cloud adds ENGINE = SharedMergeTree(...) itself. Otherwise ENGINE = MergeTree.
-  ===========================================================================#}
-  {%- macro ch_table_definition_sql() -%}
-      (
-          {%- for col in columns %}
-              `{{ col.name }}` {{ ch_column_type(col) }}
-              {%- if col.defaultValue %} DEFAULT {{ col.defaultValue }}{% endif %}
-              {%- if col.description | trim | length > 0 %} COMMENT '{{ ch_string(col.description) }}'{% endif %}
-              {%- if not loop.last -%}, {%- endif %}
-          {%- endfor %}
-      )
-      {%- if not nsNodeVariables.useCloudTableDefaults %}
-      ENGINE = MergeTree
-      {%- endif %}
-      {{ ch_storage_clauses() }}
-      {%- if node.description | trim | length > 0 %}
-      COMMENT '{{ ch_string(node.description) }}'
-      {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================
@@ -1305,7 +1230,7 @@ macroString: |-
         Order By runs before Drop Column); a dropped column still used
         in a key is rejected by ClickHouse on the clone (live table untouched)
     Terms are compared ignoring spaces, backticks and case. Call before choosing between
-    rebuild_table_sql() and the alters.
+    the rebuild (Recreate Table, in the create template) and the alters.
   ===========================================================================#}
   {%- macro set_rebuild_reason() -%}
       {%- set ns = namespace(reasons=[]) -%}
@@ -1367,34 +1292,6 @@ macroString: |-
           {%- endif -%}
       {%- endfor -%}
       {%- set nsNodeVariables.rebuildReason = ns.reasons | join('; ') -%}
-  {%- endmacro -%}
-
-  {#===========================================================================
-    rebuild_table_sql(): when set_rebuild_reason() found a reason —
-      "Warning: Table Recreated (<reason>)" — a non-failing test stage that records why;
-      "Recreate Table" — CREATE OR REPLACE the table with the desired definition. Its existing
-      data is NOT copied: the table is empty until the next run loads it;
-      "Drop Table" — when the node was renamed/moved, DROP the table at the old path.
-    No clone and no alters. '' when there is no reason.
-  ===========================================================================#}
-  {%- macro rebuild_table_sql() -%}
-      {%- if nsNodeVariables.rebuildReason %}
-          {{ test_stage('Warning: Table Recreated (' ~ nsNodeVariables.rebuildReason ~ ')', true) }}
-          -- {{ node.name }} cannot be altered in place ({{ nsNodeVariables.rebuildReason }}): ClickHouse cannot ALTER a table's PARTITION BY or PRIMARY KEY, changes ORDER BY only by removing trailing terms or adding new columns, and cannot rename or retype a column used in a key.
-          -- The table is recreated with CREATE OR REPLACE. Its existing data is lost; it stays empty until the next run reloads it.
-          {{ fail_sql(false) }}
-
-          {{ stage('Recreate Table') }}
-          CREATE OR REPLACE TABLE {{ nsNodeVariables.desObjectNameFullPath }}
-          {{ ch_table_definition_sql() }}
-
-          {%- if nsNodeVariables.curObjectNameFullPath != nsNodeVariables.desObjectNameFullPath %}
-
-          {{ stage('Drop Table') }}
-          DROP TABLE IF EXISTS {{ nsNodeVariables.curObjectNameFullPath }}
-          {%- endif %}
-          {%- set nsNodeVariables.metaDataChanged = true -%}
-      {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================

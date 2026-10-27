@@ -15,10 +15,6 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 {%- set desiredMatType = nsNodeVariables.desiredMatType %}
 {%- set currentMatType = nsNodeVariables.currentMatType %}
 
-{#- Fact tables leave out ENGINE = MergeTree and ORDER BY tuple(): ClickHouse Cloud adds them
-    (ENGINE = SharedMergeTree(...), ORDER BY tuple()) when they are not written #}
-{%- set nsNodeVariables.useCloudTableDefaults = true %}
-
 {%- if desiredState %}
 
     {# Validate: the materialization type must be table or view (ClickHouse has no transient tables) #}
@@ -41,12 +37,51 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {# Drop the current object if it was another type (a table rename/move is cloned to the new path) #}
         {{ object_drop_sql() }}
 
+        {# CreateSQL for Table, used by the first create and by the rebuild so both write the same table.
+           ClickHouse Cloud adds ENGINE = SharedMergeTree(...) and ORDER BY tuple() when they are not written.
+           Column types from ch_column_type(): Nullable(<type>) unless the column is not null.
+           @orderBy / @primaryKey are written as given (PRIMARY KEY only when it differs from ORDER BY);
+           ClickHouse rejects an invalid key itself. SETTINGS adds allow_nullable_key = 1 when there is a
+           sort or partition key, unless @settings sets it. #}
+        {%- set partitionBy = nsNodeVariables.desiredPartitionBy %}
+        {%- set orderBy = nsNodeVariables.desiredOrderBy %}
+        {%- set primaryKey = nsNodeVariables.desiredPrimaryKey %}
+        {%- set nsSettings = namespace(items=[]) %}
+        {{- ch_effective_settings(nsNodeVariables.desiredSettings, orderBy or partitionBy, nsSettings) }}
+        {%- set createTableSql %}
+            CREATE OR REPLACE TABLE {{ nsNodeVariables.desObjectNameFullPath }}
+            (
+                {%- for col in columns %}
+                `{{ col.name }}` {{ ch_column_type(col) }}
+                {%- if col.defaultValue %} DEFAULT {{ col.defaultValue }}{% endif %}
+                {%- if col.description | trim | length > 0 %} COMMENT '{{ ch_string(col.description) }}'{% endif %}
+                {%- if not loop.last %},{% endif %}
+                {%- endfor %}
+            )
+            {%- if partitionBy | length == 1 %}
+            PARTITION BY {{ partitionBy[0] }}
+            {%- elif partitionBy | length > 1 %}
+            PARTITION BY ({{ partitionBy | join(', ') }})
+            {%- endif %}
+            {%- if orderBy %}
+            ORDER BY ({{ orderBy | join(', ') }})
+            {%- if primaryKey and (primaryKey | join(',') | replace(' ', '') | replace('`', '') | lower)
+                                   != (orderBy | join(',') | replace(' ', '') | replace('`', '') | lower) %}
+            PRIMARY KEY ({{ primaryKey | join(', ') }})
+            {%- endif %}
+            {%- endif %}
+            {%- if nsSettings.items %}
+            SETTINGS {{ nsSettings.items | join(', ') }}
+            {%- endif %}
+            {%- if node.description | trim | length > 0 %}
+            COMMENT '{{ ch_string(node.description) }}'
+            {%- endif %}
+        {%- endset %}
+
         {%- if currentState is not defined or currentMatType != desiredMatType %}
 
-            {# CreateSQL for Table, sorted by @orderBy / @primaryKey, with @partitionBy and @settings when set. #}
             {{ stage('Create ' + desiredMatType) }}
-            CREATE OR REPLACE TABLE {{ nsNodeVariables.desObjectNameFullPath }}
-            {{ ch_table_definition_sql() }}
+            {{ createTableSql }}
 
         {%- elif currentState is defined and currentState != desiredState and currentMatType == desiredMatType %}
 
@@ -56,8 +91,21 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             {{ set_rebuild_reason() }}
             {%- if nsNodeVariables.rebuildReason %}
 
-                {# Warning: Table Recreated -> Recreate Table (-> Drop Table at the old path when renamed/moved) #}
-                {{ rebuild_table_sql() }}
+                {{ test_stage('Warning: Table Recreated (' ~ nsNodeVariables.rebuildReason ~ ')', true) }}
+                -- {{ node.name }} cannot be altered in place ({{ nsNodeVariables.rebuildReason }}): ClickHouse cannot ALTER a table's PARTITION BY or PRIMARY KEY, changes ORDER BY only by removing trailing terms or adding new columns, and cannot rename or retype a column used in a key.
+                -- The table is recreated with CREATE OR REPLACE. Its existing data is lost; it stays empty until the next run reloads it.
+                {{ fail_sql(false) }}
+
+                {{ stage('Recreate Table') }}
+                {{ createTableSql }}
+
+                {# Renamed / moved: drop the table at the old path #}
+                {%- if nsNodeVariables.curObjectNameFullPath != nsNodeVariables.desObjectNameFullPath %}
+
+                {{ stage('Drop Table') }}
+                DROP TABLE IF EXISTS {{ nsNodeVariables.curObjectNameFullPath }}
+                {%- endif %}
+                {%- set nsNodeVariables.metaDataChanged = true %}
 
             {%- else %}
 
