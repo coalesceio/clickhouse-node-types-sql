@@ -575,17 +575,42 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     SETTINGS join_use_nulls = 1
 
     {# == Update: delete the copies the INSERT replaced (and the previous zero key record) — per business key
-          (+ SYSTEM_VERSION for SCD2) only the row with the latest SYSTEM_UPDATE_DATE is kept == #}
-    {%- set replaceKeyCols = (columns | selectattr("isBusinessKey") | map(attribute="name") | list)
-                             + (columns | selectattr("isSystemVersion") | map(attribute="name") | list if type2Dimension else []) %}
+          (+ SYSTEM_VERSION for SCD2, + the surrogate key, which keeps the zero record apart from a real row with
+          the same business key value) only the row with the latest SYSTEM_UPDATE_DATE is kept.
+          Only this run's business keys (and the zero record) can have replaced copies, so the DELETE and its
+          subquery read just those keys instead of the whole table == #}
+    {%- set businessKeyCols = source.columns | selectattr("isBusinessKey") | list %}
+    {%- set surrogateKeyCols = columns | selectattr("isSurrogateKey") | map(attribute="name") | list %}
+    {%- set replaceKeyCols = (businessKeyCols | map(attribute="name") | list)
+                             + (columns | selectattr("isSystemVersion") | map(attribute="name") | list if type2Dimension else [])
+                             + surrogateKeyCols %}
     {%- set updateDateCols = columns | selectattr("isSystemUpdateDate") | map(attribute="name") | list %}
-    {%- if replaceKeyCols | length > 0 and updateDateCols | length > 0 %}
+    {%- if businessKeyCols | length > 0 and updateDateCols | length > 0 %}
         {%- set replaceKey = '`' ~ (replaceKeyCols | join('`, `')) ~ '`' %}
-        {{ stage('Load ' + materializationType + ' Using Merge - Delete Replaced Rows') }}
+        {%- set touchedKeys %}
+            ((`{{ businessKeyCols | map(attribute="name") | join('`, `') }}`) IN (
+                {{ source.cteString }}
+                SELECT
+                {%- for col in businessKeyCols %}
+                    {{ get_source_transform(col) }}
+                    {%- if not loop.last %}, {%- endif %}
+                {%- endfor %}
+                {{ joinclause }}
+            )
+            {%- if config.zeroKey is defined and hasSurrogateKey %}
+            OR (
+                {%- for colName in surrogateKeyCols %}
+                {%- if not loop.first %} AND {%- endif %} `{{ colName }}` = {{ zeroKeySurrogateValue }}
+                {%- endfor %})
+            {%- endif %})
+        {%- endset %}
+        {{ stage('Load ' + materializationType + ' Using Merge - Clean Up Data') }}
         DELETE FROM {{ targetPath }}
-        WHERE ({{ replaceKey }}, `{{ updateDateCols[0] }}`) NOT IN (
+        WHERE {{ touchedKeys }}
+          AND ({{ replaceKey }}, `{{ updateDateCols[0] }}`) NOT IN (
             SELECT {{ replaceKey }}, max(`{{ updateDateCols[0] }}`)
             FROM {{ targetPath }}
+            WHERE {{ touchedKeys }}
             GROUP BY {{ replaceKey }}
         )
     {%- endif %}

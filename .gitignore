@@ -1,3 +1,12 @@
 workspace.yml
 workspaces.yml
 .coa/
+
+# Node types Coalesce re-syncs from the workspace; not part of the ClickHouse SQL set
+nodeTypes/Dimension-Dimension/
+nodeTypes/Fact-Fact/
+nodeTypes/PersistentStage-persistentStage/
+nodeTypes/SQLStage-sqlStage/
+nodeTypes/SQLView-sqlView/
+nodeTypes/Stage-Stage/
+nodeTypes/View-View/
