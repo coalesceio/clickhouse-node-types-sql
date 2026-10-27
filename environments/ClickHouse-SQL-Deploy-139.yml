@@ -3,7 +3,7 @@ id: "139"
 mappingDefinitions:
   SRC:
     database: ""
-    schema: tpch
+    schema: WORKSPACE_TANVI_SOURCE
   TARGET:
     database: ""
     schema: WORKSPACE_TANVI_QA
