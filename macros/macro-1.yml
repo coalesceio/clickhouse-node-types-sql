@@ -100,8 +100,8 @@ macroString: |-
 
     {#- Sort key and primary key from the node-level @orderBy(...) / @primaryKey(...), one term per argument.
         - Only @primaryKey: ClickHouse sorts by the primary key, so it is also the ORDER BY key.
-        - Both: the primary key must be the leading terms of ORDER BY (compared ignoring spaces and
-          backticks); primaryKeyError otherwise. A primary key equal to ORDER BY is not written separately. #}
+        - Both: written as given; ClickHouse rejects a primary key that is not the leading terms of
+          ORDER BY. A primary key equal to ORDER BY is not written separately. #}
     {%- if desiredState is defined and desiredState -%}
       {%- set nsDesiredOrder = namespace(items=[]) -%}
       {%- set nsDesiredKey = namespace(items=[]) -%}
@@ -109,22 +109,6 @@ macroString: |-
       {{- collect_key_terms(config.primaryKey, nsDesiredKey) -}}
       {%- set nsNodeVariables.desiredOrderBy = nsDesiredOrder.items or nsDesiredKey.items -%}
       {%- set nsNodeVariables.desiredPrimaryKey = nsDesiredKey.items -%}
-      {%- if nsDesiredOrder.items and nsDesiredKey.items -%}
-        {%- set nsCheck = namespace(mismatch='') -%}
-        {%- for pk in nsDesiredKey.items -%}
-          {%- set ob = nsDesiredOrder.items[loop.index0] if loop.index0 < nsDesiredOrder.items | length else none -%}
-          {%- if not nsCheck.mismatch and (ob is none
-                  or (pk | replace(' ', '') | replace('`', '')) != (ob | replace(' ', '') | replace('`', ''))) -%}
-            {%- set nsCheck.mismatch = 'primaryKey term ' ~ loop.index ~ ' (' ~ pk ~ ') '
-                                       ~ ('has no orderBy term at that position' if ob is none else 'does not match orderBy term ' ~ loop.index ~ ' (' ~ ob ~ ')') -%}
-          {%- endif -%}
-        {%- endfor -%}
-        {%- if nsCheck.mismatch -%}
-          {%- set nsNodeVariables.primaryKeyError = 'ClickHouse requires PRIMARY KEY to be the leading terms of ORDER BY, but '
-                                                    ~ nsCheck.mismatch ~ '. ORDER BY (' ~ (nsDesiredOrder.items | join(', '))
-                                                    ~ '), PRIMARY KEY (' ~ (nsDesiredKey.items | join(', ')) ~ ').' -%}
-        {%- endif -%}
-      {%- endif -%}
 
       {#- Partition key and table settings from the node-level @partitionBy(...) / @settings(...):
           one term / one "name = value" setting per argument #}
@@ -168,8 +152,7 @@ macroString: |-
       alterObjectNameFullPath               what alter_ macros change: clone (table) / view
       droppedColumns / renamedColumns       quoted current column names
       desired/currentOrderBy                ORDER BY terms from @orderBy (or @primaryKey when only that is set)
-      desired/currentPrimaryKey             PRIMARY KEY terms from @primaryKey (leading terms of desiredOrderBy)
-      primaryKeyError                       why the primary key is invalid, '' when valid
+      desired/currentPrimaryKey             PRIMARY KEY terms from @primaryKey
       desired/currentPartitionBy            PARTITION BY terms from @partitionBy
       desired/currentSettings               "name = value" table settings from @settings
       rebuildReason                         why a table redeploy rebuilds instead of altering, '' when it alters
@@ -189,7 +172,6 @@ macroString: |-
                                       renamedColumns = [],
                                       desiredOrderBy = [],
                                       desiredPrimaryKey = [],
-                                      primaryKeyError = "",
                                       currentOrderBy = [],
                                       currentPrimaryKey = [],
                                       desiredPartitionBy = [],
@@ -919,29 +901,20 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    validate_order_by(): failing "Invalid Primary Key" check when @primaryKey is not the
-    leading terms of @orderBy (see primaryKeyError). Call before the CREATE.
-  ===========================================================================#}
-  {%- macro validate_order_by() -%}
-      {%- if nsNodeVariables.primaryKeyError %}
-          {{ test_stage('Invalid Primary Key: ' + node.name, false) }}
-          -- {{ nsNodeVariables.primaryKeyError }}
-          {{ fail_sql(true, 'Invalid Primary Key: ' + node.name) }}
-      {%- endif %}
-  {%- endmacro -%}
-
-  {#===========================================================================
     ch_order_by(): the ClickHouse sort/primary key clauses from the node-level @orderBy / @primaryKey:
       ORDER BY (<terms>) [PRIMARY KEY (<terms>)]
-    PRIMARY KEY is written only when it is shorter than ORDER BY (when they are the same, or only
-    @primaryKey is set, ClickHouse uses ORDER BY as the primary key).
+    PRIMARY KEY is written whenever @primaryKey differs from ORDER BY (when they are the same, or
+    only @primaryKey is set, ClickHouse uses ORDER BY as the primary key). It is written as given:
+    a primary key that is not the leading terms of ORDER BY is rejected by ClickHouse itself.
     ORDER BY tuple() when neither annotation is set — omitted when nsNodeVariables.useCloudTableDefaults
     is set (ClickHouse Cloud adds ORDER BY tuple() itself).
   ===========================================================================#}
   {%- macro ch_order_by() -%}
       {%- if nsNodeVariables.desiredOrderBy -%}
           ORDER BY ({{ nsNodeVariables.desiredOrderBy | join(', ') }})
-          {%- if nsNodeVariables.desiredPrimaryKey and nsNodeVariables.desiredPrimaryKey | length < nsNodeVariables.desiredOrderBy | length %}
+          {%- if nsNodeVariables.desiredPrimaryKey
+                 and (nsNodeVariables.desiredPrimaryKey | join(',') | replace(' ', '') | replace('`', '') | lower)
+                     != (nsNodeVariables.desiredOrderBy | join(',') | replace(' ', '') | replace('`', '') | lower) %}
           PRIMARY KEY ({{ nsNodeVariables.desiredPrimaryKey | join(', ') }})
           {%- endif %}
       {%- elif not nsNodeVariables.useCloudTableDefaults -%}
@@ -1330,7 +1303,7 @@ macroString: |-
       - SETTINGS: MODIFY / RESET SETTING always works                   -> alter_settings_sql()
       - dropping a key column: allowed once it has left the key (Modify
         Order By runs before Drop Column); a dropped column still used
-        in a key is rejected by validate_key_columns()
+        in a key is rejected by ClickHouse on the clone (live table untouched)
     Terms are compared ignoring spaces, backticks and case. Call before choosing between
     rebuild_table_sql() and the alters.
   ===========================================================================#}
@@ -1394,26 +1367,6 @@ macroString: |-
           {%- endif -%}
       {%- endfor -%}
       {%- set nsNodeVariables.rebuildReason = ns.reasons | join('; ') -%}
-  {%- endmacro -%}
-
-  {#===========================================================================
-    validate_key_columns(): failing "Invalid Key Column" check on redeploy when a column that is
-    dropped, or renamed away, is still named in @orderBy, @primaryKey or @partitionBy — ClickHouse
-    would fail either way (missing column). Whole-word match (key_identifiers()).
-  ===========================================================================#}
-  {%- macro validate_key_columns() -%}
-      {%- set nsIds = namespace(items=[]) -%}
-      {{- key_identifiers(nsNodeVariables.desiredOrderBy + nsNodeVariables.desiredPrimaryKey + nsNodeVariables.desiredPartitionBy, nsIds) -}}
-      {%- set desiredNames = columns | map(attribute='name') | list -%}
-      {%- set nsBad = namespace(items=[]) -%}
-      {%- for curCol in currentState.columns if curCol.name in nsIds.items and curCol.name not in desiredNames -%}
-          {%- set nsBad.items = nsBad.items + [curCol.name] -%}
-      {%- endfor -%}
-      {%- if nsBad.items %}
-          {{ test_stage('Invalid Key Column: ' + node.name, false) }}
-          -- Column(s) {{ nsBad.items | join(', ') }} no longer exist on {{ node.name }} (dropped or renamed) but are still used in @orderBy / @primaryKey / @partitionBy. Update those annotations.
-          {{ fail_sql(true, 'Invalid Key Column: ' + node.name) }}
-      {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================

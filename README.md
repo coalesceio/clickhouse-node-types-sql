@@ -76,6 +76,12 @@ it is empty until the next run reloads it. The deploy shows a
 To keep later sort-key changes cheap, set `@primaryKey` to the leading column(s) of
 `@orderBy` when the node is first created.
 
+`@orderBy` and `@primaryKey` are written to ClickHouse as given and are not checked by the
+node types. ClickHouse itself rejects invalid keys, for example a `@primaryKey` that is not the
+leading terms of `@orderBy`, or a key that names a column the node no longer has. A rejected
+create or redeploy leaves the existing table unchanged (a redeploy fails on the clone or on
+`CREATE OR REPLACE`, before anything replaces the live table).
+
 ## Known limitations
 
 ### `Variant` columns in SQL nodes

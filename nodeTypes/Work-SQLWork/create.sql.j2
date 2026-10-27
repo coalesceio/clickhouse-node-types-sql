@@ -42,26 +42,17 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
             {# CreateSQL for Table. Work is an intermediate stage: plain MergeTree, sorted by @orderBy / @primaryKey (tuple() when neither),
                with @partitionBy and @settings when set. #}
-            {# Validate: @primaryKey must be the leading terms of @orderBy #}
-            {{ validate_order_by() }}
-
             {{ stage('Create ' + desiredMatType) }}
             CREATE OR REPLACE TABLE {{ nsNodeVariables.desObjectNameFullPath }}
             {{ ch_table_definition_sql() }}
 
         {%- elif currentState is defined and currentState != desiredState and currentMatType == desiredMatType %}
 
-            {# Validate: no dropped / renamed-away column may still be used in a key annotation #}
-            {{ validate_key_columns() }}
-
             {# Partition / primary key changes, ORDER BY changes beyond trailing removals and new columns,
                and renamed or retyped key columns cannot be ALTERed in ClickHouse: the table is recreated
                (warning stage + CREATE OR REPLACE, existing data lost) instead of cloned and altered #}
             {{ set_rebuild_reason() }}
             {%- if nsNodeVariables.rebuildReason %}
-
-                {# Validate: @primaryKey must be the leading terms of @orderBy #}
-                {{ validate_order_by() }}
 
                 {# Warning: Table Recreated -> Recreate Table (-> Drop Table at the old path when renamed/moved) #}
                 {{ rebuild_table_sql() }}
