@@ -7,6 +7,18 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 {# == Node Type Name           : Fact  == #}
 {# == Node Type Description    : This node loads data into fact table using options distinct and multi-source cte if specified == #}
 
+{#
+    ClickHouse has no MERGE, so each load is INSERT + DELETE (same as the Dimension):
+    - INSERT the row set the MERGE would have applied. An "update" re-inserts the same business key with a newer
+      SYSTEM_UPDATE_DATE.
+    - DELETE the replaced copies: per business key only the row with the latest SYSTEM_UPDATE_DATE is kept,
+      so a plain SELECT is correct right after the run, on any MergeTree engine.
+    - @upsert without a SYSTEM_UPDATE_DATE column can't tell the copies apart, so the matching rows are deleted
+      before the INSERT instead.
+    - @allColumnMatch only inserts rows that don't exist yet, so nothing is deleted.
+    The target is read with FINAL (engines other than plain MergeTree) in case an earlier run left copies behind.
+#}
+
 {# == Validate: the materialization type must be table, transient table or view == #}
 {{ validate_materialization_type() }}
 
@@ -49,6 +61,30 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {# The node's own CTEs (source.cteString) already open a WITH clause; the load's CTEs must continue it with a comma, since a second WITH is invalid SQL. #}
     {%- set sourceDataCteOpen = ', ' if (source.cteString | default('', true) | trim | length > 0) else 'WITH ' %}
 
+    {# Target path, FINAL for engines that combine rows (plain MergeTree rejects it), and one load timestamp (now64 is constant within a query) #}
+    {%- set targetPath = ref_no_link(node.location.name, node.name) %}
+    {%- set engineName = (ch_engine() | trim).split('(')[0] | trim | replace('Replicated', '') | replace('Shared', '') %}
+    {%- set targetFinal = '' if engineName == 'MergeTree' else ' FINAL' %}
+    {%- set loadTimestamp = 'now64(6)' %}
+
+    {# Business keys of this run's source rows (and the target's SYSTEM_UPDATE_DATE): only these keys can have replaced copies #}
+    {%- set businessKeyCols = source.columns | selectattr("isBusinessKey") | list %}
+    {%- set updateDateCols = columns | selectattr("isSystemUpdateDate") | map(attribute="name") | list %}
+    {%- if businessKeyCols | length > 0 %}
+        {%- set businessKey = '`' ~ (businessKeyCols | map(attribute="name") | join('`, `')) ~ '`' %}
+        {%- set touchedKeys %}
+            ({{ businessKey }}) IN (
+                {{ source.cteString }}
+                SELECT
+                {%- for col in businessKeyCols %}
+                    {{ get_source_transform(col) }}
+                    {%- if not loop.last %}, {%- endif %}
+                {%- endfor %}
+                {{ joinclause }}
+            )
+        {%- endset %}
+    {%- endif %}
+
     {%- if lastModifiedComparison %}
         {# Test stage for checking NULL values in source - last modified column (any datatype: a NULL date/time or numeric value can never compare as newer, so the row would never be picked up as changed) #}
         {{ test_stage('Check NULL values for ' ~ lastModifiedColName ~ ' column', false) }}
@@ -81,7 +117,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 	{# == Truncate data before data insertion  == #}
     {%- if writeMode | lower != "append" -%}
         {{ stage('Truncate ' + materializationType) }}
-        TRUNCATE IF EXISTS {{ ref_no_link(node.location.name, node.name) }}
+        TRUNCATE IF EXISTS {{ targetPath }}
     {%- endif %}
 
     {%- if not hasBusinessKey and not isAllColumnMatch %}
@@ -91,7 +127,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
            An explicit changeTracking/lastModified/upsert without a business key is stopped by validate_fact_requirements before this runs.
            All columns (system columns included) are written exactly as the SELECT/CTE computes them. #}
         {{ stage('Load ' + materializationType + ' using Insert') }}
-        INSERT INTO {{ ref_no_link(node.location.name, node.name) }}
+        INSERT INTO {{ targetPath }}
         (
             {%- for col in columns %}
                 `{{ col.name }}`
@@ -108,6 +144,13 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
     {%- else %}
 
+    {%- if isSimpleUpsert and updateDateCols | length == 0 %}
+        {# @upsert without SYSTEM_UPDATE_DATE: the old and new copy of a key can't be told apart after the INSERT, so the matching rows go first #}
+        {{ stage('Load ' + materializationType + ' Using Merge - Clean Up Data') }}
+        DELETE FROM {{ targetPath }}
+        WHERE {{ touchedKeys }}
+    {%- endif %}
+
     {%- if isSimpleUpsert %}
         {{ stage('Load ' + materializationType + ' Using Merge - Upsert') }}
     {%- elif isAllColumnMatch %}
@@ -120,23 +163,94 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {{ stage('Load ' + materializationType + ' Using Merge - Change Tracking - SCD1') }}
     {%- endif %}
 
-    MERGE INTO {{ ref_no_link(node.location.name, node.name) }} `TGT`
-    USING (
+    INSERT INTO {{ targetPath }}
+    (
+        {%- for col in columns %}
+            `{{ col.name }}`
+            {%- if not loop.last %}, {%- endif %}
+        {%- endfor %}
+    )
         {{- source.cteString }}
             {# SCD Type 1: one row per business key, classified NEW/CHANGED/NOCHANGE off the business key. #}
             {%- set sysCreateDateCol = get_value_by_column_attribute("isSystemCreateDate") %}
             {# allColumnMatch may have no @isBusinessKey column at all — guard so template rendering doesn't crash. #}
             {%- set firstBizKeyCol = (columns | selectattr("isBusinessKey") | first).name if hasBusinessKey else none %}
 
-            {%- if isSimpleUpsert or isAllColumnMatch %}
-            {# @upsert/@allColumnMatch need nothing from the target — the outer MERGE's MATCHED/NOT MATCHED already tells insert vs. update, so just pass the source columns through.
-               System columns ride along with the user's own expressions (not hard-coded values), so custom SELECT/CTE logic can set them. #}
-            SELECT {{ source.selectModifier | default('', true) }}
-            {%- for col in source.columns %}
-                {{ get_source_transform(col) }} AS `{{ col.name }}`
+            {%- if isAllColumnMatch %}
+            {# @allColumnMatch: every non-system column is treated as a business key, @isBusinessKey is ignored.
+               A fully matching row already exists — nothing to update; only brand-new rows are inserted. #}
+            {%- set matchCols = columns | rejectattr("isSystemCreateDate") | rejectattr("isSystemUpdateDate") | list %}
+            {{ sourceDataCteOpen }}`SOURCE_DATA` AS (
+                SELECT {{ source.selectModifier | default('', true) }}
+                {%- for col in source.columns %}
+                    {{ get_source_transform(col) }} AS `{{ col.name }}`
+                    {%- if not loop.last %}, {%- endif %}
+                {%- endfor %}
+                {{ joinclause }}
+            ),
+
+            `TARGET_CURRENT` AS (
+                SELECT
+                    1 AS `TGT_ROW_EXISTS`
+                {%- for col in matchCols %},
+                    `{{ col.name }}` AS `TGT_{{ col.name }}`
+                {%- endfor %}
+                FROM {{ targetPath }}{{ targetFinal }}
+            )
+
+            SELECT
+            {%- for col in columns %}
+                `SOURCE_DATA`.`{{ col.name }}` AS `{{ col.name }}`
                 {%- if not loop.last %}, {%- endif %}
             {%- endfor %}
-            {{ joinclause }}
+            FROM `SOURCE_DATA`
+            LEFT JOIN `TARGET_CURRENT` ON
+            {%- for col in matchCols %}
+                {%- if not loop.first %} AND {%- endif %}
+                {{ safe_equals('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`TGT_' ~ col.name ~ '`', col.dataType) }}
+            {%- endfor %}
+            WHERE `TARGET_CURRENT`.`TGT_ROW_EXISTS` IS NULL
+
+            {%- elif isSimpleUpsert %}
+            {# @upsert: every source row is written as-is — system columns included, using whatever the SELECT/CTE put in them.
+               Only the target lookup is needed to keep an existing row's SYSTEM_CREATE_DATE. #}
+            {{ sourceDataCteOpen }}`SOURCE_DATA` AS (
+                SELECT {{ source.selectModifier | default('', true) }}
+                {%- for col in source.columns %}
+                    {{ get_source_transform(col) }} AS `{{ col.name }}`
+                    {%- if not loop.last %}, {%- endif %}
+                {%- endfor %}
+                {{ joinclause }}
+            ),
+
+            `TARGET_CURRENT` AS (
+                SELECT
+                    1 AS `TGT_ROW_EXISTS`
+                {%- for col in columns if col.isBusinessKey %},
+                    `{{ col.name }}`
+                {%- endfor %}
+                {%- for col in columns if col.isSystemCreateDate %},
+                    `{{ col.name }}` AS `TGT_{{ col.name }}`
+                {%- endfor %}
+                FROM {{ targetPath }}{{ targetFinal }}
+            )
+
+            SELECT
+            {%- for col in columns %}
+                {%- if col.isSystemCreateDate %}
+                if(`TARGET_CURRENT`.`TGT_ROW_EXISTS` IS NULL, `SOURCE_DATA`.`{{ col.name }}`, `TARGET_CURRENT`.`TGT_{{ col.name }}`)
+                {%- else %}
+                `SOURCE_DATA`.`{{ col.name }}`
+                {%- endif %}
+                AS `{{ col.name }}`
+                {%- if not loop.last %}, {%- endif %}
+            {%- endfor %}
+            FROM `SOURCE_DATA`
+            LEFT JOIN `TARGET_CURRENT` ON
+            {%- for col in columns if col.isBusinessKey %}
+                {%- if not loop.first %} AND {%- endif %}
+                {{ safe_equals('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`' ~ col.name ~ '`', col.dataType) }}
+            {%- endfor %}
             {%- else %}
 
             {{ sourceDataCteOpen }}`SOURCE_DATA` AS (
@@ -160,16 +274,16 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {%- endif %}
                     {%- if not loop.last %}, {%- endif %}
                 {%- endfor %}
-                FROM {{ ref_no_link(node.location.name, node.name) }}
+                FROM {{ targetPath }}{{ targetFinal }}
             ),
 
             `CHANGE_DETECTION` AS (
                 /* Classify each source row as NEW / CHANGED / NOCHANGE against the current target row */
                 SELECT
                     `SOURCE_DATA`.*,
-                    `TARGET_CURRENT`.`{{ sysCreateDateCol }}`,
+                    `TARGET_CURRENT`.`{{ sysCreateDateCol }}` AS `{{ sysCreateDateCol }}`,
                     {%- for col in columns if not (col.isBusinessKey or col.isSystemCreateDate or col.isSystemUpdateDate) %}
-                    `TARGET_CURRENT`.`TGT_{{ col.name }}`,
+                    `TARGET_CURRENT`.`TGT_{{ col.name }}` AS `TGT_{{ col.name }}`,
                     {%- endfor %}
                     CASE
                         -- NEW is detected off the business key match.
@@ -200,84 +314,39 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {{ safe_equals('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`' ~ col.name ~ '`', col.dataType) }}
                 {%- endfor %}
             )
-            /* Final SCD1 row set: one row per source key, tagged with the CHANGE_TYPE the
-               outer MERGE's MATCHED/NOT MATCHED branches use to decide insert vs. update */
+            /* Final SCD1 row set: NEW rows are inserted; CHANGED rows are re-inserted with a newer
+               SYSTEM_UPDATE_DATE and keep their SYSTEM_CREATE_DATE */
             SELECT
             {%- for col in columns %}
                 {%- if col.isSystemCreateDate %}
-                -- Set once on insert; preserved as-is for every other row (excluded from the
-                -- outer UPDATE SET below, but computed correctly here too for clarity).
-                CASE WHEN `CHANGE_TYPE` = 'NEW' THEN CAST(CURRENT_TIMESTAMP AS TIMESTAMP) ELSE `{{ sysCreateDateCol }}` END
+                if(`CHANGE_TYPE` = 'NEW', {{ loadTimestamp }}, `{{ sysCreateDateCol }}`)
                 {%- elif col.isSystemUpdateDate %}
-                CAST(CURRENT_TIMESTAMP AS TIMESTAMP)
+                {{ loadTimestamp }}
                 {%- else %}
                 `{{ col.name }}`
                 {%- endif %}
-                AS `{{ col.name }}`,
+                AS `{{ col.name }}`
+                {%- if not loop.last %}, {%- endif %}
             {%- endfor %}
-            `CHANGE_TYPE`
             FROM `CHANGE_DETECTION`
+            WHERE `CHANGE_TYPE` IN ('NEW', 'CHANGED')
             {%- endif %}
+    {# Unmatched LEFT JOIN columns must be NULL (ClickHouse defaults them to 0 / '') for the NEW / not-exists checks above #}
+    SETTINGS join_use_nulls = 1
 
-    ) AS `SRC`
-    ON
-
-    {%- if isAllColumnMatch %}
-    {# @allColumnMatch: every non-system column is treated as a business key, @isBusinessKey is ignored. #}
-    {%- for col in columns if not (col.isSystemCreateDate or col.isSystemUpdateDate) %}
-        {%- if not loop.first %} AND {%- endif %}
-        {{ safe_equals('`TGT`.`' ~ col.name ~ '`', '`SRC`.`' ~ col.name ~ '`', col.dataType) }}
-    {%- endfor %}
-    {%- else %}
-    {%- for col in columns if col.isBusinessKey %}
-        {%- if not loop.first %} AND {%- endif %}
-        {{ safe_equals('`TGT`.`' ~ col.name ~ '`', '`SRC`.`' ~ col.name ~ '`', col.dataType) }}
-    {%- endfor %}
+    {# == Update: delete the copies the INSERT replaced — per business key only the row with the latest SYSTEM_UPDATE_DATE is kept.
+          Only this run's business keys can have replaced copies, so the DELETE and its subquery read just those keys == #}
+    {%- if hasBusinessKey and not isAllColumnMatch and updateDateCols | length > 0 %}
+        {{ stage('Load ' + materializationType + ' Using Merge - Clean Up Data') }}
+        DELETE FROM {{ targetPath }}
+        WHERE {{ touchedKeys }}
+          AND ({{ businessKey }}, `{{ updateDateCols[0] }}`) NOT IN (
+            SELECT {{ businessKey }}, max(`{{ updateDateCols[0] }}`)
+            FROM {{ targetPath }}
+            WHERE {{ touchedKeys }}
+            GROUP BY {{ businessKey }}
+        )
     {%- endif %}
-
-    {%- if isAllColumnMatch %}
-
-        {# @allColumnMatch: a fully matching row already exists — nothing to update, so no WHEN MATCHED; only brand-new rows are inserted. #}
-
-    {%- elif isSimpleUpsert %}
-
-        {# @upsert: every matched row is overwritten straight from SRC — system columns included, using whatever the SELECT/CTE put in them.
-           SYSTEM_CREATE_DATE is kept as first inserted. If nothing is left to update (only key/create-date columns), skip WHEN MATCHED rather than emit an empty SET. #}
-        {%- set upsertUpdateCols = columns | rejectattr("isBusinessKey") | rejectattr("isSystemCreateDate") | list %}
-        {%- if upsertUpdateCols | length > 0 %}
-        WHEN MATCHED THEN UPDATE SET
-        {%- for col in upsertUpdateCols %}
-            `TGT`.`{{ col.name }}` = `SRC`.`{{ col.name }}`
-            {%- if not loop.last %}, {%- endif %}
-        {%- endfor %}
-        {%- endif %}
-
-    {%- else %}
-
-        WHEN MATCHED AND `SRC`.`CHANGE_TYPE` = 'CHANGED'
-
-        THEN UPDATE SET
-        {%- for col in columns if not (  col.isBusinessKey or
-                                        col.isSystemCreateDate) %}
-            `TGT`.`{{ col.name }}` = `SRC`.`{{ col.name }}`
-            {%- if not loop.last %}, {%- endif %}
-        {%- endfor %}
-    {%- endif %}
-
-    WHEN NOT MATCHED THEN INSERT
-    (
-        {%- for col in columns %}
-            `{{ col.name }}`
-            {%- if not loop.last %}, {%- endif %}
-        {%- endfor %}
-    )
-    VALUES
-    (
-        {%- for col in columns %}
-            `SRC`.`{{ col.name }}`
-            {%- if not loop.last %}, {%- endif %}
-        {%- endfor %}
-    )
 
     {%- endif %}
 
