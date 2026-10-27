@@ -1,6 +1,6 @@
 @id("cce6d364-5834-4733-9e8a-fdbcfa4f6320")
 @nodeType("SQLWork")
-@orderBy("n_Nationkey", "n_Regionkey")
+@orderBy("n_Nationkey", "n_Name")
 @primaryKey("n_Nationkey")
 SELECT
      `n_Nationkey` AS `n_Nationkey`,

@@ -3,7 +3,7 @@
 @orderBy("n_Nationkey")
 @settings("allow_nullable_key = 0")
 SELECT
-     `n_Nationkey` AS `n_Nationkey` @notNull,
+     toInt64(`n_Nationkey`) AS `n_Nationkey` @notNull,
      `n_Name` AS `n_Name`,
      `n_Regionkey` AS `n_Regionkey`,
      `last_Modified` AS `last_Modified`
