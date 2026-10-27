@@ -5,4 +5,4 @@ SELECT
      `n_Nationkey` AS `n_Nationkey` @id("f2a001"),
      `n_Name` AS `n_Name` @id("f2a002"),
      `n_Regionkey` AS `n_Regionkey` @id("f2a003")
-FROM {{ ref('SRC2', 'Nation_Test') }} `Nation_Test`
+FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`

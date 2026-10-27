@@ -9,4 +9,4 @@ SELECT
      `last_Modified` AS `last_Modified`,
      `n_Regionkey` * 10 AS `c_new`,
      `n_Name` AS `c_new2`
-FROM {{ ref('SRC2', 'Nation_Test') }} `Nation_Test`
+FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`

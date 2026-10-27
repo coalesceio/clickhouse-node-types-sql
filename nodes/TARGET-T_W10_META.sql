@@ -7,4 +7,4 @@ SELECT
      `n_Regionkey` AS `n_Regionkey`,
      `last_Modified` AS `last_Modified`,
      CAST(NULL AS Nullable(String)) AS `c_nulls` @notNull @defaultValue("'n/a'")
-FROM {{ ref('SRC2', 'Nation_Test') }} `Nation_Test`
+FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`

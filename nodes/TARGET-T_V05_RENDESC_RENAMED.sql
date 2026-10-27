@@ -5,4 +5,4 @@
 SELECT
      `n_Nationkey` AS `n_Nationkey`,
      `n_Name` AS `n_Name`
-FROM {{ ref('SRC2', 'Nation_Test') }} `Nation_Test`
+FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`

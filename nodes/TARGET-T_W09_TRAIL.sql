@@ -6,4 +6,4 @@ SELECT
      `n_Nationkey` AS `n_Nationkey`,
      `n_Name` AS `n_Name`,
      `last_Modified` AS `last_Modified`
-FROM {{ ref('SRC2', 'Nation_Test') }} `Nation_Test`
+FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`
