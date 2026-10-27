@@ -324,12 +324,13 @@ macroString: |-
   ===========================================================================#}
 
   {#===========================================================================
-    fail_sql(hardFail): SELECT 1/0 (hardFail, default) or SELECT 1. CREATE does not fail a
-    test stage on row count, so checks that must stop a create use the hard fail.
+    fail_sql(hardFail, stageName): throwIf (hardFail, default) or SELECT 1. CREATE does not fail
+    a test stage on row count, so checks that must stop a create throw. The reason stays in the
+    -- comment above the call; the SELECT only throws (ClickHouse's 1/0 is inf, not an error).
   ===========================================================================#}
-  {%- macro fail_sql(hardFail=true) -%}
+  {%- macro fail_sql(hardFail=true, stageName='') -%}
       {%- if hardFail -%}
-          SELECT 1/0
+          SELECT throwIf(1, 'Validation failed: {{ ch_string(stageName) }}')
       {%- else -%}
           SELECT 1
       {%- endif -%}
@@ -344,7 +345,7 @@ macroString: |-
       {%- if nsNodeVariables.desiredMatType not in allowedTypes %}
           {{ test_stage('Unsupported Materialization Type: ' + node.name, false) }}
           -- '{{ node.materializationType | default('', true) }}' is not supported on {{ node.name }}; use one of: {{ allowedTypes | join(', ') }}
-          {{ fail_sql() }}
+          {{ fail_sql(true, 'Unsupported Materialization Type: ' + node.name) }}
       {%- endif %}
   {%- endmacro -%}
 
@@ -385,7 +386,7 @@ macroString: |-
           {%- set reason = "Duplicate column name: " ~ (described.items | join(', ')) ~ ". The SELECT returns more than one column with the same name — remove the extra column or give it a different alias. " ~ aliasHint %}
           {{ test_stage("Duplicate Column Names", false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, "Duplicate Column Names") }}
       {%- endif -%}
 
       {# Two columns given the same @id value (exact string match). #}
@@ -401,14 +402,14 @@ macroString: |-
           {%- set reason = "Duplicate column ID: " ~ (idDup.items | join('; ')) ~ '. Each column needs its own unique @id("<6 hex digits>") — change the repeated ID on all but one of them.' %}
           {{ test_stage("Duplicate Column IDs", false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, "Duplicate Column IDs") }}
       {%- endif -%}
 
       {%- if idCheck.missing | length > 0 %}
           {%- set reason = "These columns have no real system-generated ID (id equals the column name): " ~ (idCheck.missing | join(', ')) ~ '. Add a unique @id("<6 hex digits>") annotation to each of them.' %}
           {{ test_stage("Missing Column IDs", false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, "Missing Column IDs") }}
       {%- endif -%}
   {%- endmacro -%}
 
@@ -426,7 +427,7 @@ macroString: |-
           {%- set reason = "Mark at least one column with @isBusinessKey to identify the dimension's natural/business key for SCD matching." %}
           {{ test_stage("Missing Business Key", false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, "Missing Business Key") }}
       {%- endif -%}
 
       {%- set lastModifiedCount = columns | selectattr("lastModifiedTracking") | list | length -%}
@@ -450,7 +451,7 @@ macroString: |-
           {%- set reason = '@mergeStrategy("' ~ mergeStrategyRaw ~ '") is not a recognised strategy. Use "changeTracking", "lastModified" or "upsert".' %}
           {{ test_stage('Invalid configuration: mergeStrategy', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, 'Invalid configuration: mergeStrategy') }}
       {%- endif -%}
 
       {# These cross-checks only apply when @mergeStrategy is set explicitly, since an inferred strategy can't conflict with itself. #}
@@ -470,7 +471,7 @@ macroString: |-
           {%- set reason = '@mergeStrategy("lastModified") requires exactly one column marked @lastModifiedTracking(<scdType>); none was found.' %}
           {{ test_stage('Invalid configuration: mergeStrategy', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, 'Invalid configuration: mergeStrategy') }}
       {%- endif %}
 
       {# Only check "at most one @lastModifiedTracking column" once lastModified is the strategy in effect. #}
@@ -478,7 +479,7 @@ macroString: |-
           {%- set reason = "@lastModifiedTracking may be applied to at most one column, but " ~ lastModifiedCount ~ " columns were marked. Remove the annotation from all but one column." %}
           {{ test_stage('Invalid configuration: Last Modified Column', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, 'Invalid configuration: Last Modified Column') }}
       {%- endif -%}
 
       {%- if isLastModifiedStrategy and changeTrackingCount > 0 %}
@@ -500,7 +501,7 @@ macroString: |-
                       {%- set reason = '@lastModifiedTracking\'s scdType parameter only accepts 1 or 2, but "' ~ scdType ~ '" was given on column ' ~ lastModifiedCol.name ~ '. Mention @lastModifiedTracking(scdType) explicitly — @lastModifiedTracking(1) to overwrite in place, or @lastModifiedTracking(2) to version the row.' %}
                       {{ test_stage('Invalid configuration: lastModifiedTracking scdType', false) }}
                       -- {{ reason }}
-                      {{ fail_sql(hardFail) }}
+                      {{ fail_sql(hardFail, 'Invalid configuration: lastModifiedTracking scdType') }}
                   {%- endif -%}
                   {%- set type2Dimension = scdType == '2' -%}
               {%- else -%}
@@ -629,7 +630,7 @@ macroString: |-
           {%- endfor %}
           {# Only hard-fail if a REQUIRED item is present; recommendations-only stays non-blocking. #}
           {%- if hardFail and anyRequired -%}
-              {{ fail_sql(hardFail) }}
+              {{ fail_sql(hardFail, stageName) }}
           {%- else -%}
               SELECT 1
           {%- endif -%}
@@ -701,7 +702,7 @@ macroString: |-
           {%- set reason = '@mergeStrategy("' ~ mergeStrategyRaw ~ '") is not a recognised strategy. Use "changeTracking", "lastModified", "upsert" or "allColumnMatch".' %}
           {{ test_stage('Invalid configuration: mergeStrategy', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, 'Invalid configuration: mergeStrategy') }}
       {%- endif -%}
 
       {# @mergeStrategy always takes priority. An explicit changeTracking/lastModified/upsert merges on the business key, so a missing @isBusinessKey stops the load.
@@ -710,7 +711,7 @@ macroString: |-
           {%- set reason = '@mergeStrategy("' ~ mergeStrategyRaw ~ '") merges on the business key, but no column is marked @isBusinessKey. Mark the business key column(s) with @isBusinessKey, or remove @mergeStrategy to load the node as a plain insert.' %}
           {{ test_stage('Invalid configuration: No Business Key', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, 'Invalid configuration: No Business Key') }}
       {%- endif -%}
 
       {# No @mergeStrategy and no business key = plain insert, so @lastModifiedTracking is never read. Warn only — the insert still runs. #}
@@ -750,7 +751,7 @@ macroString: |-
           {%- set reason = '@mergeStrategy("lastModified") requires exactly one column marked @lastModifiedTracking; none was found.' %}
           {{ test_stage('Invalid configuration: mergeStrategy', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, 'Invalid configuration: mergeStrategy') }}
       {%- endif %}
 
       {# Only check "at most one @lastModifiedTracking column" once lastModified is the strategy in effect. #}
@@ -758,7 +759,7 @@ macroString: |-
           {%- set reason = "@lastModifiedTracking may be applied to at most one column, but " ~ lastModifiedCount ~ " columns were marked. Remove the annotation from all but one column." %}
           {{ test_stage('Invalid configuration: Last Modified Column', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, 'Invalid configuration: Last Modified Column') }}
       {%- endif -%}
 
       {# Collect every missing/misconfigured system column here so one run reports them all together instead of one at a time. #}
@@ -796,7 +797,7 @@ macroString: |-
           {%- endfor %}
           {# Only hard-fail if a REQUIRED item is present; recommendations-only stays non-blocking. #}
           {%- if hardFail and anyRequired -%}
-              {{ fail_sql(hardFail) }}
+              {{ fail_sql(hardFail, 'Missing Required System Columns') }}
           {%- else -%}
               SELECT 1
           {%- endif -%}
@@ -925,7 +926,7 @@ macroString: |-
       {%- if nsNodeVariables.primaryKeyError %}
           {{ test_stage('Invalid Primary Key: ' + node.name, false) }}
           -- {{ nsNodeVariables.primaryKeyError }}
-          {{ fail_sql() }}
+          {{ fail_sql(true, 'Invalid Primary Key: ' + node.name) }}
       {%- endif %}
   {%- endmacro -%}
 
@@ -1411,7 +1412,7 @@ macroString: |-
       {%- if nsBad.items %}
           {{ test_stage('Invalid Key Column: ' + node.name, false) }}
           -- Column(s) {{ nsBad.items | join(', ') }} no longer exist on {{ node.name }} (dropped or renamed) but are still used in @orderBy / @primaryKey / @partitionBy. Update those annotations.
-          {{ fail_sql() }}
+          {{ fail_sql(true, 'Invalid Key Column: ' + node.name) }}
       {%- endif %}
   {%- endmacro -%}
 
