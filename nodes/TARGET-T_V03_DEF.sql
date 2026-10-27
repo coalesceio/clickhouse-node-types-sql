@@ -4,5 +4,6 @@
 @description("View whose definition changes")
 SELECT
      `n_Nationkey` AS `n_Nationkey`,
-     `n_Name` AS `n_Name`
+     `n_Name` AS `n_Name`,
+     `n_Regionkey` AS `n_Regionkey`
 FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`

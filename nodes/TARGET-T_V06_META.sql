@@ -2,6 +2,6 @@
 @nodeType("SQLWork")
 @materializationType("view")
 SELECT
-     `n_Nationkey` AS `n_Nationkey`,
+     `n_Nationkey` AS `n_Nationkey` @not_null,
      `n_Name` AS `n_Name`
 FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`

@@ -1,8 +1,8 @@
-@id("d6a6e257-66bd-4927-b3d4-53c9789aeb9b")
+@id("be3edad7-1add-488d-85cc-71b509e1364e")
 @nodeType("SQLWork")
 @materializationType("view")
-@description("View renamed with a new description")
 SELECT
      `n_Nationkey` AS `n_Nationkey`,
-     `n_Name` AS `n_Name`
+     `n_Name` AS `n_Name`,
+     `n_Regionkey` AS `n_Regionkey`
 FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`

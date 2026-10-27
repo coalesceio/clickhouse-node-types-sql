@@ -2,7 +2,7 @@
 @nodeType("SQLWork")
 @partitionBy("n_Regionkey", "toYear(`last_Modified`)")
 @orderBy("n_Nationkey")
-@settings("merge_with_ttl_timeout = 3600", "max_suspicious_broken_parts = 50")
+@settings("merge_with_ttl_timeout = 7200")
 SELECT
      `n_Nationkey` AS `n_Nationkey`,
      `n_Name` AS `n_Name`,
