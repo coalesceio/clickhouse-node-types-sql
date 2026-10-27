@@ -1,5 +1,6 @@
 @id("e3b6804c-f88e-4359-a4fa-068c35d064bf")
 @nodeType("SQLWork")
+@materializationType("view")
 @description("Types test v2")
 SELECT
      CAST(`n_Nationkey` AS UInt64)                                               AS `n_Nationkey`,
