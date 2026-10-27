@@ -6,5 +6,5 @@ SELECT
      `n_Name` AS `n_Name`,
      `n_Regionkey` AS `n_Regionkey`,
      `last_Modified` AS `last_Modified`,
-     CAST(NULL AS Nullable(String)) AS `c_nulls` @notNull
+     CAST(NULL AS Nullable(String)) AS `c_nulls` @notNull @defaultValue("'n/a'")
 FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`

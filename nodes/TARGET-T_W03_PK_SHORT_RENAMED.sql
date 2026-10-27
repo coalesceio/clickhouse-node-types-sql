@@ -7,5 +7,6 @@ SELECT
      `n_Name` AS `n_Name`,
      `n_Regionkey` AS `n_Regionkey`,
      `last_Modified` AS `last_Modified`,
-     `n_Regionkey` * 10 AS `c_new`
+     `n_Regionkey` * 10 AS `c_new`,
+     `n_Name` AS `c_new2`
 FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`

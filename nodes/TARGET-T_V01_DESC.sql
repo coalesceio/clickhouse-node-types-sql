@@ -1,6 +1,6 @@
 @id("d013d49b-2f74-475d-beaa-34862610a58f")
 @nodeType("SQLWork")
-@materializationType("view")
+@materializationType("table")
 @description("View description changed")
 SELECT
      `n_Nationkey` AS `n_Nationkey` @description("Nation key"),
