@@ -6,7 +6,7 @@ WITH `nation_src` AS (
         `n_Nationkey`,
         `n_Name`,
         `n_Regionkey`
-    FROM {{ ref('SRC', 'Nation_Test') }}
+    FROM {{ ref('SRC2', 'Nation_Test') }}
     WHERE `n_Nationkey` IS NOT NULL
 )
 SELECT

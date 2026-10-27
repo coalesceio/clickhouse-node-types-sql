@@ -17,4 +17,4 @@ SELECT
      `last_Modified`                                                             AS `last_Modified` @notNull,
      `n_Regionkey` + 1                                                           AS `c_new_plain`,
      now64(3)                                                                    AS `c_new_default` @defaultValue("now64(3)")
-FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`
+FROM {{ ref('SRC2', 'Nation_Test') }} `Nation_Test`

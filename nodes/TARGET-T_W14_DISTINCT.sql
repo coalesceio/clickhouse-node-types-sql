@@ -2,4 +2,4 @@
 @nodeType("SQLWork")
 SELECT DISTINCT
      `n_Regionkey` AS `n_Regionkey`
-FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`
+FROM {{ ref('SRC2', 'Nation_Test') }} `Nation_Test`

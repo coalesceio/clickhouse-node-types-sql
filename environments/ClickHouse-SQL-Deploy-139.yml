@@ -4,7 +4,13 @@ mappingDefinitions:
   SRC:
     database: ""
     schema: WORKSPACE_TANVI_SOURCE
+  SRC2:
+    database: ""
+    schema: WORKSPACE_TANVI_SOURCE
   TARGET:
+    database: ""
+    schema: WORKSPACE_TANVI_QA
+  TARGET2:
     database: ""
     schema: WORKSPACE_TANVI_QA
 name: ClickHouse-SQL-Deploy

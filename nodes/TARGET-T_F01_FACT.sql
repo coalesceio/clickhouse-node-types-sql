@@ -6,4 +6,4 @@ SELECT
      `n_Name` AS `n_Name_renamed` @id("f1a002"),
      `n_Regionkey` AS `n_Regionkey` @id("f1a003"),
      `last_Modified` AS `last_Modified` @id("f1a004")
-FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`
+FROM {{ ref('SRC2', 'Nation_Test') }} `Nation_Test`
