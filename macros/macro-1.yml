@@ -1028,14 +1028,16 @@ macroString: |-
           {%- endif -%}
       {%- endfor -%}
 
-      {#- A type change rewrites the column as a mutation; mutations_sync = 2 waits for it, so a
-          failed conversion (e.g. NULLs into a non-Nullable type) fails this stage with
-          ClickHouse's own error #}
+      {#- A type change rewrites the column as a mutation. MODIFY COLUMN waits for it per alter_sync
+          (0 on ClickHouse Cloud, so it would return before converting); alter_sync = 2 waits, so a
+          value the new type cannot take (e.g. 'n/a' into UInt32) fails this stage with ClickHouse's
+          own error before the clone is swapped in. A Nullable target is not caught: ClickHouse
+          stores NULL for such values and reports success (see README). #}
       {%- if ns.actions | length > 0 %}
           {{ stage('Alter Column') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
           {{ ns.actions | join(', ') }}
-          SETTINGS mutations_sync = 2
+          SETTINGS alter_sync = 2
           {%- set nsNodeVariables.metaDataChanged = true -%}
       {%- endif %}
   {%- endmacro -%}

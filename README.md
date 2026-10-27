@@ -82,6 +82,46 @@ leading terms of `@orderBy`, or a key that names a column the node no longer has
 create or redeploy leaves the existing table unchanged (a redeploy fails on the clone or on
 `CREATE OR REPLACE`, before anything replaces the live table).
 
+## Column type changes
+
+A redeploy changes a column's type with `ALTER TABLE ... MODIFY COLUMN` on the clone, with
+`SETTINGS alter_sync = 2` so the deploy waits for ClickHouse to convert the existing values
+(ClickHouse Cloud does not wait by default):
+
+| Change | Result |
+|---|---|
+| Values convert (e.g. `'10'` → `UInt32`) | Converted, deploy succeeds |
+| `Nullable` → not null while the column has NULLs and no `@defaultValue` | Deploy fails: *Cannot convert column ... Please specify `DEFAULT`*. Add `@defaultValue` to fill the NULLs |
+| A value the new non-`Nullable` type cannot take (e.g. `'n/a'` → `UInt32`) | Deploy fails: *Mutation ... failed to finish ... Cannot parse string*. The live table is not changed |
+| A value the new `Nullable` type cannot take (e.g. `'ALGERIA'` → `Nullable(UInt32)`) | **Deploy succeeds and ClickHouse stores NULL for that value** |
+
+The last case is not an error in ClickHouse, so the node types cannot stop it. Check the data
+before changing a column to a `Nullable` type, for example:
+
+```sql
+SELECT count() FROM <table> WHERE c IS NOT NULL AND toUInt32OrNull(c) IS NULL;
+```
+
+A failed conversion leaves an unfinished mutation on the clone table
+(`<name>_COALESCE_INTERNAL_TABLE`); the next redeploy replaces the clone.
+
+## Fact merge strategies
+
+ClickHouse has no `MERGE`, so a Fact load is an `INSERT` of the rows a merge would apply,
+followed by a clean-up `DELETE` of the copies it replaces (per business key only the row with
+the latest `SYSTEM_UPDATE_DATE` is kept).
+
+| `@mergeStrategy` | Matches on | What the load does |
+|---|---|---|
+| `changeTracking` (default when `@mergeStrategy` is not set) | `@isBusinessKey` columns | New keys are inserted; changed rows are re-inserted with a newer `SYSTEM_UPDATE_DATE` and the older copy is removed |
+| `lastModified` | `@isBusinessKey` columns, plus exactly one `@lastModifiedTracking` column | Only rows newer than the target's are loaded, then as `changeTracking` |
+| `allColumnMatch` | Every non-system column (`@isBusinessKey` is ignored) | Only rows with no fully matching row in the target are inserted; nothing is updated or deleted |
+
+A Fact with no `@isBusinessKey` column and no `@mergeStrategy` is loaded as a plain insert.
+
+`upsert` is not supported: without `MERGE` there is no separate upsert behaviour in ClickHouse.
+Use `changeTracking`.
+
 ## Known limitations
 
 ### `Variant` columns in SQL nodes
