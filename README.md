@@ -103,6 +103,26 @@ rejected key leaves behind:
 - **View changed to a table:** the view is dropped first, so after a failed `CREATE` the node
   has no object until the key is fixed and redeployed.
 
+## Storage location changes
+
+A redeploy compares the node's deployed path with its desired path. The deployed path is built
+from the mapping the node was deployed with (`currentState.storageLocations`), the same way as
+the Snowflake SQL node types, so both a node moved to another location and a location whose
+mapping changed (same location, new database) count as a move:
+
+| Node | Stages |
+|---|---|
+| Table | `Clone Table` (from the old database) → alters, if any → `Rename Table` (into the new one) → `Drop Table` at the old path. Data is kept. |
+| View | `Rename View`, or `Drop View` + `Create View` when its definition also changed |
+
+A view whose **source** location's mapping changed is not recreated; the redeploy only updates
+its metadata.
+
+The move depends on the platform passing the previously deployed mapping. On Snowflake this
+fires as expected. On the ClickHouse test environment (Coalesce PR build, deployed with `coa`)
+the previous mapping was not passed, so a mapping change gave only a metadata update and the
+next load failed because the table did not exist in the new database.
+
 ## Column type changes
 
 A redeploy changes a column's type with `ALTER TABLE ... MODIFY COLUMN` on the clone, with

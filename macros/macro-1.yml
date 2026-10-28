@@ -66,10 +66,21 @@ macroString: |-
       {%- set nsNodeVariables.desiredMatType = get_materialization_type(node.materializationType) -%}
     {%- endif -%}
 
+    {#- Current (deployed) object: resolved from currentState.storageLocations, the mapping it was
+        deployed with, so a changed location mapping (same location, new database) shows up as a path
+        change. Falls back to ref_no_link (the environment's current mapping) when the deployed
+        mapping is not available. The clone sits next to the current object. #}
     {%- if currentState is defined and currentState -%}
-      {%- set nsNodeVariables.curObjectNameFullPath = ref_no_link(currentState.node.location.name, currentState.node.name) -%}
-      {%- set nsNodeVariables.cloneObjectNameFullPath = ref_no_link(currentState.node.location.name, currentState.node.name + '_COALESCE_INTERNAL_TABLE') -%}
-
+      {%- set curLocation = (currentState.storageLocations | default([], true)) | selectattr('name', 'equalto', currentState.node.location.name) | list -%}
+      {%- if curLocation and (curLocation[0].schema or curLocation[0].database) -%}
+        {%- set curParts = [curLocation[0].database, curLocation[0].schema] | select | list -%}
+        {%- set curPrefix = '`' ~ (curParts | join('`.`')) ~ '`.' -%}
+        {%- set nsNodeVariables.curObjectNameFullPath = curPrefix ~ '`' ~ currentState.node.name ~ '`' -%}
+        {%- set nsNodeVariables.cloneObjectNameFullPath = curPrefix ~ '`' ~ currentState.node.name ~ '_COALESCE_INTERNAL_TABLE`' -%}
+      {%- else -%}
+        {%- set nsNodeVariables.curObjectNameFullPath = ref_no_link(currentState.node.location.name, currentState.node.name) -%}
+        {%- set nsNodeVariables.cloneObjectNameFullPath = ref_no_link(currentState.node.location.name, currentState.node.name + '_COALESCE_INTERNAL_TABLE') -%}
+      {%- endif -%}
     {%- endif -%}
 
     {%- if desiredState is defined and desiredState -%}
