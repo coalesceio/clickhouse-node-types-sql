@@ -288,19 +288,11 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    safe_equals(left_expr, right_expr, data_type): datatype-aware equality for business keys
-    (GEOGRAPHY/GEOMETRY compared on WKB). NULL never matches.
+    safe_equals(left_expr, right_expr, data_type): equality for business-key joins. NULL never matches.
+    data_type is unused, kept so callers don't change.
   ===========================================================================#}
   {%- macro safe_equals(left_expr, right_expr, data_type) -%}
-
-      {%- set dt = data_type | upper -%}
-
-      {%- if 'GEOGRAPHY' in dt or 'GEOMETRY' in dt -%}
-          ST_ASWKB({{ left_expr }}) = ST_ASWKB({{ right_expr }})
-      {%- else -%}
-          {{ left_expr }} = {{ right_expr }}
-      {%- endif -%}
-
+      {{ left_expr }} = {{ right_expr }}
   {%- endmacro -%}
 
   {#===========================================================================
