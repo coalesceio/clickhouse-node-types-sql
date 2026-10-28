@@ -115,8 +115,11 @@ mapping changed (same location, new database) count as a move:
 | Table | `Clone Table` (from the old database) → alters, if any → `Rename Table` (into the new one) → `Drop Table` at the old path. Data is kept. |
 | View | `Rename View`, or `Drop View` + `Create View` when its definition also changed |
 
-A view whose **source** location's mapping changed is not recreated; the redeploy only updates
-its metadata.
+A view is also recreated (`Create View`) when the mapping of a location it **reads from**
+changed, because its `SELECT` names the old database. Only the view's own source locations are
+compared: a change to any other location (for example the view's source is in `SRC` and only
+`TARGET2` changed) leaves the view as it is. Tables need nothing here: the load resolves the
+source with the current mapping when it runs.
 
 `ref_no_link()` always resolves a location with the environment's **current** mapping, so it is
 used for where an object should be now (the desired path, the run templates' load target,

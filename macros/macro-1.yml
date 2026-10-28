@@ -833,7 +833,11 @@ macroString: |-
       - only renamed/moved -> Rename View (RENAME TABLE), + Set View Comment if it changed
       - only the description changed -> Set View Comment
       - anything else changed (nothing in the view) -> Metadata Update-Default
-    The definition is compared by rendering view_definition_sql() for both states.
+    The definition is compared by rendering view_definition_sql() for both states. Both render
+    ref() with the current mapping, so a source location whose mapping changed (same location,
+    new database) is detected separately: only the locations of the view's own sources are
+    compared between currentState and desiredState storageLocations, so a change to any other
+    location leaves the view alone.
   ===========================================================================#}
   {%- macro view_redeploy_sql() -%}
       {%- set desPath = nsNodeVariables.desObjectNameFullPath -%}
@@ -841,7 +845,24 @@ macroString: |-
       {%- set isNewView = currentState is not defined or not currentState
                           or nsNodeVariables.currentMatType != nsNodeVariables.desiredMatType -%}
       {%- set pathChanged = not isNewView and curPath != desPath -%}
-      {%- set definitionChanged = isNewView or view_definition_sql(currentState) != view_definition_sql(desiredState) -%}
+
+      {#- A source location (one the view reads from) mapped to a different database since the deploy #}
+      {%- set nsSrc = namespace(moved=false) -%}
+      {%- if not isNewView -%}
+          {%- for src in desiredState.sources | default([]) -%}
+              {%- for dep in src.dependencies | default([]) -%}
+                  {%- set curLoc = (currentState.storageLocations | default([], true)) | selectattr('name', 'equalto', dep.node.location.name) | list -%}
+                  {%- set desLoc = (desiredState.storageLocations | default([], true)) | selectattr('name', 'equalto', dep.node.location.name) | list -%}
+                  {%- if curLoc and desLoc
+                         and (curLoc[0].database != desLoc[0].database or curLoc[0].schema != desLoc[0].schema) -%}
+                      {%- set nsSrc.moved = true -%}
+                  {%- endif -%}
+              {%- endfor -%}
+          {%- endfor -%}
+      {%- endif -%}
+
+      {%- set definitionChanged = isNewView or nsSrc.moved
+                                  or view_definition_sql(currentState) != view_definition_sql(desiredState) -%}
       {%- set desiredDescription = node.description if node.description | trim | length > 0 else '' -%}
       {%- set currentDescription = '' if isNewView
                                    else (currentState.node.description if currentState.node.description | trim | length > 0 else '') -%}
