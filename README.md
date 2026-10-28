@@ -118,10 +118,17 @@ mapping changed (same location, new database) count as a move:
 A view whose **source** location's mapping changed is not recreated; the redeploy only updates
 its metadata.
 
-The move depends on the platform passing the previously deployed mapping. On Snowflake this
-fires as expected. On the ClickHouse test environment (Coalesce PR build, deployed with `coa`)
-the previous mapping was not passed, so a mapping change gave only a metadata update and the
-next load failed because the table did not exist in the new database.
+`ref_no_link()` always resolves a location with the environment's **current** mapping, so it is
+used for where an object should be now (the desired path, the run templates' load target,
+`ref()` in the node's SQL) but not for the deployed path: after a mapping change it would give
+the new database for both, and the move would never be detected.
+
+The move depends on the platform passing the previously deployed mapping in
+`currentState.storageLocations`. This was verified with SQL nodes on Snowflake production
+(`current` held the old schema, `desired` the new one; a redeploy without a mapping change did
+nothing). On the ClickHouse test environment (Coalesce PR build, deployed with `coa`),
+`currentState.storageLocations` already held the new mapping, so a mapping change gave only a
+metadata update and the next load failed because the table did not exist in the new database.
 
 ## Column type changes
 
