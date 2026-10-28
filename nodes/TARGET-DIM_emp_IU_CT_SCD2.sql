@@ -1,7 +1,6 @@
 @id("4d6c23dd-77fb-43b8-b79f-e8ec203f9159")
 @nodeType("SQLDimension")
 @description("Employee dimension - INSERT + DELETE load, change tracking SCD Type 2, plain MergeTree")
-@engine("MergeTree")
 @orderBy("id", "SYSTEM_VERSION")
 @mergeStrategy("changeTracking")
 SELECT

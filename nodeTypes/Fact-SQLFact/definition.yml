@@ -19,52 +19,32 @@ metadata:
 
         - name: materializationType
           description: |-
-            • Controls node's materialization type — supports 𝘁𝗮𝗯𝗹𝗲, 𝘃𝗶𝗲𝘄, and 𝘁𝗿𝗮𝗻𝘀𝗶𝗲𝗻𝘁 𝘁𝗮𝗯𝗹𝗲.
+            • Controls node's materialization type — supports 𝘁𝗮𝗯𝗹𝗲 and 𝘃𝗶𝗲𝘄.
           isRequired: false
           parameters:
             - name: type
               type: string
               isRequired: true
               default: table
-              example: transient table
+              example: view
               options:
                 - table
-                - transient table
                 - view
 
-        - name: engine
+        - name: partitionBy
           description: |-
-            • ClickHouse table engine (ENGINE = ...) — any MergeTree-family engine, with its parameters.
-            • If not specified, defaults to 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲.
-            • The table is sorted by the orderBy columns (ORDER BY tuple() when none). The Replacing, Summing,
-              Aggregating, Collapsing and Coalescing engines combine rows that share the ORDER BY key, so mark the key columns with orderBy.
-              Ex. engine("ReplacingMergeTree(SYSTEM_UPDATE_DATE)")
-            • Engines and parameters:
-              MergeTree
-              ReplacingMergeTree([ver [, is_deleted]])
-              SummingMergeTree([columns])
-              AggregatingMergeTree
-              CollapsingMergeTree(sign)
-              VersionedCollapsingMergeTree(sign, version)
-              CoalescingMergeTree([columns])
-              GraphiteMergeTree(config_section)
-            • Ignored on views.
+            • The table's PARTITION BY key. Each argument is one term — a column or an expression, written as it should appear in the SQL; several terms are partitioned together.
+              Ex. partitionBy("toYYYYMM(`order_Date`)")
+              Ex. partitionBy("toYYYYMM(`order_Date`)", "`region`")
+            • Keep it coarse (e.g. one partition per month): each partition is stored separately, and too many partitions slow inserts down and eventually make them fail.
+            • Without partitionBy the table is not partitioned. Ignored on views.
+            • ⚠️ Changing partitionBy (or renaming / retyping a column used in it) on redeploy recreates the table — existing data is lost.
           isRequired: false
           parameters:
-            - name: engine
+            - name: term
               type: string
               isRequired: true
-              default: MergeTree
-              example: ReplacingMergeTree(SYSTEM_UPDATE_DATE)
-              options:
-                - MergeTree
-                - ReplacingMergeTree
-                - SummingMergeTree
-                - AggregatingMergeTree
-                - CollapsingMergeTree
-                - VersionedCollapsingMergeTree
-                - CoalescingMergeTree
-                - GraphiteMergeTree
+              example: toYYYYMM(<col_name>)
 
         - name: orderBy
           description: |-
@@ -72,6 +52,7 @@ metadata:
               Ex. orderBy("`n_Nationkey`")
               Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)")
             • Without orderBy (and primaryKey) the table uses ORDER BY tuple(). Ignored on views.
+            • ⚠️ On redeploy, removing trailing terms or adding new columns (without a default) is altered in place when primaryKey is set; any other orderBy change (or renaming / retyping a column used in it) recreates the table — existing data is lost.
           isRequired: false
           parameters:
             - name: term
@@ -86,26 +67,13 @@ metadata:
               Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)") primaryKey("`n_Nationkey`", "`n_Name`")
             • Without orderBy, the primary key is also the sort key: primaryKey("`n_Nationkey`") → ORDER BY (`n_Nationkey`).
             • When it is the same as orderBy, it is not written separately. Ignored on views.
+            • ⚠️ Changing primaryKey (or renaming / retyping a column used in it) on redeploy recreates the table — existing data is lost.
           isRequired: false
           parameters:
             - name: term
               type: string
               isRequired: true
               example: <col_name>
-
-        - name: partitionBy
-          description: |-
-            • The table's PARTITION BY key. Each argument is one term — a column or an expression, written as it should appear in the SQL; several terms are partitioned together.
-              Ex. partitionBy("toYYYYMM(`order_Date`)")
-              Ex. partitionBy("toYYYYMM(`order_Date`)", "`region`")
-            • Keep it coarse (e.g. one partition per month): each partition is stored separately, and too many partitions slow inserts down and eventually make them fail.
-            • Without partitionBy the table is not partitioned. Ignored on views.
-          isRequired: false
-          parameters:
-            - name: term
-              type: string
-              isRequired: true
-              example: toYYYYMM(<col_name>)
 
         - name: settings
           description: |-
@@ -114,6 +82,7 @@ metadata:
               Ex. settings("index_granularity = 8192", "min_bytes_for_wide_part = 0")
             • allow_nullable_key = 1 is added automatically when the table has an orderBy, primaryKey or partitionBy, so nullable columns can be key terms — set it here to override it.
             • Ignored on views.
+            • On redeploy, changes are applied in place with MODIFY SETTING / RESET SETTING.
           isRequired: false
           parameters:
             - name: setting
@@ -145,8 +114,8 @@ metadata:
             • Picks the change-detection method; different methods require different column annotations.
             • If not specified: a node with an isBusinessKey column defaults to changeTracking - 𝗦𝗖𝗗 𝗧𝘆𝗽𝗲 𝟭; a node with no isBusinessKey column is loaded as a plain insert.
             • The value is not case-sensitive; any other value fails the run.
-            • changeTracking, lastModified and upsert need the SELECT/CTE to return exactly one row per business key, with no NULL business key — a pre-load test can handle this. allColumnMatch uses no business key.
-            • Always takes priority when set: changeTracking, lastModified and upsert merge on the business key, so the run fails if no column is marked isBusinessKey. allColumnMatch needs no isBusinessKey.
+            • changeTracking and lastModified need the SELECT/CTE to return exactly one row per business key, with no NULL business key — a pre-load test can handle this. allColumnMatch uses no business key.
+            • Always takes priority when set: changeTracking and lastModified merge on the business key, so the run fails if no column is marked isBusinessKey. allColumnMatch needs no isBusinessKey.
             • Ignored on views
 
             ◆ 𝗰𝗵𝗮𝗻𝗴𝗲𝗧𝗿𝗮𝗰𝗸𝗶𝗻𝗴
@@ -157,12 +126,6 @@ metadata:
               • Compares a single lastModifiedTracking timestamp column against the target's stored value — 𝗦𝗖𝗗 𝗧𝘆𝗽𝗲 𝟭.
               • Requires exactly one column marked lastModifiedTracking — the run fails if none is present.
 
-            ◆ 𝘂𝗽𝘀𝗲𝗿𝘁
-              • No change detection at all — a matched row is always updated, an unmatched row is inserted.
-              • The SELECT/CTE should return one row per business key (e.g. de-duplicated upstream).
-              • System columns are optional; any that are present are written exactly as the SELECT/CTE computes them. SYSTEM_CREATE_DATE keeps its first-inserted value on update.
-              • Requires no lastModifiedTracking column
-
             ◆ 𝗮𝗹𝗹𝗖𝗼𝗹𝘂𝗺𝗻𝗠𝗮𝘁𝗰𝗵
               • Meant for factless fact tables used for event tracking and coverage/relationship tracking.
               • Treats every non-system column as the business key — a source row is inserted only if no target row matches it on all of those columns; an existing matching row is left untouched (never updated).
@@ -171,7 +134,7 @@ metadata:
               • Requires no lastModifiedTracking column
 
             Agentic creation — before writing a new Fact node's SELECT, ask the user (don't silently default):
-            1. Which merge strategy do they want — upsert, changeTracking, lastModified, or allColumnMatch? If they don't know, explain the four options above and let them choose — don't pick changeTracking just because it's the fallback default.
+            1. Which merge strategy do they want — changeTracking, lastModified, or allColumnMatch? If they don't know, explain the three options above and let them choose — don't pick changeTracking just because it's the fallback default.
             2. If they want a plain insert with no merge, leave out both this annotation and isBusinessKey — setting a strategy without a business key fails the run.
 
           isRequired: false
@@ -184,7 +147,6 @@ metadata:
               options:
                 - changeTracking
                 - lastModified
-                - upsert
                 - allColumnMatch
 
         - name: disableTests
@@ -271,7 +233,7 @@ metadata:
         - name: isBusinessKey
           description: |-
             • Marks a column as part of the business key used to match existing rows during the merge.
-            • If no column is marked and no mergeStrategy is set, there is no merge — every source row is simply inserted. An explicit changeTracking, lastModified or upsert without a business key fails the run.
+            • If no column is marked and no mergeStrategy is set, there is no merge — every source row is simply inserted. An explicit changeTracking or lastModified without a business key fails the run.
             • Ignored on views.
 
             Agentic creation — before writing the SELECT, ask the user which column(s) should be marked @isBusinessKey, or whether they want a plain insert with none. Don't guess based on column naming (e.g. assuming a "_ID"/"_KEY" column, or the first natural-looking key) — the business key is a domain decision only the user can make, and getting it wrong silently breaks change detection for every row. A business key can be more than one column; ask whether it's composite.
@@ -290,10 +252,9 @@ metadata:
           description: |-
             ⚙ This is a system column.
             • Marks this column as the timestamp a row was first created.
-            • 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱 𝘂𝗻𝗹𝗲𝘀𝘀 mergeStrategy 𝗶𝘀 𝘂𝗽𝘀𝗲𝗿𝘁 or 𝗮𝗹𝗹𝗖𝗼𝗹𝘂𝗺𝗻𝗠𝗮𝘁𝗰𝗵, or no column is marked isBusinessKey (these write it as computed).
+            • 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱 𝘂𝗻𝗹𝗲𝘀𝘀 mergeStrategy 𝗶𝘀 𝗮𝗹𝗹𝗖𝗼𝗹𝘂𝗺𝗻𝗠𝗮𝘁𝗰𝗵, or no column is marked isBusinessKey (these write it as computed).
             • Value written under changeTracking/lastModified: CURRENT_TIMESTAMP on first insert, then kept unchanged.
-            • The expression in the SELECT is only used to derive the column's datatype — its value is ignored under changeTracking/lastModified (upsert writes it as computed).
-            • To use different values (e.g. a source-supplied timestamp), use upsert and compute them in the SELECT/CTE.
+            • The expression in the SELECT is only used to derive the column's datatype — its value is ignored under changeTracking/lastModified.
 
             Expected expression:
             CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_CREATE_DATE" @isSystemCreateDate
@@ -305,10 +266,9 @@ metadata:
           description: |-
             ⚙ This is a system column.
             • Marks this column as the timestamp a row was last updated.
-            • 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱 𝘂𝗻𝗹𝗲𝘀𝘀 mergeStrategy 𝗶𝘀 𝘂𝗽𝘀𝗲𝗿𝘁 or 𝗮𝗹𝗹𝗖𝗼𝗹𝘂𝗺𝗻𝗠𝗮𝘁𝗰𝗵, or no column is marked isBusinessKey (these write it as computed) — recomputed to the current timestamp on every inserted or changed row, so every row change carries an audit trail of when it was last updated.
+            • 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱 𝘂𝗻𝗹𝗲𝘀𝘀 mergeStrategy 𝗶𝘀 𝗮𝗹𝗹𝗖𝗼𝗹𝘂𝗺𝗻𝗠𝗮𝘁𝗰𝗵, or no column is marked isBusinessKey (these write it as computed) — recomputed to the current timestamp on every inserted or changed row, so every row change carries an audit trail of when it was last updated.
             • Value written under changeTracking/lastModified: CURRENT_TIMESTAMP whenever the row is inserted or changed.
-            • The expression in the SELECT is only used to derive the column's datatype — its value is ignored under changeTracking/lastModified (upsert writes it as computed).
-            • To use different values (e.g. a source-supplied timestamp), use upsert and compute them in the SELECT/CTE.
+            • The expression in the SELECT is only used to derive the column's datatype — its value is ignored under changeTracking/lastModified.
 
             Expected expression:
             CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate

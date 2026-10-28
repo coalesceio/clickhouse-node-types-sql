@@ -1,7 +1,6 @@
 @id("0f07cddf-3354-4201-8d9e-1bc3eab43eae")
 @nodeType("SQLFact")
 @description("Factless fact - employee / department / hire date, keys only, allColumnMatch (insert only new combinations)")
-@engine("MergeTree")
 @orderBy("id", "department", "created_date")
 @mergeStrategy("allColumnMatch")
 SELECT

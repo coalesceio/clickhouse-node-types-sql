@@ -1,7 +1,6 @@
 @id("90f64f84-f23c-4f6a-9c9a-17261acf0d02")
 @nodeType("SQLDimension")
 @description("Employee dimension - INSERT + DELETE load, last modified SCD Type 1, plain MergeTree")
-@engine("MergeTree")
 @orderBy("id")
 @mergeStrategy("lastModified")
 SELECT

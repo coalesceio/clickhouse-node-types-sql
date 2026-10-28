@@ -12,8 +12,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     - INSERT the row set the MERGE would have applied. An "update" re-inserts the same key with a newer
       SYSTEM_UPDATE_DATE (SCD2 expiry re-inserts the old version with SYSTEM_CURRENT_FLAG = 'N').
     - DELETE the replaced copies: per business key (+ SYSTEM_VERSION for SCD2) only the row with the latest
-      SYSTEM_UPDATE_DATE is kept, so a plain SELECT is correct right after the run, on any MergeTree engine.
-    The target is read with FINAL (engines other than plain MergeTree) in case an earlier run left copies behind.
+      SYSTEM_UPDATE_DATE is kept, so a plain SELECT is correct right after the run (the table is plain MergeTree).
 #}
 
 {#- High date for an open SYSTEM_END_DATE, within the column type's range (DateTime64 ends in 2299, DateTime in 2106) #}
@@ -70,7 +69,6 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {# No @mergeStrategy given — always default to changeTracking, regardless of which tracking columns are present (must match validate_dimension_requirements). #}
         {%- set mergeStrategy = 'changetracking' %}
     {%- endif %}
-    {%- set isSimpleUpsert = mergeStrategy == 'upsert' %}
     {%- set isLastModifiedStrategy = mergeStrategy == 'lastmodified' %}
     {%- set isChangeTrackingStrategy = mergeStrategy == 'changetracking' %}
 
@@ -93,20 +91,13 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {%- set type2Dimension = false %}
     {%- endif %}
 
-    {%- if isSimpleUpsert %}
-        {# @upsert always forces plain SCD1, no matter what @lastModifiedTracking/@isChangeTracking say. #}
-        {%- set type2Dimension = false %}
-    {%- endif %}
-
     {%- set source = sources[0] %}
     {%- set joinclause = source.join %}
     {# The node's own CTEs (source.cteString) already open a WITH clause; the load's CTEs must continue it with a comma, since a second WITH is invalid SQL. #}
     {%- set sourceDataCteOpen = ', ' if (source.cteString | default('', true) | trim | length > 0) else 'WITH ' %}
 
-    {# Target path, FINAL for engines that combine rows (plain MergeTree rejects it), and one load timestamp (now64 is constant within a query) #}
+    {# Target path and one load timestamp (now64 is constant within a query) #}
     {%- set targetPath = ref_no_link(node.location.name, node.name) %}
-    {%- set engineName = (ch_engine() | trim).split('(')[0] | trim | replace('Replicated', '') | replace('Shared', '') %}
-    {%- set targetFinal = '' if engineName == 'MergeTree' else ' FINAL' %}
     {%- set loadTimestamp = 'now64(6)' %}
 
     {%- if lastModifiedComparison %}
@@ -194,7 +185,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {%- for col in zeroKeyCreateDateCols %},
                     min(`{{ col.name }}`) AS `{{ col.name }}`
                     {%- endfor %}
-                FROM {{ targetPath }}{{ targetFinal }}
+                FROM {{ targetPath }}
                 WHERE
                 {%- for col in columns if col.isSurrogateKey %}
                     {%- if not loop.first %} AND {%- endif %}
@@ -203,9 +194,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             ) AS `EXISTING_ZERO`
     {%- endif %}
 
-    {%- if isSimpleUpsert %}
-        {{ stage('Load ' + materializationType + ' Using Merge - Upsert') }}
-    {%- elif lastModifiedComparison %}
+    {%- if lastModifiedComparison %}
         {#== Last Modified SCD ==#}
         {%- if type2Dimension %}
             {{ stage('Load ' + materializationType + ' Using Merge - Last Modified Comparison - SCD2') }}
@@ -264,7 +253,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {%- endif %}
                     {%- if not loop.last %}, {%- endif %}
                 {%- endfor %}
-                FROM {{ targetPath }}{{ targetFinal }}
+                FROM {{ targetPath }}
                 WHERE `{{ sysCurrentFlagCol }}` = 'Y'
             ),
 
@@ -436,53 +425,6 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                guard here too so a missing key fails that test with a clear message instead of crashing template rendering outright. #}
             {%- set firstBizKeyCol = (columns | selectattr("isBusinessKey") | first).name if hasBusinessKey else none %}
 
-            {%- if isSimpleUpsert %}
-            {# @upsert: every source row is written as-is — system columns included, using whatever the SELECT/CTE put in them.
-               Only the target lookup is needed to keep an existing row's surrogate key and SYSTEM_CREATE_DATE. #}
-            {{ sourceDataCteOpen }}`SOURCE_DATA` AS (
-                SELECT {{ source.selectModifier | default('', true) }}
-                {%- for col in source.columns if not col.isSurrogateKey %}
-                    {{ get_source_transform(col) }} AS `{{ col.name }}`
-                    {%- if not loop.last %}, {%- endif %}
-                {%- endfor %}
-                {%- for col in source.columns if col.isSurrogateKey %},
-                    {{ get_source_transform(col) }} AS `SRC_{{ col.name }}`
-                {%- endfor %}
-                {{ joinclause }}
-            ),
-
-            `TARGET_CURRENT` AS (
-                SELECT
-                    1 AS `TGT_ROW_EXISTS`
-                {%- for col in columns if col.isBusinessKey %},
-                    `{{ col.name }}`
-                {%- endfor %}
-                {%- for col in columns if col.isSurrogateKey or col.isSystemCreateDate %},
-                    `{{ col.name }}` AS `TGT_{{ col.name }}`
-                {%- endfor %}
-                FROM {{ targetPath }}{{ targetFinal }}
-            )
-
-            SELECT
-            {%- for col in columns %}
-                {%- if col.isSurrogateKey %}
-                if(`TARGET_CURRENT`.`TGT_ROW_EXISTS` IS NULL, {{ new_surrogate_key(col) }}, `TARGET_CURRENT`.`TGT_{{ col.name }}`)
-                {%- elif col.isSystemCreateDate %}
-                if(`TARGET_CURRENT`.`TGT_ROW_EXISTS` IS NULL, `SOURCE_DATA`.`{{ col.name }}`, `TARGET_CURRENT`.`TGT_{{ col.name }}`)
-                {%- else %}
-                `SOURCE_DATA`.`{{ col.name }}`
-                {%- endif %}
-                AS `{{ col.name }}`
-                {%- if not loop.last %}, {%- endif %}
-            {%- endfor %}
-            FROM `SOURCE_DATA`
-            LEFT JOIN `TARGET_CURRENT` ON
-            {%- for col in columns if col.isBusinessKey %}
-                {%- if not loop.first %} AND {%- endif %}
-                {{ safe_equals('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`' ~ col.name ~ '`', col.dataType) }}
-            {%- endfor %}
-            {%- else %}
-
             {{ sourceDataCteOpen }}`SOURCE_DATA` AS (
                 /* Incoming source rows, transformed and aliased to the target column names */
                 SELECT {{ source.selectModifier | default('', true) }}
@@ -508,7 +450,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {%- endif %}
                     {%- if not loop.last %}, {%- endif %}
                 {%- endfor %}
-                FROM {{ targetPath }}{{ targetFinal }}
+                FROM {{ targetPath }}
             ),
 
             `CHANGE_DETECTION` AS (
@@ -578,7 +520,6 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             {%- endfor %}
             FROM `CHANGE_DETECTION`
             WHERE `CHANGE_TYPE` IN ('NEW', 'CHANGED')
-            {%- endif %}
         {%- endif %}
     {# Unmatched LEFT JOIN columns must be NULL (ClickHouse defaults them to 0 / '') for the NEW checks above #}
     SETTINGS join_use_nulls = 1

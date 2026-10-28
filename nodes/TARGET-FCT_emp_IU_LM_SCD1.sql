@@ -1,7 +1,6 @@
 @id("5842b88f-0188-4110-97a2-4afab43dfe1a")
 @nodeType("SQLFact")
 @description("Employee fact - INSERT + DELETE load, last modified SCD Type 1, plain MergeTree")
-@engine("MergeTree")
 @orderBy("id")
 @mergeStrategy("lastModified")
 SELECT

@@ -18,18 +18,32 @@ metadata:
 
         - name: materializationType
           description: |-
-            • Controls node's materialization type — supports 𝘁𝗮𝗯𝗹𝗲, 𝘃𝗶𝗲𝘄, and 𝘁𝗿𝗮𝗻𝘀𝗶𝗲𝗻𝘁 𝘁𝗮𝗯𝗹𝗲.
+            • Controls node's materialization type — supports 𝘁𝗮𝗯𝗹𝗲 and 𝘃𝗶𝗲𝘄.
           isRequired: false
           parameters:
             - name: type
               type: string
               isRequired: true
               default: table
-              example: transient table
+              example: view
               options:
                 - table
-                - transient table
                 - view
+
+        - name: partitionBy
+          description: |-
+            • The table's PARTITION BY key. Each argument is one term — a column or an expression, written as it should appear in the SQL; several terms are partitioned together.
+              Ex. partitionBy("toYYYYMM(`order_Date`)")
+              Ex. partitionBy("toYYYYMM(`order_Date`)", "`region`")
+            • Keep it coarse (e.g. one partition per month): each partition is stored separately, and too many partitions slow inserts down and eventually make them fail.
+            • Without partitionBy the table is not partitioned. Ignored on views.
+            • ⚠️ Changing partitionBy (or renaming / retyping a column used in it) on redeploy recreates the table — existing data is lost.
+          isRequired: false
+          parameters:
+            - name: term
+              type: string
+              isRequired: true
+              example: toYYYYMM(<col_name>)
 
         - name: orderBy
           description: |-
@@ -37,6 +51,7 @@ metadata:
               Ex. orderBy("`n_Nationkey`")
               Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)")
             • Without orderBy (and primaryKey) the table uses ORDER BY tuple(). Ignored on views.
+            • ⚠️ On redeploy, removing trailing terms or adding new columns (without a default) is altered in place when primaryKey is set; any other orderBy change (or renaming / retyping a column used in it) recreates the table — existing data is lost.
           isRequired: false
           parameters:
             - name: term
@@ -51,26 +66,13 @@ metadata:
               Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)") primaryKey("`n_Nationkey`", "`n_Name`")
             • Without orderBy, the primary key is also the sort key: primaryKey("`n_Nationkey`") → ORDER BY (`n_Nationkey`).
             • When it is the same as orderBy, it is not written separately. Ignored on views.
+            • ⚠️ Changing primaryKey (or renaming / retyping a column used in it) on redeploy recreates the table — existing data is lost.
           isRequired: false
           parameters:
             - name: term
               type: string
               isRequired: true
               example: <col_name>
-
-        - name: partitionBy
-          description: |-
-            • The table's PARTITION BY key. Each argument is one term — a column or an expression, written as it should appear in the SQL; several terms are partitioned together.
-              Ex. partitionBy("toYYYYMM(`order_Date`)")
-              Ex. partitionBy("toYYYYMM(`order_Date`)", "`region`")
-            • Keep it coarse (e.g. one partition per month): each partition is stored separately, and too many partitions slow inserts down and eventually make them fail.
-            • Without partitionBy the table is not partitioned. Ignored on views.
-          isRequired: false
-          parameters:
-            - name: term
-              type: string
-              isRequired: true
-              example: toYYYYMM(<col_name>)
 
         - name: settings
           description: |-
@@ -79,6 +81,7 @@ metadata:
               Ex. settings("index_granularity = 8192", "min_bytes_for_wide_part = 0")
             • allow_nullable_key = 1 is added automatically when the table has an orderBy, primaryKey or partitionBy, so nullable columns can be key terms — set it here to override it.
             • Ignored on views.
+            • On redeploy, changes are applied in place with MODIFY SETTING / RESET SETTING.
           isRequired: false
           parameters:
             - name: setting

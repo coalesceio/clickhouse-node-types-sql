@@ -66,10 +66,21 @@ macroString: |-
       {%- set nsNodeVariables.desiredMatType = get_materialization_type(node.materializationType) -%}
     {%- endif -%}
 
+    {#- Current (deployed) object: resolved from currentState.storageLocations, the mapping it was
+        deployed with, so a changed location mapping (same location, new database) shows up as a path
+        change. Falls back to ref_no_link (the environment's current mapping) when the deployed
+        mapping is not available. The clone sits next to the current object. #}
     {%- if currentState is defined and currentState -%}
-      {%- set nsNodeVariables.curObjectNameFullPath = ref_no_link(currentState.node.location.name, currentState.node.name) -%}
-      {%- set nsNodeVariables.cloneObjectNameFullPath = ref_no_link(currentState.node.location.name, currentState.node.name + '_COALESCE_INTERNAL_TABLE') -%}
-
+      {%- set curLocation = (currentState.storageLocations | default([], true)) | selectattr('name', 'equalto', currentState.node.location.name) | list -%}
+      {%- if curLocation and (curLocation[0].schema or curLocation[0].database) -%}
+        {%- set curParts = [curLocation[0].database, curLocation[0].schema] | select | list -%}
+        {%- set curPrefix = '`' ~ (curParts | join('`.`')) ~ '`.' -%}
+        {%- set nsNodeVariables.curObjectNameFullPath = curPrefix ~ '`' ~ currentState.node.name ~ '`' -%}
+        {%- set nsNodeVariables.cloneObjectNameFullPath = curPrefix ~ '`' ~ currentState.node.name ~ '_COALESCE_INTERNAL_TABLE`' -%}
+      {%- else -%}
+        {%- set nsNodeVariables.curObjectNameFullPath = ref_no_link(currentState.node.location.name, currentState.node.name) -%}
+        {%- set nsNodeVariables.cloneObjectNameFullPath = ref_no_link(currentState.node.location.name, currentState.node.name + '_COALESCE_INTERNAL_TABLE') -%}
+      {%- endif -%}
     {%- endif -%}
 
     {%- if desiredState is defined and desiredState -%}
@@ -100,8 +111,8 @@ macroString: |-
 
     {#- Sort key and primary key from the node-level @orderBy(...) / @primaryKey(...), one term per argument.
         - Only @primaryKey: ClickHouse sorts by the primary key, so it is also the ORDER BY key.
-        - Both: the primary key must be the leading terms of ORDER BY (compared ignoring spaces and
-          backticks); primaryKeyError otherwise. A primary key equal to ORDER BY is not written separately. #}
+        - Both: written as given; ClickHouse rejects a primary key that is not the leading terms of
+          ORDER BY. A primary key equal to ORDER BY is not written separately. #}
     {%- if desiredState is defined and desiredState -%}
       {%- set nsDesiredOrder = namespace(items=[]) -%}
       {%- set nsDesiredKey = namespace(items=[]) -%}
@@ -109,22 +120,6 @@ macroString: |-
       {{- collect_key_terms(config.primaryKey, nsDesiredKey) -}}
       {%- set nsNodeVariables.desiredOrderBy = nsDesiredOrder.items or nsDesiredKey.items -%}
       {%- set nsNodeVariables.desiredPrimaryKey = nsDesiredKey.items -%}
-      {%- if nsDesiredOrder.items and nsDesiredKey.items -%}
-        {%- set nsCheck = namespace(mismatch='') -%}
-        {%- for pk in nsDesiredKey.items -%}
-          {%- set ob = nsDesiredOrder.items[loop.index0] if loop.index0 < nsDesiredOrder.items | length else none -%}
-          {%- if not nsCheck.mismatch and (ob is none
-                  or (pk | replace(' ', '') | replace('`', '')) != (ob | replace(' ', '') | replace('`', ''))) -%}
-            {%- set nsCheck.mismatch = 'primaryKey term ' ~ loop.index ~ ' (' ~ pk ~ ') '
-                                       ~ ('has no orderBy term at that position' if ob is none else 'does not match orderBy term ' ~ loop.index ~ ' (' ~ ob ~ ')') -%}
-          {%- endif -%}
-        {%- endfor -%}
-        {%- if nsCheck.mismatch -%}
-          {%- set nsNodeVariables.primaryKeyError = 'ClickHouse requires PRIMARY KEY to be the leading terms of ORDER BY, but '
-                                                    ~ nsCheck.mismatch ~ '. ORDER BY (' ~ (nsDesiredOrder.items | join(', '))
-                                                    ~ '), PRIMARY KEY (' ~ (nsDesiredKey.items | join(', ')) ~ ').' -%}
-        {%- endif -%}
-      {%- endif -%}
 
       {#- Partition key and table settings from the node-level @partitionBy(...) / @settings(...):
           one term / one "name = value" setting per argument #}
@@ -141,6 +136,20 @@ macroString: |-
       {{- collect_key_terms(currentState.config.orderBy, nsCurrentOrder) -}}
       {{- collect_key_terms(currentState.config.primaryKey, nsCurrentKey) -}}
       {%- set nsNodeVariables.currentOrderBy = nsCurrentOrder.items or nsCurrentKey.items -%}
+      {%- set nsNodeVariables.currentPrimaryKey = nsCurrentKey.items -%}
+      {%- set nsCurrentPartition = namespace(items=[]) -%}
+      {%- set nsCurrentSettings = namespace(items=[]) -%}
+      {{- collect_key_terms(currentState.config.partitionBy, nsCurrentPartition) -}}
+      {{- collect_key_terms(currentState.config.settings, nsCurrentSettings) -}}
+      {%- set nsNodeVariables.currentPartitionBy = nsCurrentPartition.items -%}
+      {%- set nsNodeVariables.currentSettings = nsCurrentSettings.items -%}
+    {%- endif -%}
+
+    {#- Redeploy: did the sort key change (ignoring spaces, backticks and case)? #}
+    {%- if currentState is defined and currentState and desiredState is defined and desiredState -%}
+      {%- set nsNodeVariables.orderByChanged =
+            (nsNodeVariables.currentOrderBy | join(',') | replace(' ', '') | replace('`', '') | lower)
+            != (nsNodeVariables.desiredOrderBy | join(',') | replace(' ', '') | replace('`', '') | lower) -%}
     {%- endif -%}
 
   {%- endmacro -%}
@@ -154,10 +163,12 @@ macroString: |-
       alterObjectNameFullPath               what alter_ macros change: clone (table) / view
       droppedColumns / renamedColumns       quoted current column names
       desired/currentOrderBy                ORDER BY terms from @orderBy (or @primaryKey when only that is set)
-      desiredPrimaryKey                     PRIMARY KEY terms from @primaryKey (leading terms of desiredOrderBy)
-      primaryKeyError                       why the primary key is invalid, '' when valid
-      desiredPartitionBy                    PARTITION BY terms from @partitionBy
-      desiredSettings                       "name = value" table settings from @settings
+      desired/currentPrimaryKey             PRIMARY KEY terms from @primaryKey
+      desired/currentPartitionBy            PARTITION BY terms from @partitionBy
+      desired/currentSettings               "name = value" table settings from @settings
+      rebuildReason                         why a table redeploy rebuilds instead of altering, '' when it alters
+                                            (set by set_rebuild_reason())
+      orderByChanged / orderByAltered       redeploy: the sort key changed / a MODIFY ORDER BY was emitted
       metaDataChanged                      set by the redeploy macros
   ===========================================================================#}
   {%- set nsNodeVariables = namespace(desiredMatType = "",
@@ -170,10 +181,15 @@ macroString: |-
                                       renamedColumns = [],
                                       desiredOrderBy = [],
                                       desiredPrimaryKey = [],
-                                      primaryKeyError = "",
                                       currentOrderBy = [],
+                                      currentPrimaryKey = [],
                                       desiredPartitionBy = [],
+                                      currentPartitionBy = [],
                                       desiredSettings = [],
+                                      currentSettings = [],
+                                      rebuildReason = "",
+                                      orderByChanged = false,
+                                      orderByAltered = false,
                                       metaDataChanged = false) -%}
   {{- initialize_node_variables(nsNodeVariables) -}}
 
@@ -196,25 +212,13 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    drop_materialization(materialization): DROP keyword for a type, e.g. 'TABLE IF EXISTS'.
+    drop_materialization(materialization): DROP keyword for a ClickHouse type — 'VIEW IF EXISTS'
+    for a view, 'TABLE IF EXISTS' for a table and anything else (including a table deployed
+    earlier with a type that is no longer offered).
   ===========================================================================#}
   {% macro drop_materialization(materialization) %}
-      {%- if materialization | lower in ['table', 'transient table','temporary table', 'hybrid table'] -%}
-          TABLE IF EXISTS
-      {%- elif materialization | lower in ['view', 'secure view', 'run view', 'cortex search service'] -%}
+      {%- if materialization | lower == 'view' -%}
           VIEW IF EXISTS
-      {%- elif materialization | lower in ['dynamic table','transient dynamic table', 'dynamic iceberg table'] -%}
-          DYNAMIC TABLE IF EXISTS
-      {%- elif materialization | lower == 'materialized view' -%}
-          MATERIALIZED VIEW IF EXISTS
-      {%- elif materialization | lower == 'external table' -%}
-          EXTERNAL TABLE IF EXISTS
-      {%- elif materialization | lower == 'iceberg table' -%}
-          ICEBERG TABLE IF EXISTS
-      {%- elif materialization | lower == 'interactive table' -%}
-          INTERACTIVE TABLE IF EXISTS
-      {%- elif materialization | lower == 'stream' -%}
-          STREAM IF EXISTS
       {%- else -%}
           TABLE IF EXISTS
       {%- endif %}
@@ -311,12 +315,13 @@ macroString: |-
   ===========================================================================#}
 
   {#===========================================================================
-    fail_sql(hardFail): SELECT 1/0 (hardFail, default) or SELECT 1. CREATE does not fail a
-    test stage on row count, so checks that must stop a create use the hard fail.
+    fail_sql(hardFail, stageName): throwIf (hardFail, default) or SELECT 1. CREATE does not fail
+    a test stage on row count, so checks that must stop a create throw. The reason stays in the
+    -- comment above the call; the SELECT only throws (ClickHouse's 1/0 is inf, not an error).
   ===========================================================================#}
-  {%- macro fail_sql(hardFail=true) -%}
+  {%- macro fail_sql(hardFail=true, stageName='') -%}
       {%- if hardFail -%}
-          SELECT 1/0
+          SELECT throwIf(1, 'Validation failed: {{ ch_string(stageName) }}')
       {%- else -%}
           SELECT 1
       {%- endif -%}
@@ -324,13 +329,14 @@ macroString: |-
 
   {#===========================================================================
     validate_materialization_type(allowedTypes): failing "Unsupported Materialization Type"
-    check when the normalized type is not allowed. Call first in create and run.
+    check when the normalized type is not allowed (ClickHouse has no transient tables, so
+    'transient table' fails here). Call first in create and run.
   ===========================================================================#}
-  {%- macro validate_materialization_type(allowedTypes=['table', 'transient table', 'view']) -%}
+  {%- macro validate_materialization_type(allowedTypes=['table', 'view']) -%}
       {%- if nsNodeVariables.desiredMatType not in allowedTypes %}
           {{ test_stage('Unsupported Materialization Type: ' + node.name, false) }}
           -- '{{ node.materializationType | default('', true) }}' is not supported on {{ node.name }}; use one of: {{ allowedTypes | join(', ') }}
-          {{ fail_sql() }}
+          {{ fail_sql(true, 'Unsupported Materialization Type: ' + node.name) }}
       {%- endif %}
   {%- endmacro -%}
 
@@ -371,7 +377,7 @@ macroString: |-
           {%- set reason = "Duplicate column name: " ~ (described.items | join(', ')) ~ ". The SELECT returns more than one column with the same name — remove the extra column or give it a different alias. " ~ aliasHint %}
           {{ test_stage("Duplicate Column Names", false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, "Duplicate Column Names") }}
       {%- endif -%}
 
       {# Two columns given the same @id value (exact string match). #}
@@ -387,14 +393,14 @@ macroString: |-
           {%- set reason = "Duplicate column ID: " ~ (idDup.items | join('; ')) ~ '. Each column needs its own unique @id("<6 hex digits>") — change the repeated ID on all but one of them.' %}
           {{ test_stage("Duplicate Column IDs", false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, "Duplicate Column IDs") }}
       {%- endif -%}
 
       {%- if idCheck.missing | length > 0 %}
           {%- set reason = "These columns have no real system-generated ID (id equals the column name): " ~ (idCheck.missing | join(', ')) ~ '. Add a unique @id("<6 hex digits>") annotation to each of them.' %}
           {{ test_stage("Missing Column IDs", false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, "Missing Column IDs") }}
       {%- endif -%}
   {%- endmacro -%}
 
@@ -412,7 +418,7 @@ macroString: |-
           {%- set reason = "Mark at least one column with @isBusinessKey to identify the dimension's natural/business key for SCD matching." %}
           {{ test_stage("Missing Business Key", false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, "Missing Business Key") }}
       {%- endif -%}
 
       {%- set lastModifiedCount = columns | selectattr("lastModifiedTracking") | list | length -%}
@@ -427,23 +433,15 @@ macroString: |-
           {# No @mergeStrategy given — always default to changeTracking, regardless of which tracking columns are present. #}
           {%- set mergeStrategy = 'changetracking' -%}
       {%- endif -%}
-      {%- set isSimpleUpsert = mergeStrategy == 'upsert' -%}
       {%- set isLastModifiedStrategy = mergeStrategy == 'lastmodified' -%}
       {%- set isChangeTrackingStrategy = mergeStrategy == 'changetracking' %}
 
       {# An unrecognised strategy would otherwise fall through to change tracking without any warning. #}
-      {%- if not (isSimpleUpsert or isLastModifiedStrategy or isChangeTrackingStrategy) %}
-          {%- set reason = '@mergeStrategy("' ~ mergeStrategyRaw ~ '") is not a recognised strategy. Use "changeTracking", "lastModified" or "upsert".' %}
+      {%- if not (isLastModifiedStrategy or isChangeTrackingStrategy) %}
+          {%- set reason = '@mergeStrategy("' ~ mergeStrategyRaw ~ '") is not a recognised strategy. Use "changeTracking" or "lastModified".' %}
           {{ test_stage('Invalid configuration: mergeStrategy', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
-      {%- endif -%}
-
-      {# These cross-checks only apply when @mergeStrategy is set explicitly, since an inferred strategy can't conflict with itself. #}
-      {%- if mergeStrategyExplicit and isSimpleUpsert and (lastModifiedCount > 0 or changeTrackingCount > 0) %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
-          -- @mergeStrategy("upsert") performs no change detection, so @isChangeTracking/@lastModifiedTracking columns are never read. Remove them, or switch mergeStrategy to "changeTracking"/"lastModified" to use them.
-          SELECT 1
+          {{ fail_sql(hardFail, 'Invalid configuration: mergeStrategy') }}
       {%- endif -%}
 
       {%- if isChangeTrackingStrategy and lastModifiedCount > 0 %}
@@ -456,7 +454,7 @@ macroString: |-
           {%- set reason = '@mergeStrategy("lastModified") requires exactly one column marked @lastModifiedTracking(<scdType>); none was found.' %}
           {{ test_stage('Invalid configuration: mergeStrategy', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, 'Invalid configuration: mergeStrategy') }}
       {%- endif %}
 
       {# Only check "at most one @lastModifiedTracking column" once lastModified is the strategy in effect. #}
@@ -464,7 +462,7 @@ macroString: |-
           {%- set reason = "@lastModifiedTracking may be applied to at most one column, but " ~ lastModifiedCount ~ " columns were marked. Remove the annotation from all but one column." %}
           {{ test_stage('Invalid configuration: Last Modified Column', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, 'Invalid configuration: Last Modified Column') }}
       {%- endif -%}
 
       {%- if isLastModifiedStrategy and changeTrackingCount > 0 %}
@@ -486,7 +484,7 @@ macroString: |-
                       {%- set reason = '@lastModifiedTracking\'s scdType parameter only accepts 1 or 2, but "' ~ scdType ~ '" was given on column ' ~ lastModifiedCol.name ~ '. Mention @lastModifiedTracking(scdType) explicitly — @lastModifiedTracking(1) to overwrite in place, or @lastModifiedTracking(2) to version the row.' %}
                       {{ test_stage('Invalid configuration: lastModifiedTracking scdType', false) }}
                       -- {{ reason }}
-                      {{ fail_sql(hardFail) }}
+                      {{ fail_sql(hardFail, 'Invalid configuration: lastModifiedTracking scdType') }}
                   {%- endif -%}
                   {%- set type2Dimension = scdType == '2' -%}
               {%- else -%}
@@ -496,10 +494,6 @@ macroString: |-
               {%- set type2Dimension = changeTrackingCount > 0 -%}
           {%- endif -%}
       {%- else -%}
-          {%- set type2Dimension = false -%}
-      {%- endif -%}
-      {%- if isSimpleUpsert %}
-          {# @upsert always forces plain SCD1, no matter what @lastModifiedTracking/@isChangeTracking say. #}
           {%- set type2Dimension = false -%}
       {%- endif %}
 
@@ -519,13 +513,26 @@ macroString: |-
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': false,
               'annotation': '@isSurrogateKey',
-              'example': '0 AS `' ~ node.name ~ '_KEY` @isSurrogateKey',
+              'example': 'generateUUIDv4() AS `' ~ node.name ~ '_KEY` @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")',
               'reason': 'Recommended for SCD Type 2, to give tables a stable per-version join key. Ignore this warning if you are managing your own surrogate key logic (e.g. a sequence NEXTVAL) instead of using @isSurrogateKey.'
           }] -%}
       {%- endif -%}
 
+      {# New rows get the surrogate key's @defaultValue; without one they take the value the SELECT computes for the key column. #}
+      {%- for col in columns if col.isSurrogateKey and not col.defaultValue -%}
+          {%- set isUuidKey = 'uuid' in (col.dataType | lower) -%}
+          {%- set missingSystemColumns.items = missingSystemColumns.items + [{
+              'required': isUuidKey,
+              'annotation': '@defaultValue on ' ~ col.name,
+              'example': 'generateUUIDv4() AS `' ~ col.name ~ '` @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")',
+              'reason': ('A UUID surrogate key needs @defaultValue("generateUUIDv4()"): new rows and new SCD Type 2 versions take their key from it.'
+                         if isUuidKey else
+                         'Without @defaultValue, new rows and new SCD Type 2 versions take the value the SELECT computes for ' ~ col.name ~ ', so the SELECT must give every new row a unique key. @defaultValue("generateUUIDv4()") on a UUID column does this for you.')
+          }] -%}
+      {%- endfor -%}
+
       {%- set hasSystemCreateDate = columns | selectattr("isSystemCreateDate") | list | length > 0 -%}
-      {%- if not isSimpleUpsert and not hasSystemCreateDate -%}
+      {%- if not hasSystemCreateDate -%}
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': true,
               'annotation': '@isSystemCreateDate',
@@ -536,7 +543,7 @@ macroString: |-
 
       {# SYSTEM_UPDATE_DATE is required for both SCD Type 1 and Type 2. #}
       {%- set hasSystemUpdateDate = columns | selectattr("isSystemUpdateDate") | list | length > 0 -%}
-      {%- if not isSimpleUpsert and not hasSystemUpdateDate -%}
+      {%- if not hasSystemUpdateDate -%}
           {%- if type2Dimension -%}
               {%- set missingSystemColumns.items = missingSystemColumns.items + [{
                   'required': true,
@@ -602,7 +609,7 @@ macroString: |-
           {%- endfor %}
           {# Only hard-fail if a REQUIRED item is present; recommendations-only stays non-blocking. #}
           {%- if hardFail and anyRequired -%}
-              {{ fail_sql(hardFail) }}
+              {{ fail_sql(hardFail, stageName) }}
           {%- else -%}
               SELECT 1
           {%- endif -%}
@@ -664,26 +671,25 @@ macroString: |-
           {# No @mergeStrategy given — always default to changeTracking, regardless of which tracking columns are present. #}
           {%- set mergeStrategy = 'changetracking' -%}
       {%- endif -%}
-      {%- set isSimpleUpsert = mergeStrategy == 'upsert' -%}
       {%- set isLastModifiedStrategy = mergeStrategy == 'lastmodified' -%}
       {%- set isChangeTrackingStrategy = mergeStrategy == 'changetracking' -%}
       {%- set isAllColumnMatch = mergeStrategy == 'allcolumnmatch' %}
 
       {# An unrecognised strategy would otherwise fall through to change tracking without any warning. #}
-      {%- if not (isSimpleUpsert or isLastModifiedStrategy or isChangeTrackingStrategy or isAllColumnMatch) %}
-          {%- set reason = '@mergeStrategy("' ~ mergeStrategyRaw ~ '") is not a recognised strategy. Use "changeTracking", "lastModified", "upsert" or "allColumnMatch".' %}
+      {%- if not (isLastModifiedStrategy or isChangeTrackingStrategy or isAllColumnMatch) %}
+          {%- set reason = '@mergeStrategy("' ~ mergeStrategyRaw ~ '") is not a recognised strategy. Use "changeTracking", "lastModified" or "allColumnMatch".' %}
           {{ test_stage('Invalid configuration: mergeStrategy', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, 'Invalid configuration: mergeStrategy') }}
       {%- endif -%}
 
-      {# @mergeStrategy always takes priority. An explicit changeTracking/lastModified/upsert merges on the business key, so a missing @isBusinessKey stops the load.
+      {# @mergeStrategy always takes priority. An explicit changeTracking/lastModified merges on the business key, so a missing @isBusinessKey stops the load.
          Not for allColumnMatch, which needs no @isBusinessKey — every column is the match key. An unrecognised value is already flagged above. #}
-      {%- if not hasBusinessKey and mergeStrategyExplicit and (isSimpleUpsert or isLastModifiedStrategy or isChangeTrackingStrategy) %}
+      {%- if not hasBusinessKey and mergeStrategyExplicit and (isLastModifiedStrategy or isChangeTrackingStrategy) %}
           {%- set reason = '@mergeStrategy("' ~ mergeStrategyRaw ~ '") merges on the business key, but no column is marked @isBusinessKey. Mark the business key column(s) with @isBusinessKey, or remove @mergeStrategy to load the node as a plain insert.' %}
           {{ test_stage('Invalid configuration: No Business Key', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, 'Invalid configuration: No Business Key') }}
       {%- endif -%}
 
       {# No @mergeStrategy and no business key = plain insert, so @lastModifiedTracking is never read. Warn only — the insert still runs. #}
@@ -706,13 +712,6 @@ macroString: |-
           SELECT 1
       {%- endif -%}
 
-      {# These cross-checks only apply when @mergeStrategy is set explicitly, since an inferred strategy can't conflict with itself. #}
-      {%- if hasBusinessKey and mergeStrategyExplicit and isSimpleUpsert and lastModifiedCount > 0 %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
-          -- @mergeStrategy("upsert") performs no change detection, so @lastModifiedTracking columns are never read. Remove them, or switch mergeStrategy to "lastModified" to use them.
-          SELECT 1
-      {%- endif -%}
-
       {%- if hasBusinessKey and isChangeTrackingStrategy and lastModifiedCount > 0 %}
           {{ test_stage('Invalid configuration: mergeStrategy', true) }}
           -- @mergeStrategy("changeTracking") does not use @lastModifiedTracking — that column would be silently ignored. Remove it, or switch mergeStrategy to "lastModified".
@@ -723,7 +722,7 @@ macroString: |-
           {%- set reason = '@mergeStrategy("lastModified") requires exactly one column marked @lastModifiedTracking; none was found.' %}
           {{ test_stage('Invalid configuration: mergeStrategy', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, 'Invalid configuration: mergeStrategy') }}
       {%- endif %}
 
       {# Only check "at most one @lastModifiedTracking column" once lastModified is the strategy in effect. #}
@@ -731,14 +730,14 @@ macroString: |-
           {%- set reason = "@lastModifiedTracking may be applied to at most one column, but " ~ lastModifiedCount ~ " columns were marked. Remove the annotation from all but one column." %}
           {{ test_stage('Invalid configuration: Last Modified Column', false) }}
           -- {{ reason }}
-          {{ fail_sql(hardFail) }}
+          {{ fail_sql(hardFail, 'Invalid configuration: Last Modified Column') }}
       {%- endif -%}
 
       {# Collect every missing/misconfigured system column here so one run reports them all together instead of one at a time. #}
       {%- set missingSystemColumns = namespace(items=[]) %}
 
       {%- set hasSystemCreateDate = columns | selectattr("isSystemCreateDate") | list | length > 0 -%}
-      {%- if hasBusinessKey and not isSimpleUpsert and not isAllColumnMatch and not hasSystemCreateDate -%}
+      {%- if hasBusinessKey and not isAllColumnMatch and not hasSystemCreateDate -%}
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': true,
               'annotation': '@isSystemCreateDate',
@@ -748,7 +747,7 @@ macroString: |-
       {%- endif %}
 
       {%- set hasSystemUpdateDate = columns | selectattr("isSystemUpdateDate") | list | length > 0 -%}
-      {%- if hasBusinessKey and not isSimpleUpsert and not isAllColumnMatch and not hasSystemUpdateDate -%}
+      {%- if hasBusinessKey and not isAllColumnMatch and not hasSystemUpdateDate -%}
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': true,
               'annotation': '@isSystemUpdateDate',
@@ -769,7 +768,7 @@ macroString: |-
           {%- endfor %}
           {# Only hard-fail if a REQUIRED item is present; recommendations-only stays non-blocking. #}
           {%- if hardFail and anyRequired -%}
-              {{ fail_sql(hardFail) }}
+              {{ fail_sql(hardFail, 'Missing Required System Columns') }}
           {%- else -%}
               SELECT 1
           {%- endif -%}
@@ -781,31 +780,126 @@ macroString: |-
   ===========================================================================#}
 
   {#===========================================================================
-    view_definition_sql(state): view column list, comments and AS SELECT for a state.
-    Surrogate key and system columns (Dimension/Fact) select CAST(NULL AS <type>).
+    view_definition_sql(state): everything after CREATE OR REPLACE VIEW <path> for a state —
+    a typed column list with the column COMMENTs, then AS SELECT. ClickHouse takes column
+    comments only in a typed list, and the view's own comment is set separately
+    (view_comment_sql()): a trailing COMMENT '...' after the SELECT is read as a table alias
+    when the FROM has none. Types come from ch_column_type() (nullability folded in).
+    Surrogate key and system columns (Dimension/Fact) select NULL, or the type's default value
+    when the column is not Nullable (ClickHouse cannot CAST NULL to a non-Nullable type).
   ===========================================================================#}
   {%- macro view_definition_sql(state) -%}
       (
           {%- for col in state.columns %}
-              `{{ col.name }}`
-              {%- if col.description | trim | length > 0 %} COMMENT '{{ col.description | escape }}'{% endif %}
+              `{{ col.name }}` {{ ch_column_type(col) }}
+              {%- if col.description | trim | length > 0 %} COMMENT '{{ ch_string(col.description) }}'{% endif %}
               {%- if not loop.last -%}, {%- endif %}
           {%- endfor %}
       )
-      {%- if state.node.description | trim | length > 0 %} COMMENT = '{{ state.node.description | escape }}'{% endif %}
       AS
       {{ state.sources[0].cteString }}
       SELECT {{ state.sources[0].selectModifier | default('', true) }}
       {%- for col in state.sources[0].columns %}
           {%- if col.isSurrogateKey or col.isSystemVersion or col.isSystemCurrentFlag
                   or col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemEndDate %}
-          CAST(NULL AS {{ col.dataType }}) AS `{{ col.name }}`
+              {%- set colType = ch_column_type(col) %}
+              {%- if (colType | lower).startswith('nullable(') %}
+          CAST(NULL AS {{ colType }}) AS `{{ col.name }}`
+              {%- else %}
+          defaultValueOfTypeName('{{ ch_string(colType) }}') AS `{{ col.name }}`
+              {%- endif %}
           {%- else %}
           {{ get_source_transform(col) }} AS `{{ col.name }}`
           {%- endif %}
           {%- if not loop.last -%}, {%- endif %}
       {%- endfor %}
       {{ state.sources[0].join }}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    view_comment_sql(path): "Set View Comment" — ALTER TABLE <view> MODIFY COMMENT with the node
+    description ('' clears it).
+  ===========================================================================#}
+  {%- macro view_comment_sql(path) -%}
+      {{ stage('Set View Comment') }}
+      ALTER TABLE {{ path }}
+      MODIFY COMMENT '{{ ch_string(node.description | default('', true)) }}'
+  {%- endmacro -%}
+
+  {#===========================================================================
+    view_redeploy_sql(): the view branch of create.sql.j2 for every node type, after
+    object_drop_sql() has dropped a current object of another type:
+      - first deploy, type changed, or definition changed -> (Drop View at the old path when
+        renamed/moved) + Create View (CREATE OR REPLACE VIEW) + Set View Comment when there is one
+      - only renamed/moved -> Rename View (RENAME TABLE), + Set View Comment if it changed
+      - only the description changed -> Set View Comment
+      - anything else changed (nothing in the view) -> Metadata Update-Default
+    The definition is compared by rendering view_definition_sql() for both states. Both render
+    ref() with the current mapping, so a source location whose mapping changed (same location,
+    new database) is detected separately: only the locations of the view's own sources are
+    compared between currentState and desiredState storageLocations, so a change to any other
+    location leaves the view alone.
+  ===========================================================================#}
+  {%- macro view_redeploy_sql() -%}
+      {%- set desPath = nsNodeVariables.desObjectNameFullPath -%}
+      {%- set curPath = nsNodeVariables.curObjectNameFullPath -%}
+      {%- set isNewView = currentState is not defined or not currentState
+                          or nsNodeVariables.currentMatType != nsNodeVariables.desiredMatType -%}
+      {%- set pathChanged = not isNewView and curPath != desPath -%}
+
+      {#- A source location (one the view reads from) mapped to a different database since the deploy #}
+      {%- set nsSrc = namespace(moved=false) -%}
+      {%- if not isNewView -%}
+          {%- for src in desiredState.sources | default([]) -%}
+              {%- for dep in src.dependencies | default([]) -%}
+                  {%- set curLoc = (currentState.storageLocations | default([], true)) | selectattr('name', 'equalto', dep.node.location.name) | list -%}
+                  {%- set desLoc = (desiredState.storageLocations | default([], true)) | selectattr('name', 'equalto', dep.node.location.name) | list -%}
+                  {%- if curLoc and desLoc
+                         and (curLoc[0].database != desLoc[0].database or curLoc[0].schema != desLoc[0].schema) -%}
+                      {%- set nsSrc.moved = true -%}
+                  {%- endif -%}
+              {%- endfor -%}
+          {%- endfor -%}
+      {%- endif -%}
+
+      {%- set definitionChanged = isNewView or nsSrc.moved
+                                  or view_definition_sql(currentState) != view_definition_sql(desiredState) -%}
+      {%- set desiredDescription = node.description if node.description | trim | length > 0 else '' -%}
+      {%- set currentDescription = '' if isNewView
+                                   else (currentState.node.description if currentState.node.description | trim | length > 0 else '') -%}
+
+      {%- if definitionChanged %}
+          {%- if pathChanged %}
+              {{ stage('Drop View') }}
+              DROP VIEW IF EXISTS {{ curPath }}
+          {%- endif %}
+
+          {{ stage('Create View') }}
+          CREATE OR REPLACE VIEW {{ desPath }}
+          {{ view_definition_sql(desiredState) }}
+
+          {#- CREATE OR REPLACE resets the comment, so set it again even when unchanged #}
+          {%- if desiredDescription %}
+
+          {{ view_comment_sql(desPath) }}
+          {%- endif %}
+          {%- set nsNodeVariables.metaDataChanged = true -%}
+
+      {%- elif pathChanged or currentDescription != desiredDescription %}
+          {%- if pathChanged %}
+              {{ stage('Rename View') }}
+              RENAME TABLE {{ curPath }}
+              TO {{ desPath }}
+          {%- endif %}
+          {%- if currentDescription != desiredDescription %}
+
+          {{ view_comment_sql(desPath) }}
+          {%- endif %}
+          {%- set nsNodeVariables.metaDataChanged = true -%}
+
+      {%- elif currentState != desiredState %}
+          {{ alter_metadata_sql() }}
+      {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================
@@ -817,93 +911,22 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    ch_column_type(col): the column's type with its nullability, for CREATE / ADD COLUMN.
-    @notNull on a Nullable(T) column (Coalesce infers most ClickHouse columns as Nullable) gives
-    T NOT NULL; ClickHouse rejects NULL / NOT NULL after a Nullable(...) type, so that is left bare.
+    ch_effective_settings(settings, hasKey, ns): appends to ns.items the "name = value" settings a
+    table gets: @settings, with allow_nullable_key = 1 first when the table has a sort or partition
+    key (hasKey, so nullable columns can be key terms) and @settings does not set it. Used by the
+    CREATE in each node type's create template and by alter_settings_sql().
   ===========================================================================#}
-  {%- macro ch_column_type(col) -%}
-      {%- set dataType = col.dataType | default('', true) | trim -%}
-      {%- set isNullableType = (dataType | lower).startswith('nullable(') and dataType.endswith(')') -%}
-      {%- if isNullableType and col.nullable == false -%}
-          {{- dataType[9:-1] | trim }} NOT NULL
-      {%- elif isNullableType -%}
-          {{- dataType -}}
-      {%- elif col.nullable == false -%}
-          {{- dataType }} NOT NULL
-      {%- else -%}
-          {{- dataType }} NULL
-      {%- endif -%}
-  {%- endmacro -%}
-
-  {#===========================================================================
-    validate_order_by(): failing "Invalid Primary Key" check when @primaryKey is not the
-    leading terms of @orderBy (see primaryKeyError). Call before the CREATE.
-  ===========================================================================#}
-  {%- macro validate_order_by() -%}
-      {%- if nsNodeVariables.primaryKeyError %}
-          {{ test_stage('Invalid Primary Key: ' + node.name, false) }}
-          -- {{ nsNodeVariables.primaryKeyError }}
-          {{ fail_sql() }}
-      {%- endif %}
-  {%- endmacro -%}
-
-  {#===========================================================================
-    ch_order_by(): the ClickHouse sort/primary key clauses from the node-level @orderBy / @primaryKey:
-      ORDER BY (<terms>) [PRIMARY KEY (<terms>)]
-    PRIMARY KEY is written only when it is shorter than ORDER BY (when they are the same, or only
-    @primaryKey is set, ClickHouse uses ORDER BY as the primary key).
-    ORDER BY tuple() when neither annotation is set.
-  ===========================================================================#}
-  {%- macro ch_order_by() -%}
-      {%- if nsNodeVariables.desiredOrderBy -%}
-          ORDER BY ({{ nsNodeVariables.desiredOrderBy | join(', ') }})
-          {%- if nsNodeVariables.desiredPrimaryKey and nsNodeVariables.desiredPrimaryKey | length < nsNodeVariables.desiredOrderBy | length %}
-          PRIMARY KEY ({{ nsNodeVariables.desiredPrimaryKey | join(', ') }})
-          {%- endif %}
-      {%- else -%}
-          ORDER BY tuple()
-      {%- endif -%}
-  {%- endmacro -%}
-
-  {#===========================================================================
-    ch_storage_clauses(): the MergeTree clauses after ENGINE, in the order ClickHouse requires:
-      [PARTITION BY <term> | (<terms>)]  ORDER BY ... [PRIMARY KEY ...]  [SETTINGS <settings>]
-    PARTITION BY from @partitionBy (one term as-is, several as a tuple); ORDER BY / PRIMARY KEY
-    from ch_order_by(). SETTINGS from @settings, plus allow_nullable_key = 1 when there is a sort
-    or partition key (so nullable columns can be key terms) unless @settings sets it.
-    A table COMMENT goes after these clauses.
-  ===========================================================================#}
-  {%- macro ch_storage_clauses() -%}
-      {%- set partitionBy = nsNodeVariables.desiredPartitionBy -%}
-      {%- set nsSettings = namespace(items=nsNodeVariables.desiredSettings, nullableKeySet=false) -%}
-      {%- for setting in nsSettings.items -%}
+  {%- macro ch_effective_settings(settings, hasKey, ns) -%}
+      {%- set nsSet = namespace(nullableKeySet=false) -%}
+      {%- for setting in settings -%}
           {%- if (setting | lower | replace(' ', '')).startswith('allow_nullable_key=') -%}
-              {%- set nsSettings.nullableKeySet = true -%}
+              {%- set nsSet.nullableKeySet = true -%}
           {%- endif -%}
       {%- endfor -%}
-      {%- if (nsNodeVariables.desiredOrderBy or partitionBy) and not nsSettings.nullableKeySet -%}
-          {%- set nsSettings.items = ['allow_nullable_key = 1'] + nsSettings.items -%}
+      {%- if hasKey and not nsSet.nullableKeySet -%}
+          {%- set ns.items = ns.items + ['allow_nullable_key = 1'] -%}
       {%- endif -%}
-
-      {%- if partitionBy | length == 1 -%}
-          PARTITION BY {{ partitionBy[0] }}
-      {% elif partitionBy | length > 1 -%}
-          PARTITION BY ({{ partitionBy | join(', ') }})
-      {% endif -%}
-      {{ ch_order_by() }}
-      {%- if nsSettings.items %}
-          SETTINGS {{ nsSettings.items | join(', ') }}
-      {%- endif -%}
-  {%- endmacro -%}
-
-  {#===========================================================================
-    ch_engine(): the table engine from @engine("<engine expression>"), written as-is
-    (e.g. ReplacingMergeTree(SYSTEM_UPDATE_DATE)); MergeTree when @engine is absent,
-    bare or empty. Declared defaults are not applied to config, so the fallback lives here.
-  ===========================================================================#}
-  {%- macro ch_engine() -%}
-      {%- set engineParams = config.engine.parameters if config.engine is mapping else [] -%}
-      {{- (engineParams[0] if engineParams else '') | trim | default('MergeTree', true) -}}
+      {%- set ns.items = ns.items + settings -%}
   {%- endmacro -%}
 
   {#===========================================================================
@@ -912,30 +935,28 @@ macroString: |-
 
   {#===========================================================================
     Table redeploy (base Work clone pattern): Clone Table -> alter_ stages on the clone
-    -> Swap Cloned Table (or Rename Table when renamed/moved) -> Delete Table.
+    -> Swap Cloned Table + Drop Cloned Table (or Rename Table + Drop Table when renamed/moved).
     Views are recreated when their definition changes.
   ===========================================================================#}
 
   {#===========================================================================
-    object_drop_sql(): "Drop <type>" when the node is deleted, the type changed or a view
-    moved/renamed. A deleted table also drops its leftover clone ("Delete Table").
+    object_drop_sql(): "Drop Table" / "Drop View" when the node is deleted or the type changed. A
+    deleted table also drops its leftover clone ("Drop Cloned Table"). A view that moved/renamed is handled
+    by view_redeploy_sql() (renamed, or dropped and recreated).
   ===========================================================================#}
   {%- macro object_drop_sql() -%}
       {%- if currentState is defined and currentState -%}
           {%- set currentMatType = nsNodeVariables.currentMatType -%}
           {%- set nodeDeleted = desiredState is not defined or not desiredState -%}
-          {%- set dropCurrent = nodeDeleted
-                                or currentMatType != nsNodeVariables.desiredMatType
-                                or (nsNodeVariables.desiredMatType == 'view'
-                                    and nsNodeVariables.curObjectNameFullPath != nsNodeVariables.desObjectNameFullPath) -%}
+          {%- set dropCurrent = nodeDeleted or currentMatType != nsNodeVariables.desiredMatType -%}
 
           {%- if nodeDeleted and currentMatType != 'view' %}
-              {{ stage('Delete Table') }}
+              {{ stage('Drop Cloned Table') }}
               DROP TABLE IF EXISTS {{ nsNodeVariables.cloneObjectNameFullPath }}
           {%- endif %}
 
           {%- if dropCurrent %}
-              {{ stage('Drop ' + currentMatType) }}
+              {{ stage('Drop ' + (currentMatType | capitalize)) }}
               DROP {{ drop_materialization(currentMatType) }} {{ nsNodeVariables.curObjectNameFullPath }}
               {%- set nsNodeVariables.metaDataChanged = true -%}
           {%- endif %}
@@ -943,9 +964,45 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_modify_columns_sql(): "Alter Column" — one ALTER ( ... ) with every data type,
-    nullability, description and default change, using the old column names.
-    Call before alter_rename_columns_sql().
+    ch_column_type(col): the column's final ClickHouse type with its nullability folded in —
+    used by the CREATE, ADD COLUMN, MODIFY COLUMN and views, so they all agree.
+      - Coalesce infers SQL node columns as nullable and may wrap the type in Nullable(...);
+        a wrapped type counts as nullable unless the column is NOT NULL (@notNull).
+      - A surrogate key (@isSurrogateKey) is never Nullable: every row gets a key.
+      - Types ClickHouse cannot put inside Nullable stay as they are: Array, Map, Tuple,
+        Nested, JSON / Object, Dynamic, Variant, (Simple)AggregateFunction and the geo types
+        (Point, Ring, LineString, MultiLineString, Polygon, MultiPolygon).
+      - LowCardinality takes the nullability inside: LowCardinality(Nullable(<type>)).
+      - Anything else: Nullable(<type>) when nullable, else <type>.
+  ===========================================================================#}
+  {%- macro ch_column_type(col) -%}
+      {%- set dataType = col.dataType | trim -%}
+      {%- set isWrapped = (dataType | lower).startswith('nullable(') and dataType.endswith(')') -%}
+      {%- set baseType = dataType[9:-1] | trim if isWrapped else dataType -%}
+      {%- set isNullable = col.nullable != false and not col.isSurrogateKey -%}
+      {%- set family = baseType.split('(')[0] | trim | lower -%}
+      {%- if family in ['array', 'map', 'tuple', 'nested', 'json', 'object', 'dynamic', 'variant',
+                        'aggregatefunction', 'simpleaggregatefunction',
+                        'point', 'ring', 'linestring', 'multilinestring', 'polygon', 'multipolygon'] -%}
+          {{- baseType -}}
+      {%- elif family == 'lowcardinality' -%}
+          {%- set inner = baseType[15:-1] | trim -%}
+          {%- if isNullable and not (inner | lower).startswith('nullable(') -%}
+              LowCardinality(Nullable({{ inner }}))
+          {%- else -%}
+              {{- baseType -}}
+          {%- endif -%}
+      {%- elif isNullable -%}
+          Nullable({{ baseType }})
+      {%- else -%}
+          {{- baseType -}}
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    alter_modify_columns_sql(): "Alter Column" — one ALTER with a MODIFY COLUMN per changed
+    column: data type and nullability (ClickHouse folds NULL / NOT NULL into the type),
+    default and comment, using the old column names. Call before alter_rename_columns_sql().
   ===========================================================================#}
   {%- macro alter_modify_columns_sql() -%}
       {%- set ns = namespace(actions=[]) -%}
@@ -955,51 +1012,63 @@ macroString: |-
           {%- if matchingCols -%}
               {%- set desCol = matchingCols | first -%}
               {%- set colName = '`' + curCol.name + '`' -%}
-              {%- set currentNotNull = curCol.nullable == false -%}
+              {%- set currentType = ch_column_type(curCol) -%}
+              {%- set desiredType = ch_column_type(desCol) -%}
               {%- set currentDefaultValue = curCol.defaultValue if curCol.defaultValue else none -%}
               {%- set currentDescription = curCol.description if curCol.description | trim | length > 0 else '' -%}
-              {%- set desiredNotNull = desCol.nullable == false -%}
               {%- set desiredDefaultValue = desCol.defaultValue if desCol.defaultValue else none -%}
               {%- set desiredDescription = desCol.description if desCol.description | trim | length > 0 else '' -%}
 
-              {#- Collect an action per changed attribute #}
-              {%- if (curCol.dataType | upper | replace(' ', '')) != (desCol.dataType | upper | replace(' ', '')) -%}
-                  {%- set ns.actions = ns.actions + [colName ~ ' SET DATA TYPE ' ~ desCol.dataType] -%}
+              {#- One MODIFY COLUMN with the changed type / default / comment (ClickHouse keeps the
+                  parts that are not given); removing a default is its own REMOVE DEFAULT #}
+              {%- set parts = [] -%}
+              {%- set typeChanged = (currentType | upper | replace(' ', '')) != (desiredType | upper | replace(' ', '')) -%}
+              {%- if typeChanged -%}
+                  {%- set parts = parts + [desiredType] -%}
               {%- endif -%}
-              {%- if currentNotNull != desiredNotNull -%}
-                  {%- set ns.actions = ns.actions + [colName ~ (' SET NOT NULL' if desiredNotNull else ' DROP NOT NULL')] -%}
+              {%- if desiredDefaultValue != none and currentDefaultValue != desiredDefaultValue -%}
+                  {%- set parts = parts + ['DEFAULT ' ~ desiredDefaultValue] -%}
               {%- endif -%}
               {%- if currentDescription != desiredDescription -%}
-                  {%- set ns.actions = ns.actions + [colName ~ " COMMENT '" ~ (desiredDescription | escape) ~ "'"] -%}
+                  {%- set parts = parts + ["COMMENT '" ~ ch_string(desiredDescription) ~ "'"] -%}
               {%- endif -%}
-              {%- if currentDefaultValue != desiredDefaultValue -%}
-                  {%- if desiredDefaultValue == none -%}
-                      {%- set ns.actions = ns.actions + [colName ~ ' DROP DEFAULT'] -%}
-                  {%- else -%}
-                      {%- set ns.actions = ns.actions + [colName ~ ' SET DEFAULT ' ~ desiredDefaultValue] -%}
-                  {%- endif -%}
+              {%- if parts -%}
+                  {%- set ns.actions = ns.actions + ['MODIFY COLUMN ' ~ colName ~ ' ' ~ (parts | join(' '))] -%}
+              {%- endif -%}
+              {%- if desiredDefaultValue == none and currentDefaultValue != none -%}
+                  {%- set ns.actions = ns.actions + ['MODIFY COLUMN ' ~ colName ~ ' REMOVE DEFAULT'] -%}
               {%- endif -%}
           {%- endif -%}
       {%- endfor -%}
 
+      {#- A type change rewrites the column as a mutation. MODIFY COLUMN waits for it per alter_sync
+          (0 on ClickHouse Cloud, so it would return before converting); alter_sync = 2 waits, so a
+          value the new type cannot take (e.g. 'n/a' into UInt32) fails this stage with ClickHouse's
+          own error before the clone is swapped in. A Nullable target is not caught: ClickHouse
+          stores NULL for such values and reports success (see README). #}
       {%- if ns.actions | length > 0 %}
           {{ stage('Alter Column') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          ALTER ( {{ ns.actions | join(', ') }} )
+          {{ ns.actions | join(', ') }}
+          SETTINGS alter_sync = 2
           {%- set nsNodeVariables.metaDataChanged = true -%}
       {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_add_columns_sql(): "Add Column" — one ADD COLUMN for columns with a new id, with NOT NULL,
-    DEFAULT and comment. No identity: Snowflake only adds one to an empty table.
+    alter_add_columns_sql(): "Add Column" — one ALTER with an ADD COLUMN per column with a new id
+    (ClickHouse repeats the command for each column), with NOT NULL, DEFAULT and comment.
+    New columns with a DEFAULT are then materialized for the existing rows.
   ===========================================================================#}
   {%- macro alter_add_columns_sql() -%}
-      {%- set ns = namespace(items=[]) -%}
+      {%- set ns = namespace(items=[], withDefault=[]) -%}
       {%- for desCol in columns -%}
           {%- set idAlreadyCurrent = currentState.columns | default([]) | selectattr('id', 'equalto', desCol.id) | list -%}
           {%- if not idAlreadyCurrent -%}
               {%- set ns.items = ns.items + [desCol] -%}
+              {%- if desCol.defaultValue -%}
+                  {%- set ns.withDefault = ns.withDefault + [desCol] -%}
+              {%- endif -%}
           {%- endif -%}
       {%- endfor -%}
 
@@ -1009,15 +1078,33 @@ macroString: |-
           {%- for desCol in ns.items %}
               ADD COLUMN `{{ desCol.name }}` {{ ch_column_type(desCol) }}
               {%- if desCol.defaultValue %} DEFAULT {{ desCol.defaultValue }} {%- endif %}
-              {%- if desCol.description | trim | length > 0 %} COMMENT '{{ desCol.description | escape }}'{%- endif %}
+              {%- if desCol.description | trim | length > 0 %} COMMENT '{{ ch_string(desCol.description) }}'{%- endif %}
               {%- if not loop.last -%}, {%- endif %}
           {%- endfor %}
+          {#- A new column can only join the sort key in the ALTER that adds it #}
+          {%- if nsNodeVariables.orderByChanged %},
+              MODIFY ORDER BY ({{ nsNodeVariables.desiredOrderBy | join(', ') }})
+              {%- set nsNodeVariables.orderByAltered = true -%}
+          {%- endif %}
           {%- set nsNodeVariables.metaDataChanged = true -%}
+
+          {#- Rows already in the table get a new column's DEFAULT computed on every read, so a
+              non-deterministic default (generateUUIDv4(), now64()) changes between queries.
+              MATERIALIZE COLUMN writes the values once. #}
+          {%- if ns.withDefault | length > 0 %}
+          {{ stage('Materialize Column Default') }}
+          ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
+          {%- for desCol in ns.withDefault %}
+              MATERIALIZE COLUMN `{{ desCol.name }}`
+              {%- if not loop.last -%}, {%- endif %}
+          {%- endfor %}
+          SETTINGS mutations_sync = 2
+          {%- endif %}
       {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_rename_columns_sql(): "Rename Column" per column whose id is kept but name
+    alter_rename_columns_sql():"Rename Column" per column whose id is kept but name
     changed. A column without @id has its name as id, so renaming it drops and re-adds it.
   ===========================================================================#}
   {%- macro alter_rename_columns_sql() -%}
@@ -1033,42 +1120,88 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_order_by_sql(): "Recluster Table" with the new key, or "Drop Cluster Key"
-    when it was removed. Call after column adds/renames and before Delete Column.
-    (Still Snowflake syntax — ClickHouse redeploy is pending.)
+    alter_order_by_sql(): "Modify Order By" — MODIFY ORDER BY with the new sort key, when it
+    changed and alter_add_columns_sql() did not already do it. Its own ALTER, after column
+    adds/renames and before Drop Column: ClickHouse refuses to drop a column in the same
+    ALTER that takes it out of the sort key. Only the changes set_rebuild_reason() lets through
+    (trailing terms removed, new columns added) reach here; others recreate the table.
   ===========================================================================#}
   {%- macro alter_order_by_sql() -%}
-      {#- Whitespace-insensitive, so trunc(a,-5) vs trunc(a, -5) is not a change #}
-      {%- set keyChanged = (nsNodeVariables.desiredOrderBy | map('replace', ' ', '') | list)
-                        != (nsNodeVariables.currentOrderBy | map('replace', ' ', '') | list) -%}
-
-      {%- if nsNodeVariables.desiredOrderBy | length > 0 and keyChanged %}
-          {{ stage('Recluster Table') }}
+      {%- if nsNodeVariables.orderByChanged and not nsNodeVariables.orderByAltered %}
+          {{ stage('Modify Order By') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          CLUSTER BY ({{ nsNodeVariables.desiredOrderBy | join(', ') }})
-          {%- set nsNodeVariables.metaDataChanged = true -%}
-      {%- elif nsNodeVariables.desiredOrderBy | length == 0 and nsNodeVariables.currentOrderBy | length > 0 %}
-          {{ stage('Drop Cluster Key') }}
-          ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          DROP CLUSTERING KEY
+          MODIFY ORDER BY ({{ nsNodeVariables.desiredOrderBy | join(', ') }})
+          {%- set nsNodeVariables.orderByAltered = true -%}
           {%- set nsNodeVariables.metaDataChanged = true -%}
       {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_drop_columns_sql(): "Delete Column" — one ALTER ... DROP for removed columns.
+    alter_settings_sql(): "Modify Settings" — MODIFY SETTING for each setting added or changed, then
+    "Reset Settings" — RESET SETTING for each removed (two ALTERs: ClickHouse cannot parse both in
+    one), comparing the effective settings (ch_effective_settings(),
+    so the automatic allow_nullable_key = 1 counts). ClickHouse accepts both for every MergeTree
+    setting on an existing table.
+  ===========================================================================#}
+  {%- macro alter_settings_sql() -%}
+      {%- set nsCur = namespace(items=[]) -%}
+      {%- set nsDes = namespace(items=[]) -%}
+      {{- ch_effective_settings(nsNodeVariables.currentSettings, nsNodeVariables.currentOrderBy or nsNodeVariables.currentPartitionBy, nsCur) -}}
+      {{- ch_effective_settings(nsNodeVariables.desiredSettings, nsNodeVariables.desiredOrderBy or nsNodeVariables.desiredPartitionBy, nsDes) -}}
+
+      {#- Compare by setting name (case-insensitive); values ignoring spaces #}
+      {%- set nsMap = namespace(modify=[], reset=[]) -%}
+      {%- for d in nsDes.items if '=' in d -%}
+          {%- set dName = d.split('=')[0] | trim | lower -%}
+          {%- set dValue = d.split('=', 1)[1] | trim -%}
+          {%- set nsFind = namespace(value=none) -%}
+          {%- for c in nsCur.items if '=' in c and (c.split('=')[0] | trim | lower) == dName -%}
+              {%- set nsFind.value = c.split('=', 1)[1] | trim -%}
+          {%- endfor -%}
+          {%- if nsFind.value is none or (nsFind.value | replace(' ', '')) != (dValue | replace(' ', '')) -%}
+              {%- set nsMap.modify = nsMap.modify + [dName ~ ' = ' ~ dValue] -%}
+          {%- endif -%}
+      {%- endfor -%}
+      {%- for c in nsCur.items if '=' in c -%}
+          {%- set cName = c.split('=')[0] | trim | lower -%}
+          {%- set nsFind = namespace(found=false) -%}
+          {%- for d in nsDes.items if '=' in d and (d.split('=')[0] | trim | lower) == cName -%}
+              {%- set nsFind.found = true -%}
+          {%- endfor -%}
+          {%- if not nsFind.found and cName not in nsMap.reset -%}
+              {%- set nsMap.reset = nsMap.reset + [cName] -%}
+          {%- endif -%}
+      {%- endfor -%}
+
+      {#- Separate ALTERs: after MODIFY SETTING's list, ClickHouse cannot parse a following RESET SETTING #}
+      {%- if nsMap.modify %}
+          {{ stage('Modify Settings') }}
+          ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
+          MODIFY SETTING {{ nsMap.modify | join(', ') }}
+          {%- set nsNodeVariables.metaDataChanged = true -%}
+      {%- endif %}
+      {%- if nsMap.reset %}
+          {{ stage('Reset Settings') }}
+          ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
+          RESET SETTING {{ nsMap.reset | join(', ') }}
+          {%- set nsNodeVariables.metaDataChanged = true -%}
+      {%- endif %}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    alter_drop_columns_sql(): "Drop Column" — one ALTER with a DROP COLUMN per removed column.
   ===========================================================================#}
   {%- macro alter_drop_columns_sql() -%}
       {%- if nsNodeVariables.droppedColumns | length > 0 %}
-          {{ stage('Delete Column') }}
+          {{ stage('Drop Column') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          DROP {{ nsNodeVariables.droppedColumns | join(', ') }}
+          DROP COLUMN {{ nsNodeVariables.droppedColumns | join(', DROP COLUMN ') }}
           {%- set nsNodeVariables.metaDataChanged = true -%}
       {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_description_sql(): "Edit Table Description" — SET COMMENT on the clone when the
+    alter_description_sql(): "Edit Table Description" — MODIFY COMMENT on the clone when the
     node description changed (missing = empty). Tables only: a view is recreated instead.
   ===========================================================================#}
   {%- macro alter_description_sql() -%}
@@ -1077,14 +1210,108 @@ macroString: |-
       {%- if currentDescription != desiredDescription %}
           {{ stage('Edit Table Description') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
-          SET COMMENT = '{{ desiredDescription | escape }}'
+          MODIFY COMMENT '{{ ch_string(desiredDescription) }}'
           {%- set nsNodeVariables.metaDataChanged = true -%}
       {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================
-    alter_clone_swap_sql(alterSql): wraps the alters in Delete Clone Table -> Clone Table ->
-    alterSql -> Swap Cloned Table + Delete Table, or Rename Table + Delete Table when
+    key_identifiers(terms, ns): appends to ns.items every identifier in the key terms — the text
+    split on operators, brackets, quotes, commas and spaces, backticks removed — so a column is
+    matched as a whole word (n_Name does not match n_Name_New). Function names come out too;
+    they never equal a column name in practice.
+  ===========================================================================#}
+  {%- macro key_identifiers(terms, ns) -%}
+      {%- set nsText = namespace(value=terms | join(' ')) -%}
+      {%- for ch in ['`', '(', ')', ',', '+', '-', '*', '/', '%', '=', '<', '>', '!', "'", '"', '[', ']', '{', '}', ':', ';', '|', '&', '\n', '\t'] -%}
+          {%- set nsText.value = nsText.value | replace(ch, ' ') -%}
+      {%- endfor -%}
+      {%- set ns.items = ns.items + nsText.value.split() -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    set_rebuild_reason(): sets nsNodeVariables.rebuildReason when a table redeploy cannot be done
+    with ALTER, '' otherwise. Verified against ClickHouse Cloud 26.6:
+      - PARTITION BY: no ALTER exists                                   -> recreate
+      - PRIMARY KEY: no ALTER exists. Without @primaryKey the primary
+        key is the whole ORDER BY, so any ORDER BY change changes it    -> recreate
+      - ORDER BY (primary key unchanged): MODIFY ORDER BY only accepts
+        removing trailing terms and adding terms that use only columns
+        added in the same ALTER without a DEFAULT; anything else        -> recreate
+      - rename or type change (nullability included) of a column used
+        in a current key                                                -> recreate
+      - SETTINGS: MODIFY / RESET SETTING always works                   -> alter_settings_sql()
+      - dropping a key column: allowed once it has left the key (Modify
+        Order By runs before Drop Column); a dropped column still used
+        in a key is rejected by ClickHouse on the clone (live table untouched)
+    Terms are compared ignoring spaces, backticks and case. Call before choosing between
+    the rebuild (Recreate Table, in the create template) and the alters.
+  ===========================================================================#}
+  {%- macro set_rebuild_reason() -%}
+      {%- set ns = namespace(reasons=[]) -%}
+      {%- set norm = namespace(cur=[], des=[]) -%}
+
+      {#- PARTITION BY #}
+      {%- if (nsNodeVariables.currentPartitionBy | join(',') | replace(' ', '') | replace('`', '') | lower)
+             != (nsNodeVariables.desiredPartitionBy | join(',') | replace(' ', '') | replace('`', '') | lower) -%}
+          {%- set ns.reasons = ns.reasons + ['PARTITION BY changed'] -%}
+      {%- endif -%}
+
+      {#- PRIMARY KEY, as ClickHouse sees it: @primaryKey, else the whole ORDER BY #}
+      {%- set curKey = nsNodeVariables.currentPrimaryKey or nsNodeVariables.currentOrderBy -%}
+      {%- set desKey = nsNodeVariables.desiredPrimaryKey or nsNodeVariables.desiredOrderBy -%}
+      {%- set keyChanged = (curKey | join(',') | replace(' ', '') | replace('`', '') | lower)
+                           != (desKey | join(',') | replace(' ', '') | replace('`', '') | lower) -%}
+      {%- if keyChanged -%}
+          {%- if not nsNodeVariables.currentPrimaryKey and not nsNodeVariables.desiredPrimaryKey -%}
+              {%- set ns.reasons = ns.reasons + ['ORDER BY changed without @primaryKey'] -%}
+          {%- else -%}
+              {%- set ns.reasons = ns.reasons + ['PRIMARY KEY changed'] -%}
+          {%- endif -%}
+
+      {#- ORDER BY with the primary key unchanged: drop the terms that use only new, DEFAULT-less
+          columns; what is left must be a prefix of the current ORDER BY #}
+      {%- elif nsNodeVariables.orderByChanged -%}
+          {%- set nsNew = namespace(names=[]) -%}
+          {%- for desCol in columns if not desCol.defaultValue
+                  and not (currentState.columns | selectattr('id', 'equalto', desCol.id) | list) -%}
+              {%- set nsNew.names = nsNew.names + [desCol.name] -%}
+          {%- endfor -%}
+          {%- set existingNames = currentState.columns | map(attribute='name') | list -%}
+          {%- set nsKept = namespace(terms=[]) -%}
+          {%- for term in nsNodeVariables.desiredOrderBy -%}
+              {%- set nsIds = namespace(items=[]) -%}
+              {{- key_identifiers([term], nsIds) -}}
+              {%- set usesNew = nsIds.items | select('in', nsNew.names) | list -%}
+              {%- set usesExisting = nsIds.items | select('in', existingNames) | list -%}
+              {%- if not (usesNew and not usesExisting) -%}
+                  {%- set nsKept.terms = nsKept.terms + [term | replace(' ', '') | replace('`', '') | lower] -%}
+              {%- endif -%}
+          {%- endfor -%}
+          {%- set curTerms = nsNodeVariables.currentOrderBy | map('replace', ' ', '') | map('replace', '`', '') | map('lower') | list -%}
+          {%- if nsKept.terms != curTerms[:nsKept.terms | length] -%}
+              {%- set ns.reasons = ns.reasons + ['ORDER BY changed'] -%}
+          {%- endif -%}
+      {%- endif -%}
+
+      {#- Renamed / retyped key columns #}
+      {%- set nsKeyIds = namespace(items=[]) -%}
+      {{- key_identifiers(nsNodeVariables.currentOrderBy + nsNodeVariables.currentPrimaryKey + nsNodeVariables.currentPartitionBy, nsKeyIds) -}}
+      {%- for curCol in currentState.columns if curCol.name in nsKeyIds.items -%}
+          {%- set matchingCols = columns | default([]) | selectattr('id', 'equalto', curCol.id) | list -%}
+          {%- if matchingCols and (matchingCols | first).name != curCol.name -%}
+              {%- set ns.reasons = ns.reasons + ['key column ' ~ curCol.name ~ ' renamed'] -%}
+          {%- elif matchingCols
+                  and (ch_column_type(curCol) | upper | replace(' ', '')) != (ch_column_type(matchingCols | first) | upper | replace(' ', '')) -%}
+              {%- set ns.reasons = ns.reasons + ['key column ' ~ curCol.name ~ ' type changed'] -%}
+          {%- endif -%}
+      {%- endfor -%}
+      {%- set nsNodeVariables.rebuildReason = ns.reasons | join('; ') -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    alter_clone_swap_sql(alterSql): wraps the alters in Clone Table (CREATE OR REPLACE ... CLONE AS) ->
+    alterSql -> Swap Cloned Table + Drop Cloned Table, or Rename Table + Drop Table when
     renamed/moved. '' when there is nothing to alter and the path is unchanged.
     ClickHouse: CLONE AS copies schema + data (all partitions attached), no grants are copied;
     EXCHANGE TABLES is atomic on Atomic/Shared databases; CLONE AS is not supported in a
@@ -1096,12 +1323,9 @@ macroString: |-
       {%- set pathChanged = currentPath != nsNodeVariables.desObjectNameFullPath -%}
 
       {%- if alterSql | trim | length > 0 or pathChanged %}
-          {#- A clone left by a failed redeploy would block CREATE ... CLONE AS #}
-          {{ stage('Delete Clone Table') }}
-          DROP TABLE IF EXISTS {{ clonePath }}
-
+          {#- OR REPLACE also replaces a clone left by a failed redeploy #}
           {{ stage('Clone Table') }}
-          CREATE TABLE {{ clonePath }}
+          CREATE OR REPLACE TABLE {{ clonePath }}
           CLONE AS {{ currentPath }}
 
           {{ alterSql }}
@@ -1111,14 +1335,14 @@ macroString: |-
               RENAME TABLE {{ clonePath }}
               TO {{ nsNodeVariables.desObjectNameFullPath }}
 
-              {{ stage('Delete Table') }}
+              {{ stage('Drop Table') }}
               DROP TABLE IF EXISTS {{ currentPath }}
           {%- else %}
               {{ stage('Swap Cloned Table') }}
               EXCHANGE TABLES {{ clonePath }}
               AND {{ currentPath }}
 
-              {{ stage('Delete Table') }}
+              {{ stage('Drop Cloned Table') }}
               DROP TABLE IF EXISTS {{ clonePath }}
           {%- endif %}
           {%- set nsNodeVariables.metaDataChanged = true -%}
@@ -1269,6 +1493,21 @@ macroString: |-
               {{ sql.parameters[0] }}
           {%- endif %}
       {%- endfor %}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    zero_key_surrogate_value(col): the zero record's surrogate key — the nil UUID
+    00000000-0000-0000-0000-000000000000 for a UUID column, else the node-level
+    surrogateKeyValue (0 when not set).
+  ===========================================================================#}
+  {%- macro zero_key_surrogate_value(col) -%}
+      {%- if 'uuid' in (col.dataType | lower) -%}
+          toUUID('00000000-0000-0000-0000-000000000000')
+      {%- elif config.zeroKey.parameters is defined and config.zeroKey.parameters | length > 0 -%}
+          {{ config.zeroKey.parameters[0] }}
+      {%- else -%}
+          0
+      {%- endif -%}
   {%- endmacro -%}
 
   {#===========================================================================

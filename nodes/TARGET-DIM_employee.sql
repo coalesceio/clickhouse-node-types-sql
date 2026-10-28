@@ -1,6 +1,5 @@
 @id("cfa39963-cf2b-4e93-abb9-5cac5cce681c")
 @nodeType("SQLDimension")
-@engine("ReplacingMergeTree(SYSTEM_UPDATE_DATE)")
 @orderBy("id")
 @mergeStrategy("changeTracking")
 SELECT

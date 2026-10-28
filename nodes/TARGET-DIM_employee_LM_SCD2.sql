@@ -1,7 +1,6 @@
 @id("eccfdd57-e2d2-413d-b9fd-92b95151a52f")
 @nodeType("SQLDimension")
 @description("Employee dimension - last modified SCD Type 2")
-@engine("ReplacingMergeTree(SYSTEM_UPDATE_DATE)")
 @orderBy("id", "SYSTEM_VERSION")
 @mergeStrategy("lastModified")
 SELECT

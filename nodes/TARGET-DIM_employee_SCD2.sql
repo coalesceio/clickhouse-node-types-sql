@@ -1,7 +1,6 @@
 @id("5f042a8b-8d54-41e8-b9a9-8c47baf30e75")
 @nodeType("SQLDimension")
 @description("Employee dimension - change tracking SCD Type 2")
-@engine("ReplacingMergeTree(SYSTEM_UPDATE_DATE)")
 @orderBy("id", "SYSTEM_VERSION")
 @mergeStrategy("changeTracking")
 SELECT

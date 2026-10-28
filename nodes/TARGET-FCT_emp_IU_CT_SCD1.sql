@@ -1,7 +1,6 @@
 @id("4e583f6b-eb19-4aeb-9fa7-882b5201a873")
 @nodeType("SQLFact")
 @description("Employee fact - INSERT + DELETE load, change tracking SCD Type 1, plain MergeTree")
-@engine("MergeTree")
 @orderBy("id")
 @mergeStrategy("changeTracking")
 SELECT
