@@ -1,11 +1,11 @@
 fileVersion: 1
-id: 7fe7c30d-3e59-4a56-8927-f8ccb4dbb09d
-name: Nation_Test
+id: bba080b0-15f1-4206-accc-e19f3db217a4
+name: employee
 operation:
   database: ""
   deployEnabled: true
   description: ""
-  locationName: TARGET
+  locationName: SRC
   metadata:
     columns:
       - acceptedValues:
@@ -13,14 +13,14 @@ operation:
           values: []
         appliedColumnTests: {}
         columnReference:
-          columnCounter: b2eff1ca-4105-4897-9160-f827947ce4b7
-          stepCounter: 7fe7c30d-3e59-4a56-8927-f8ccb4dbb09d
+          columnCounter: 4d27bf06-6aeb-4af6-b505-28046b5fab69
+          stepCounter: bba080b0-15f1-4206-accc-e19f3db217a4
         config: {}
-        dataType: UInt32
+        dataType: UInt64
         defaultValue: ""
         description: ""
-        name: n_Nationkey
-        nativeType: UInt32
+        name: id
+        nativeType: UInt64
         nullable: false
         sourceColumnReferences:
           - columnReferences: []
@@ -31,49 +31,13 @@ operation:
           values: []
         appliedColumnTests: {}
         columnReference:
-          columnCounter: d94900e0-10a4-41be-9817-4dc8d05a089c
-          stepCounter: 7fe7c30d-3e59-4a56-8927-f8ccb4dbb09d
-        config: {}
-        dataType: FixedString(25)
-        defaultValue: ""
-        description: ""
-        name: n_Name
-        nativeType: FixedString(25)
-        nullable: false
-        sourceColumnReferences:
-          - columnReferences: []
-            transform: ""
-        transform: ""
-      - acceptedValues:
-          strictMatch: true
-          values: []
-        appliedColumnTests: {}
-        columnReference:
-          columnCounter: d9ff8024-5b2c-493b-a96b-a4e65d1c52ff
-          stepCounter: 7fe7c30d-3e59-4a56-8927-f8ccb4dbb09d
-        config: {}
-        dataType: UInt32
-        defaultValue: ""
-        description: ""
-        name: n_Regionkey
-        nativeType: UInt32
-        nullable: false
-        sourceColumnReferences:
-          - columnReferences: []
-            transform: ""
-        transform: ""
-      - acceptedValues:
-          strictMatch: true
-          values: []
-        appliedColumnTests: {}
-        columnReference:
-          columnCounter: abedb9da-5633-4816-a551-64a354ca3afe
-          stepCounter: 7fe7c30d-3e59-4a56-8927-f8ccb4dbb09d
+          columnCounter: 012d7001-c78a-44dd-89fc-a2b670a0c94b
+          stepCounter: bba080b0-15f1-4206-accc-e19f3db217a4
         config: {}
         dataType: String
         defaultValue: ""
         description: ""
-        name: n_Comment
+        name: name
         nativeType: String
         nullable: false
         sourceColumnReferences:
@@ -85,20 +49,56 @@ operation:
           values: []
         appliedColumnTests: {}
         columnReference:
-          columnCounter: b49c73ca-1707-468f-b0da-fd2f849ecb54
-          stepCounter: 7fe7c30d-3e59-4a56-8927-f8ccb4dbb09d
+          columnCounter: 6f84611a-9b9a-4882-a79d-198053ce0a87
+          stepCounter: bba080b0-15f1-4206-accc-e19f3db217a4
         config: {}
-        dataType: DateTime64(3)
+        dataType: String
         defaultValue: ""
         description: ""
-        name: last_Modified
-        nativeType: DateTime64(3)
+        name: department
+        nativeType: String
         nullable: false
         sourceColumnReferences:
           - columnReferences: []
             transform: ""
         transform: ""
-  name: Nation_Test
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 41423f21-baff-4bb8-a2d8-2d93b549dd85
+          stepCounter: bba080b0-15f1-4206-accc-e19f3db217a4
+        config: {}
+        dataType: Decimal(10, 2)
+        defaultValue: ""
+        description: ""
+        name: salary
+        nativeType: Decimal(10, 2)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 88ebdc4d-e493-498f-a812-02e69a9f8997
+          stepCounter: bba080b0-15f1-4206-accc-e19f3db217a4
+        config: {}
+        dataType: DateTime64(3, 'UTC')
+        defaultValue: ""
+        description: ""
+        name: created_at
+        nativeType: DateTime64(3, 'UTC')
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: employee
   schema: ""
   sqlType: Source
   type: sourceInput

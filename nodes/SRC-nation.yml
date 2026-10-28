@@ -1,0 +1,88 @@
+fileVersion: 1
+id: bebf53cd-d407-4b39-a045-c1be1aa22902
+name: nation
+operation:
+  database: ""
+  deployEnabled: true
+  description: ""
+  locationName: SRC
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 17f4f8e9-ff39-4427-8ced-34ccee7dac57
+          stepCounter: bebf53cd-d407-4b39-a045-c1be1aa22902
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: n_nationkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 584e7d60-a9f4-477b-b40a-895f75c5310a
+          stepCounter: bebf53cd-d407-4b39-a045-c1be1aa22902
+        config: {}
+        dataType: FixedString(25)
+        defaultValue: ""
+        description: ""
+        name: n_name
+        nativeType: FixedString(25)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 2c0781ba-184d-4018-ae4f-c10503c5ba4f
+          stepCounter: bebf53cd-d407-4b39-a045-c1be1aa22902
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: n_regionkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: ba833a7a-e8dc-4888-9a33-bc361f09a1bf
+          stepCounter: bebf53cd-d407-4b39-a045-c1be1aa22902
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: n_comment
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: nation
+  schema: ""
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node

@@ -19,4 +19,4 @@ SELECT
      `n_Comment` AS `n_Comment` @notNull @defaultValue("'<value>'") @description("<text>"),
      `last_Modified` AS  `last_Modified` @freshness(1, "YEAR") @relative_time("<=", "last_Modified"),
      {{ get_hash("GH_COL") }} AS "GH_COL"
-FROM {{ ref('TARGET', 'Nation_Test') }} `Nation_Test`
+FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`
