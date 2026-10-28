@@ -12,7 +12,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     - INSERT the row set the MERGE would have applied. An "update" re-inserts the same key with a newer
       SYSTEM_UPDATE_DATE (SCD2 expiry re-inserts the old version with SYSTEM_CURRENT_FLAG = 'N').
     - DELETE the replaced copies: per business key (+ SYSTEM_VERSION for SCD2) only the row with the latest
-      SYSTEM_UPDATE_DATE is kept, so a plain SELECT is correct right after the run.
+      SYSTEM_UPDATE_DATE is kept, so a plain SELECT is correct right after the run (the table is plain MergeTree).
 #}
 
 {#- High date for an open SYSTEM_END_DATE, within the column type's range (DateTime64 ends in 2299, DateTime in 2106) #}
@@ -136,6 +136,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- endif %}
 
     {%- if config.zeroKey is defined and hasSurrogateKey %}
+        {%- set zeroKeySurrogateValue = config.zeroKey.parameters[0] if (config.zeroKey.parameters is defined and config.zeroKey.parameters | length > 0) else '0' %}
         {%- set zeroKeyCreateDateCols = columns | selectattr("isSystemCreateDate") | list %}
         {{ stage('Load ' + materializationType + ' Using Merge - Zero Key Record') }}
             {# Re-inserted on every run: the newer SYSTEM_UPDATE_DATE replaces the previous zero record.
@@ -162,7 +163,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 SELECT
                 {%- for col in source.columns %}
                     {%- if col.isSurrogateKey %}
-                        {{ zero_key_surrogate_value(col) }}
+                        {{ zeroKeySurrogateValue }}
                     {%- elif col.isSystemCurrentFlag %}
                         'Y'
                     {%- elif col.isSystemEndDate or col.isSystemUpdateDate or col.isSystemCreateDate %}
@@ -188,7 +189,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 WHERE
                 {%- for col in columns if col.isSurrogateKey %}
                     {%- if not loop.first %} AND {%- endif %}
-                    `{{ col.name }}` = {{ zero_key_surrogate_value(col) }}
+                    `{{ col.name }}` = {{ zeroKeySurrogateValue }}
                 {%- endfor %}
             ) AS `EXISTING_ZERO`
     {%- endif %}
@@ -405,7 +406,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 WHERE `CHANGE_TYPE` = 'UPDATE_NON_TYPE2'
                 {%- endif %}
             )
-            -- Final SCD2 row set; new rows and new versions get their key from new_surrogate_key(), re-inserted rows keep theirs
+            -- Final SCD2 row set; new rows and new versions get a new surrogate key, re-inserted rows keep theirs
             SELECT
             {%- for col in columns %}
                 {%- if col.isSurrogateKey %}
@@ -548,8 +549,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             )
             {%- if config.zeroKey is defined and hasSurrogateKey %}
             OR (
-                {%- for col in columns if col.isSurrogateKey %}
-                {%- if not loop.first %} AND {%- endif %} `{{ col.name }}` = {{ zero_key_surrogate_value(col) }}
+                {%- for colName in surrogateKeyCols %}
+                {%- if not loop.first %} AND {%- endif %} `{{ colName }}` = {{ zeroKeySurrogateValue }}
                 {%- endfor %})
             {%- endif %})
         {%- endset %}

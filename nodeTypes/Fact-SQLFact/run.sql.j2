@@ -12,7 +12,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     - INSERT the row set the MERGE would have applied. An "update" re-inserts the same business key with a newer
       SYSTEM_UPDATE_DATE.
     - DELETE the replaced copies: per business key only the row with the latest SYSTEM_UPDATE_DATE is kept,
-      so a plain SELECT is correct right after the run.
+      so a plain SELECT is correct right after the run (the table is plain MergeTree).
     - @allColumnMatch only inserts rows that don't exist yet, so nothing is deleted.
 #}
 
