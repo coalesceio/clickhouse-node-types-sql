@@ -279,19 +279,12 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    safe_compare(src_expr, tgt_expr, data_type): datatype-aware "values differ" condition.
+    safe_compare(src_expr, tgt_expr, data_type): NULL-safe "values differ" condition
+    (ClickHouse's isDistinctFrom: NULL vs value differs, NULL vs NULL does not).
+    data_type is unused, kept so callers don't change.
   ===========================================================================#}
   {%- macro safe_compare(src_expr, tgt_expr, data_type) -%}
-
-      {%- set dt = data_type | upper -%}
-
-      {%- if 'GEOGRAPHY' in dt or 'GEOMETRY' in dt -%}
-          ST_ASWKB({{ src_expr }}) IS DISTINCT FROM ST_ASWKB({{ tgt_expr }})
-      {%- else -%}
-          {#- ClickHouse has no IS DISTINCT FROM: values differ, or exactly one side is NULL -#}
-          ({{ src_expr }} != {{ tgt_expr }} OR ({{ src_expr }} IS NULL) != ({{ tgt_expr }} IS NULL))
-      {%- endif -%}
-
+      isDistinctFrom({{ src_expr }}, {{ tgt_expr }})
   {%- endmacro -%}
 
   {#===========================================================================
