@@ -59,8 +59,10 @@ generateUUIDv4() AS `DIM_CUSTOMER_KEY` @isSurrogateKey @notNull @defaultValue("g
   the SELECT must give every new row (and every new SCD Type 2 version) a unique key. A
   validation warning is shown.
 
-- **Zero key record:** a `UUID` surrogate key gets the nil UUID
-  `00000000-0000-0000-0000-000000000000`; other surrogate keys get `surrogateKeyValue`.
+- **Zero key record:** the surrogate key gets `surrogateKeyValue` (the first `@zeroKey` value).
+  A `UUID` surrogate key takes it when it is a UUID, e.g.
+  `@zeroKey("11111111-1111-1111-1111-111111111111", ...)`, and otherwise gets the nil UUID
+  `00000000-0000-0000-0000-000000000000`. A numeric surrogate key takes the number as written.
 - **Adding the column to an existing table:** ClickHouse computes a new column's `DEFAULT` on
   read for rows already in the table, so `generateUUIDv4()` would give those rows a different
   value on every query. The redeploy runs `MATERIALIZE COLUMN` after `ADD COLUMN` for every new

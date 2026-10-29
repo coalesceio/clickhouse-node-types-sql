@@ -61,20 +61,18 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- set targetPath = ref_no_link(node.location.name, node.name) %}
     {%- set loadTimestamp = 'now64(6)' %}
 
-    {# Business keys of this run's source rows (and the target's SYSTEM_UPDATE_DATE): only these keys can have replaced copies #}
-    {%- set businessKeyCols = source.columns | selectattr("isBusinessKey") | list %}
+    {# Business keys (and the target's SYSTEM_UPDATE_DATE) for the clean-up: only keys that now have more than one row in the target can have replaced copies.
+       The clean-up reads only the target, never the source: a DELETE cannot use the node's own CTEs (ClickHouse resolves a CTE name inside a DELETE as a table). #}
+    {%- set businessKeyCols = columns | selectattr("isBusinessKey") | list %}
     {%- set updateDateCols = columns | selectattr("isSystemUpdateDate") | map(attribute="name") | list %}
     {%- if businessKeyCols | length > 0 %}
         {%- set businessKey = '`' ~ (businessKeyCols | map(attribute="name") | join('`, `')) ~ '`' %}
         {%- set touchedKeys %}
             ({{ businessKey }}) IN (
-                {{ source.cteString }}
-                SELECT
-                {%- for col in businessKeyCols %}
-                    {{ get_source_transform(col) }}
-                    {%- if not loop.last %}, {%- endif %}
-                {%- endfor %}
-                {{ joinclause }}
+                SELECT {{ businessKey }}
+                FROM {{ targetPath }}
+                GROUP BY {{ businessKey }}
+                HAVING count() > 1
             )
         {%- endset %}
     {%- endif %}
@@ -280,7 +278,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     SETTINGS join_use_nulls = 1
 
     {# == Update: delete the copies the INSERT replaced — per business key only the row with the latest SYSTEM_UPDATE_DATE is kept.
-          Only this run's business keys can have replaced copies, so the DELETE and its subquery read just those keys == #}
+          Only keys with more than one row can have replaced copies, so the DELETE and its subquery read just those keys == #}
     {%- if hasBusinessKey and not isAllColumnMatch and updateDateCols | length > 0 %}
         {{ stage('Load ' + materializationType + ' Using Merge - Clean Up Data') }}
         DELETE FROM {{ targetPath }}
