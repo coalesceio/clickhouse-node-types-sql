@@ -430,7 +430,7 @@ macroString: |-
       {%- endif -%}
 
       {%- if isChangeTrackingStrategy and lastModifiedCount > 0 %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
+          {{ test_stage('Warning: mergeStrategy', true) }}
           -- @mergeStrategy("changeTracking") does not use @lastModifiedTracking — that column would be silently ignored. Remove it, or switch mergeStrategy to "lastModified".
           SELECT 1
       {%- endif -%}
@@ -451,7 +451,7 @@ macroString: |-
       {%- endif -%}
 
       {%- if isLastModifiedStrategy and changeTrackingCount > 0 %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
+          {{ test_stage('Warning: mergeStrategy', true) }}
           -- @mergeStrategy("lastModified") does not use @isChangeTracking — those columns would be silently ignored (the last-modified comparison takes priority). Remove them, or switch mergeStrategy to "changeTracking" to use them.
           SELECT 1
       {%- endif -%}
@@ -688,26 +688,26 @@ macroString: |-
 
       {# No @mergeStrategy and no business key = plain insert, so @lastModifiedTracking is never read. Warn only — the insert still runs. #}
       {%- if not hasBusinessKey and not mergeStrategyExplicit and lastModifiedCount > 0 %}
-          {{ test_stage('Invalid configuration: No Business Key', true) }}
+          {{ test_stage('Warning: No Business Key', true) }}
           -- No @mergeStrategy and no column marked @isBusinessKey, so this node is loaded as a plain insert — @lastModifiedTracking will be ignored. Mark the business key column(s) with @isBusinessKey and set @mergeStrategy("lastModified") to use it, or remove the annotation.
           SELECT 1
       {%- endif -%}
 
       {# allColumnMatch matches on every non-system column, so @isBusinessKey / @lastModifiedTracking are never read. Warn only — the merge still runs. #}
       {%- if isAllColumnMatch and hasBusinessKey %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
+          {{ test_stage('Warning: mergeStrategy', true) }}
           -- @mergeStrategy("allColumnMatch") matches on every non-system column, so @isBusinessKey is ignored — all columns are used as the business key for comparison. Remove @isBusinessKey, or switch mergeStrategy to use it.
           SELECT 1
       {%- endif -%}
 
       {%- if isAllColumnMatch and lastModifiedCount > 0 %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
+          {{ test_stage('Warning: mergeStrategy', true) }}
           -- @mergeStrategy("allColumnMatch") performs no change detection, so @lastModifiedTracking columns are never read. Remove them, or switch mergeStrategy to "lastModified" to use them.
           SELECT 1
       {%- endif -%}
 
       {%- if hasBusinessKey and isChangeTrackingStrategy and lastModifiedCount > 0 %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
+          {{ test_stage('Warning: mergeStrategy', true) }}
           -- @mergeStrategy("changeTracking") does not use @lastModifiedTracking — that column would be silently ignored. Remove it, or switch mergeStrategy to "lastModified".
           SELECT 1
       {%- endif -%}

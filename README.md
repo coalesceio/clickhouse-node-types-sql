@@ -12,26 +12,6 @@ The Coalesce Base Node Types - SQL Package for ClickHouse includes:
 
 Concepts shared across every node type — ClickHouse table defaults, sort and partition keys, column types, data quality tests, known limitations, and usage examples — are documented once in [Common Reference](#common-reference) and linked to from each node type below.
 
-## ClickHouse vs. Snowflake at a Glance
-
-The package keeps the annotations, stage names and behaviour of the Snowflake SQL package wherever ClickHouse allows it. The differences:
-
-| **Area** | **Snowflake** | **ClickHouse** |
-|---|---|---|
-| Materialization types | table / transient table / view | table / view — ClickHouse has no transient tables |
-| Table engine | Snowflake table | MergeTree (ClickHouse Cloud: `SharedMergeTree`) — see [ClickHouse Cloud Defaults](#clickhouse-cloud-defaults) |
-| Physical layout | `@clusterKey` | [`@orderBy`](#orderby), [`@primaryKey`](#primarykey), [`@partitionBy`](#partitionby), [`@settings`](#settings) |
-| Tags | `@tag` (node and column) | Not supported — ClickHouse has no object tags |
-| Column nullability | `NOT NULL` constraint | Folded into the type: `Nullable(<type>)` unless `@notNull` — see [Column Types](#column-types) |
-| Surrogate key | `identity` column | Plain column filled from `@defaultValue`, e.g. `generateUUIDv4()` — see [Surrogate Keys](#surrogate-keys-dimension) |
-| Dimension / Fact load | `MERGE` | `INSERT` of the rows a merge would apply, then a clean-up `DELETE` of the replaced copies — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact) |
-| `@mergeStrategy("upsert")` | Supported | Not supported — use `changeTracking` |
-| `@writeMode("truncateInsert")` on Work | `INSERT OVERWRITE` (atomic) | `TRUNCATE` + `INSERT` (two stages) |
-| Table redeploy | Altered on a clone, always in place | Altered on a clone, **or recreated** (data lost) when a sort / partition key change cannot be altered — see [Sort Key and Partition Key Changes](#sort-key-and-partition-key-changes) |
-| View redeploy | Renamed or described view is recreated | Renamed in place (`Rename View`); description changed with `Set View Comment` |
-| Open `SYSTEM_END_DATE` | `2999-12-31 00:00:00` | The highest value the column's type can hold, e.g. `2299-12-31 23:59:59.999999` — see [SCD Type 2 End Date](#scd-type-2-end-date) |
-| Duplicate business keys in the source | `MERGE` fails | Load succeeds and both copies stay — see [Unique Business Keys](#unique-business-keys-fact-and-dimension) |
-
 ## Node Type Comparison
 
 A side-by-side view of which annotations each node type supports, so it's easy to see what a given node type is missing compared to the others.
@@ -139,7 +119,7 @@ Every deployment of a Work node first runs this check, which stops the deploymen
 
 | **Stage** | **Description** |
 |-----------|----------------|
-| **Unsupported Materialization Type: \<node\>** | `@materializationType` is not `table` or `view` (for example `transient table`) — fails with `Validation failed: Unsupported Materialization Type: <node>` |
+| **Unsupported Materialization Type: \<node\>** | `@materializationType` is not `table` or `view` — fails with `Validation failed: Unsupported Materialization Type: <node>` |
 
 #### Work Initial Deployment
 
@@ -338,7 +318,7 @@ Chooses how this dimension decides a row has changed, and therefore which column
 | `lastModified` | Compares a single `@lastModifiedTracking` column against the target's stored value. Requires exactly one column marked `@lastModifiedTracking` — a validation check flags it if none (or more than one) is present. SCD Type 1 or 2 comes from that column's own `scdType` parameter. Doesn't use `@isChangeTracking` — if present, a warning is raised and it's ignored. |
 
 * *Not specified in the SQL editor → defaults to **changeTracking** - SCD Type 1.*
-* The value is not case-sensitive; any other value — including `upsert`, which the Snowflake package supports — is flagged by the **Invalid configuration: mergeStrategy** check and stops the deploy and the run.
+* The value is not case-sensitive; any other value is flagged by the **Invalid configuration: mergeStrategy** check and stops the deploy and the run.
 * Every strategy matches on the business key, so the SELECT/CTE must return exactly one row per business key, with no NULL business key — see [Unique Business Keys](#unique-business-keys-fact-and-dimension).
 * The load writes fixed system column values — see [System column values](#system-column-values).
 * Change detection is NULL-safe (`isDistinctFrom`): a value changing to or from NULL counts as a change; NULL on both sides does not.
@@ -529,7 +509,7 @@ The load time is `now64(6)`, evaluated once per load statement, so every row of 
 
 #### SCD Type 2 End Date
 
-ClickHouse cannot store Snowflake's open end date `2999-12-31`. The current version (and the zero key record) gets the highest value the `@isSystemEndDate` column's type can hold:
+ClickHouse's date types cannot hold a far-future date such as `2999-12-31`, so the current version (and the zero key record) gets the highest value the `@isSystemEndDate` column's type can hold:
 
 | Column type | Open end date |
 |---|---|
@@ -555,7 +535,7 @@ Every deployment of a Dimension Node first runs these checks before any change i
 | **Stage** | **Description** |
 |-----------|----------------|
 | **Unsupported Materialization Type: \<node\>** | `@materializationType` is not `table` or `view` — stops the deployment and the run |
-| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Missing Business Key \| Invalid configuration: … \| Missing Required System Columns \| Missing Recommended System Columns \| Surrogate Key Not Set/Using Custom Surrogate Key Logic \| Warning: Zero Key Value Too Long** | Dimension validation checks (table only), rendered only when the annotations have a problem — see [Dimension Load](#dimension-load). A required problem stops the deployment with `Validation failed: <stage>`; a recommendation or warning does not. |
+| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Missing Business Key \| Invalid configuration: … \| Warning: mergeStrategy \| Missing Required System Columns \| Missing Recommended System Columns \| Surrogate Key Not Set/Using Custom Surrogate Key Logic \| Warning: Zero Key Value Too Long** | Dimension validation checks (table only), rendered only when the annotations have a problem — see [Dimension Load](#dimension-load). A required problem stops the deployment with `Validation failed: <stage>`; a recommendation or warning does not. |
 
 When deployed for the first time into an Environment, the Dimension Node executes one of these stages, depending on its materialization type:
 
@@ -580,7 +560,7 @@ Every run of a Dimension Node of materialization type table runs its configured 
 | **Stage** | **Description** |
 |-----------|----------------|
 | **Pre Load Test `<n>`** | Node-level `@tests(..., "Before")` tests, in the order they appear. |
-| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Missing Business Key \| Invalid configuration: … \| Missing Required System Columns \| Missing Recommended System Columns \| Surrogate Key Not Set/Using Custom Surrogate Key Logic \| Warning: Zero Key Value Too Long** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, no `@isBusinessKey`, an unrecognised `@mergeStrategy`, a missing or repeated `@lastModifiedTracking` column, an `scdType` other than 1 or 2, a tracking annotation the strategy ignores (non-failing), a missing system column, a missing `@defaultValue` on the surrogate key, a surrogate key that is only recommended (non-failing), or a zero key string longer than its `FixedString` column (non-failing)). |
+| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Missing Business Key \| Invalid configuration: … \| Warning: mergeStrategy \| Missing Required System Columns \| Missing Recommended System Columns \| Surrogate Key Not Set/Using Custom Surrogate Key Logic \| Warning: Zero Key Value Too Long** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, no `@isBusinessKey`, an unrecognised `@mergeStrategy`, a missing or repeated `@lastModifiedTracking` column, an `scdType` other than 1 or 2, a tracking annotation the strategy ignores (non-failing), a missing system column, a missing `@defaultValue` on the surrogate key, a surrogate key that is only recommended (non-failing), or a zero key string longer than its `FixedString` column (non-failing)). |
 | **Check NULL values for `<column>` column** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only when `@writeMode("truncateInsert")` is set — clears the target before the load. |
@@ -591,7 +571,7 @@ Every run of a Dimension Node of materialization type table runs its configured 
 | **Post-SQL `<n>`** | Each `@postSQL` statement, in the order they appear. |
 | **`<column>: <test>` \| Post Load Test `<n>`** | Column-level data quality tests and node-level `@tests(..., "After")` tests, run after the load. |
 
-> **Note:** The stage names keep the Snowflake package's "Using Merge" wording so runs read the same on both platforms; ClickHouse has no `MERGE` statement.
+> **Note:** ClickHouse has no `MERGE` statement; the "Using Merge" stages insert the rows a merge would apply and clean up the replaced copies — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact).
 
 #### Dimension Redeployment
 
@@ -706,7 +686,7 @@ Chooses how rows are matched against the target, and therefore which column anno
 | `allColumnMatch` | Treats every non-system column as the business key: a source row is inserted only if no target row matches it on all of those columns, and an existing matching row is never updated or deleted. `@isBusinessKey` isn't needed — if present, a warning is raised, it's ignored and all columns are used for the comparison. `@lastModifiedTracking` isn't used either — a warning is raised and it's ignored. System columns are optional, are left out of the comparison, and are written exactly as the SELECT/CTE computes them. |
 
 * *Not specified in the SQL editor → defaults to **changeTracking** - SCD Type 1 when a column is marked `@isBusinessKey`, otherwise the node is loaded as a [plain insert](#fact-load-behaviour).*
-* The value is not case-sensitive; any other value — including `upsert`, which the Snowflake package supports — is flagged by the **Invalid configuration: mergeStrategy** check and stops the deploy and the run. Use `changeTracking` instead of `upsert`.
+* The value is not case-sensitive; any other value is flagged by the **Invalid configuration: mergeStrategy** check and stops the deploy and the run.
 * When set, `@mergeStrategy` always takes priority: `changeTracking` and `lastModified` match on the business key, so without an `@isBusinessKey` column the **Invalid configuration: No Business Key** check fails and the load stops. `allColumnMatch` needs no `@isBusinessKey`.
 * **Note:** Ignored on Views.
 
@@ -759,7 +739,7 @@ Requirement level of each column annotation, by load:
 **Legend:** 🔴 Required · ⚪ Optional · — Not used
 
 * ¹ Ignored if present — every non-system column is used as the business key and a warning is raised.
-* ² A `@lastModifiedTracking` column on a plain insert is ignored, with a non-failing **Invalid configuration: No Business Key** warning.
+* ² A `@lastModifiedTracking` column on a plain insert is ignored, with a non-failing **Warning: No Business Key**.
 * `allColumnMatch` is meant for **factless fact tables** (no measures — the row itself is the fact), used for event tracking and coverage/relationship tracking. See [Fact All Column Match](#fact-all-column-match).
 * Under `changeTracking` / `lastModified` the load writes fixed values into the system columns: `@isSystemCreateDate` gets the load time on first insert and is then kept; `@isSystemUpdateDate` gets the load time whenever the row is inserted or changed. The expression the SELECT gives them is only used to derive the column's datatype.
 * Under `allColumnMatch` and plain insert, system columns are written exactly as the SELECT/CTE computes them.
@@ -776,7 +756,7 @@ Every deployment of a Fact Node first runs these checks before any change in Cli
 | **Stage** | **Description** |
 |-----------|----------------|
 | **Unsupported Materialization Type: \<node\>** | `@materializationType` is not `table` or `view` — stops the deployment and the run |
-| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Invalid configuration: No Business Key \| Invalid configuration: … \| Missing Required System Columns** | Fact validation checks (table only), rendered only when the annotations have a problem — see [Fact Load](#fact-load). A required problem stops the deployment with `Validation failed: <stage>`; a warning does not. |
+| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Invalid configuration: No Business Key \| Invalid configuration: … \| Warning: mergeStrategy \| Warning: No Business Key \| Missing Required System Columns** | Fact validation checks (table only), rendered only when the annotations have a problem — see [Fact Load](#fact-load). A required problem stops the deployment with `Validation failed: <stage>`; a warning does not. |
 
 When deployed for the first time into an Environment, the Fact Node executes one of these stages, depending on its materialization type:
 
@@ -801,7 +781,7 @@ Every run of a Fact Node of materialization type table runs its configured data 
 | **Stage** | **Description** |
 |-----------|----------------|
 | **Pre Load Test `<n>`** | Node-level `@tests(..., "Before")` tests, in the order they appear. |
-| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Invalid configuration: … \| Missing Required System Columns** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, an unrecognised `@mergeStrategy`, an explicit strategy without a business key, a missing or repeated `@lastModifiedTracking` column, a tracking/key annotation the strategy ignores (non-failing), or a missing system column). |
+| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Invalid configuration: … \| Warning: mergeStrategy \| Warning: No Business Key \| Missing Required System Columns** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, an unrecognised `@mergeStrategy`, an explicit strategy without a business key, a missing or repeated `@lastModifiedTracking` column, a tracking/key annotation the strategy ignores (non-failing), or a missing system column). |
 | **Check NULL values for `<column>` column** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only when `@writeMode("truncateInsert")` is set — clears the target before the load. |
@@ -919,7 +899,7 @@ SELECT count() FROM <table> WHERE c IS NOT NULL AND toUInt32OrNull(c) IS NULL;
 
 A failed conversion leaves an unfinished mutation on the clone table (`<name>_COALESCE_INTERNAL_TABLE`); the next redeploy replaces the clone.
 
-Unlike Snowflake, ClickHouse allows narrowing a type and changing a `DEFAULT` to any expression — the conversion rules above are the only limits.
+ClickHouse allows narrowing a type and changing a `DEFAULT` to any expression — the conversion rules above are the only limits.
 
 ### Sort Key and Partition Key Changes
 
@@ -952,7 +932,7 @@ To keep later sort-key changes cheap, set `@primaryKey` to the leading column(s)
 
 ### Storage Location Changes
 
-A redeploy compares the node's deployed path with its desired path. The deployed path is built from the mapping the node was deployed with (`currentState.storageLocations`), the same way as the Snowflake SQL node types, so both a node moved to another location and a location whose mapping changed (same location, new database) count as a move:
+A redeploy compares the node's deployed path with its desired path. The deployed path is built from the mapping the node was deployed with (`currentState.storageLocations`), so both a node moved to another location and a location whose mapping changed (same location, new database) count as a move:
 
 | Node | Stages |
 |---|---|
@@ -962,8 +942,6 @@ A redeploy compares the node's deployed path with its desired path. The deployed
 A view is also recreated (**Create View**) when the mapping of a location it **reads from** changed, because its `SELECT` names the old database. Only the view's own source locations are compared: a change to any other location (for example the view's source is in `SRC` and only `TARGET2` changed) leaves the view as it is. Tables need nothing here: the load resolves the source with the current mapping when it runs.
 
 `ref_no_link()` always resolves a location with the environment's **current** mapping, so it is used for where an object should be now (the desired path, the run templates' load target, `ref()` in the node's SQL) but not for the deployed path: after a mapping change it would give the new database for both, and the move would never be detected.
-
-The move depends on the platform passing the previously deployed mapping in `currentState.storageLocations`. This was verified with SQL nodes on Snowflake production (`current` held the old schema, `desired` the new one; a redeploy without a mapping change did nothing). On the ClickHouse test environment (Coalesce PR build, deployed with `coa`), `currentState.storageLocations` already held the new mapping, so a mapping change gave only a metadata update and the next load failed because the table did not exist in the new database. Re-test mapping changes once the ClickHouse node types are on production.
 
 ### How a Load Replaces Rows (Dimension and Fact)
 
@@ -990,7 +968,7 @@ A Fact with no `@isBusinessKey` column and no `@mergeStrategy` is loaded as a pl
 
 The `@isBusinessKey` column(s) must be unique in the node's source: one row per business key per load. Making sure of this is the user's responsibility; the node types do not check it.
 
-If the source returns the same business key more than once, ClickHouse does not fail the load (Snowflake's `MERGE` would fail with *Duplicate row detected during DML action*). Both rows are inserted with the same `SYSTEM_UPDATE_DATE`, the clean-up keeps the row(s) with the latest `SYSTEM_UPDATE_DATE` per key, and so **both copies stay in the target**.
+If the source returns the same business key more than once, ClickHouse does not fail the load. Both rows are inserted with the same `SYSTEM_UPDATE_DATE`, the clean-up keeps the row(s) with the latest `SYSTEM_UPDATE_DATE` per key, and so **both copies stay in the target**.
 
 De-duplicate the data before it is loaded, for example:
 
@@ -1047,7 +1025,7 @@ table/view.
 | `table` | MergeTree table (default). |
 | `view` | View. |
 
-* Use lowercase `table` or `view` — case and extra spaces are ignored (`"Table "` reads as `table`); any other value, including `transient table`, stops the deploy and the run with an **Unsupported Materialization Type** check.
+* Use lowercase `table` or `view` — case and extra spaces are ignored (`"Table "` reads as `table`); any other value stops the deploy and the run with an **Unsupported Materialization Type** check.
 * *Not specified in the SQL editor → defaults to **table**.*
 
 **Example:**
@@ -1318,7 +1296,7 @@ Adds a `DEFAULT` expression to the column.
 | Parameter | Description |
 |-----------|-------------|
 | `hash_name` | Hash name used across columns to identify the columns included in the hash. |
-| `algo` | **(optional)** Hashing function. `MD5`, `SHA1`, `SHA224`, `SHA256`, `SHA384` and `SHA512` (any case) return a lowercase hex `String`, as on Snowflake. Any other ClickHouse hash function (e.g. `cityHash64`, `xxHash64`, `sipHash64`) is called as written and returns its own type (usually `UInt64`). Defaults to `SHA1`. |
+| `algo` | **(optional)** Hashing function. `MD5`, `SHA1`, `SHA224`, `SHA256`, `SHA384` and `SHA512` (any case) return a lowercase hex `String`. Any other ClickHouse hash function (e.g. `cityHash64`, `xxHash64`, `sipHash64`) is called as written and returns its own type (usually `UInt64`). Defaults to `SHA1`. |
 | `delimiter` | **(optional)** Delimiter used to separate column values when generating the hash. Defaults to `\|\|` and can be customized; `''` concatenates without one. |
 
 * Each value is converted with `toString()`, and NULL is hashed as the text `'null'`.
@@ -1528,12 +1506,6 @@ Avoid naming custom annotations after words that are reserved keywords in the pl
 * **Switching Between YAML and SQL Node Types**:  
 Converting an existing YAML (`.yml`) node to a SQL (`.sql`) node, or vice versa, is not supported.
 
-* **No Transient Tables, Tags or Cluster Keys**:  
-ClickHouse has none of these. `@materializationType("transient table")` stops the deploy and the run; `@tag` and `@clusterKey` are not part of this package — use `@orderBy` / `@primaryKey` / `@partitionBy` for the physical layout.
-
-* **No `upsert` Merge Strategy**:  
-Without `MERGE` there is no separate upsert behaviour in ClickHouse. `@mergeStrategy("upsert")` fails the **Invalid configuration: mergeStrategy** check; use `changeTracking`.
-
 * **Recreated Tables Lose Their Data**:  
 A redeploy that changes `@partitionBy`, `@primaryKey`, an `@orderBy` change ClickHouse cannot alter, or a key column's name or type recreates the table empty — including a Dimension's whole SCD Type 2 history. The **Warning: Table Recreated (\<reason\>)** stage shows when this happens. See [Sort Key and Partition Key Changes](#sort-key-and-partition-key-changes).
 
@@ -1565,7 +1537,7 @@ Dimension and Fact expect every business key to be non-NULL. Matching uses plain
 A business key that disappears from the source is left as it is in the target — under SCD Type 2 its current row stays current (`SYSTEM_CURRENT_FLAG` = `'Y'`, open `SYSTEM_END_DATE`), and under SCD Type 1 the row is kept unchanged. Deletes are never detected, expired or flagged; handle them separately (e.g. with `@postSQL`) if the dimension needs to reflect removed keys.
 
 * **Adding a Not-Null Column Without a Default**:  
-Unlike Snowflake, ClickHouse adds a `@notNull` column without `@defaultValue` to a table that already holds rows: the existing rows get the type's default value (`0`, `''`, ...), not an error. Add a `@defaultValue` if those rows need a specific value.
+ClickHouse adds a `@notNull` column without `@defaultValue` to a table that already holds rows: the existing rows get the type's default value (`0`, `''`, ...), not an error. Add a `@defaultValue` if those rows need a specific value.
 
 * **System Columns Added to a Loaded Table**:  
 Adding `@isSystemCreateDate` / `@isSystemUpdateDate` to a table that already holds rows adds the columns with NULL (or the type's default when not `Nullable`) in every existing row. `@isSystemCreateDate` is carried over from the target on every later update, so it keeps that value for those rows. Backfill them once (e.g. with `@postSQL`) or reload with `@writeMode("truncateInsert")` if they need values.
