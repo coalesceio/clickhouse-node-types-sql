@@ -388,11 +388,14 @@ metadata:
             • Marks this column as the SCD Type 2 expiration timestamp — a far-future sentinel while the row is current, set to the actual expiry time once superseded.
             • Required for SCD Type 2 — this is what makes a version's active window queryable; omitting it leaves expired versions with no expiry marker.
             • Optional for SCD Type 1 — (no versioning, so nothing ever expires) — safe to omit entirely.
-            • Value written under changeTracking/lastModified: '2999-12-31 00:00:00' on the current row; the expiry time (one millisecond before the load) on an expired SCD2 row.
+            • Value written under changeTracking/lastModified: the highest value the column type can hold on the current row (and on the zero key record); the expiry time (one millisecond before the load) on an expired SCD2 row.
+              DateTime64 → 2299-12-31 23:59:59.999999 · DateTime → 2106-02-07 06:28:15 · Date32 → 2299-12-31 · Date → 2149-06-06
+              ClickHouse cannot store Snowflake's 2999-12-31.
             • The expression in the SELECT is only used to derive the column's datatype — its value is ignored under changeTracking/lastModified.
+              Use DateTime64(6): CAST(... AS TIMESTAMP) is a DateTime in ClickHouse (seconds only, ends in 2106).
 
             Expected expression:
-            CAST('2999-12-31 00:00:00' AS TIMESTAMP) AS "SYSTEM_END_DATE" @isSystemEndDate
+            CAST('2299-12-31 23:59:59.999999' AS DateTime64(6)) AS "SYSTEM_END_DATE" @isSystemEndDate
 
             Agentic creation only — manual creation adds this column automatically.
           isRequired: false
@@ -561,7 +564,7 @@ metadata:
           {%- set ns.items = ns.items + [{'expr': "'Y'", 'alias': '"SYSTEM_CURRENT_FLAG"', 'annotation': idAnnotation ~ '@isSystemCurrentFlag'}] -%}
           {%- set ns.items = ns.items + [{'expr': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP)', 'alias': '"SYSTEM_CREATE_DATE"', 'annotation': idAnnotation ~ '@isSystemCreateDate'}] -%}
           {%- set ns.items = ns.items + [{'expr': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP)', 'alias': '"SYSTEM_UPDATE_DATE"', 'annotation': idAnnotation ~ '@isSystemUpdateDate'}] -%}
-          {%- set ns.items = ns.items + [{'expr': "CAST('2999-12-31 00:00:00' AS TIMESTAMP)", 'alias': '"SYSTEM_END_DATE"', 'annotation': idAnnotation ~ '@isSystemEndDate'}] -%}
+          {%- set ns.items = ns.items + [{'expr': "CAST('2299-12-31 23:59:59.999999' AS DateTime64(6))", 'alias': '"SYSTEM_END_DATE"', 'annotation': idAnnotation ~ '@isSystemEndDate'}] -%}
           {%- set maxExprLen = ns.items | map(attribute='expr') | map('length') | max -%}
           {%- set maxAliasLen = ns.items | map(attribute='alias') | map('length') | max -%}
           {%- for item in ns.items -%}

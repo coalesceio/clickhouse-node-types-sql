@@ -279,35 +279,20 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    safe_compare(src_expr, tgt_expr, data_type): datatype-aware "values differ" condition.
+    safe_compare(src_expr, tgt_expr, data_type): NULL-safe "values differ" condition
+    (ClickHouse's isDistinctFrom: NULL vs value differs, NULL vs NULL does not).
+    data_type is unused, kept so callers don't change.
   ===========================================================================#}
   {%- macro safe_compare(src_expr, tgt_expr, data_type) -%}
-
-      {%- set dt = data_type | upper -%}
-
-      {%- if 'GEOGRAPHY' in dt or 'GEOMETRY' in dt -%}
-          ST_ASWKB({{ src_expr }}) IS DISTINCT FROM ST_ASWKB({{ tgt_expr }})
-      {%- else -%}
-          {#- ClickHouse has no IS DISTINCT FROM: values differ, or exactly one side is NULL -#}
-          ({{ src_expr }} != {{ tgt_expr }} OR ({{ src_expr }} IS NULL) != ({{ tgt_expr }} IS NULL))
-      {%- endif -%}
-
+      isDistinctFrom({{ src_expr }}, {{ tgt_expr }})
   {%- endmacro -%}
 
   {#===========================================================================
-    safe_equals(left_expr, right_expr, data_type): datatype-aware equality for business keys
-    (GEOGRAPHY/GEOMETRY compared on WKB). NULL never matches.
+    safe_equals(left_expr, right_expr, data_type): equality for business-key joins. NULL never matches.
+    data_type is unused, kept so callers don't change.
   ===========================================================================#}
   {%- macro safe_equals(left_expr, right_expr, data_type) -%}
-
-      {%- set dt = data_type | upper -%}
-
-      {%- if 'GEOGRAPHY' in dt or 'GEOMETRY' in dt -%}
-          ST_ASWKB({{ left_expr }}) = ST_ASWKB({{ right_expr }})
-      {%- else -%}
-          {{ left_expr }} = {{ right_expr }}
-      {%- endif -%}
-
+      {{ left_expr }} = {{ right_expr }}
   {%- endmacro -%}
 
   {#===========================================================================
@@ -588,7 +573,7 @@ macroString: |-
               {%- set missingSystemColumns.items = missingSystemColumns.items + [{
                   'required': true,
                   'annotation': '@isSystemEndDate',
-                  'example': 'CAST(\'2999-12-31 00:00:00\' AS TIMESTAMP) AS `SYSTEM_END_DATE` @isSystemEndDate',
+                  'example': 'CAST(\'2299-12-31 23:59:59.999999\' AS DateTime64(6)) AS `SYSTEM_END_DATE` @isSystemEndDate',
                   'reason': 'Required because this is an SCD Type 2 dimension: SYSTEM_END_DATE is what gets set to the expiry timestamp when a changed row\'s prior version is expired, and to the far-future sentinel on every newly inserted current version — without it there\'s no way to bound how long each historical version was active.'
               }] -%}
           {%- endif -%}
