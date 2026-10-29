@@ -1,0 +1,106 @@
+fileVersion: 1
+id: 57baf24f-8e95-4f17-8bdc-45344e5ace68
+name: partsupp
+operation:
+  database: ""
+  deployEnabled: true
+  description: ""
+  locationName: SRC
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 0b1e246a-0c4c-489c-a89d-5a07b0dc2619
+          stepCounter: 57baf24f-8e95-4f17-8bdc-45344e5ace68
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: ps_partkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 8cceca06-157c-490a-b836-0818fe42c04c
+          stepCounter: 57baf24f-8e95-4f17-8bdc-45344e5ace68
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: ps_suppkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 59751b0c-0566-4c12-b714-3deab0dfd654
+          stepCounter: 57baf24f-8e95-4f17-8bdc-45344e5ace68
+        config: {}
+        dataType: Int32
+        defaultValue: ""
+        description: ""
+        name: ps_availqty
+        nativeType: Int32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: b554809c-1db0-481c-831b-830730b66f5b
+          stepCounter: 57baf24f-8e95-4f17-8bdc-45344e5ace68
+        config: {}
+        dataType: Decimal(12, 2)
+        defaultValue: ""
+        description: ""
+        name: ps_supplycost
+        nativeType: Decimal(12, 2)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 52b597bb-83f2-45fb-9ee9-e35d63c8af27
+          stepCounter: 57baf24f-8e95-4f17-8bdc-45344e5ace68
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: ps_comment
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: partsupp
+  schema: ""
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node

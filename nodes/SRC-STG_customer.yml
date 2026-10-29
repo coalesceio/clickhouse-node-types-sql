@@ -1,0 +1,160 @@
+fileVersion: 1
+id: 167ec77a-3bae-42e6-a163-b4f9bcb15aaf
+name: STG_customer
+operation:
+  database: ""
+  deployEnabled: true
+  description: ""
+  locationName: SRC
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: bf14682c-e069-4f3d-aacc-232c63be7b60
+          stepCounter: 167ec77a-3bae-42e6-a163-b4f9bcb15aaf
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: c_custkey
+        nativeType: Nullable(UInt32)
+        nullable: true
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 49928dc8-9531-49cb-95fe-2f9d50cc110e
+          stepCounter: 167ec77a-3bae-42e6-a163-b4f9bcb15aaf
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: c_name
+        nativeType: Nullable(String)
+        nullable: true
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: cb43bffa-5196-4ab4-971e-e0332b684aed
+          stepCounter: 167ec77a-3bae-42e6-a163-b4f9bcb15aaf
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: c_address
+        nativeType: Nullable(String)
+        nullable: true
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 4552ecdc-f4f7-4505-844e-6d0427c552b1
+          stepCounter: 167ec77a-3bae-42e6-a163-b4f9bcb15aaf
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: c_nationkey
+        nativeType: Nullable(UInt32)
+        nullable: true
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: e22390a1-4721-4e28-81b5-a68b2b3e5bd3
+          stepCounter: 167ec77a-3bae-42e6-a163-b4f9bcb15aaf
+        config: {}
+        dataType: FixedString(15)
+        defaultValue: ""
+        description: ""
+        name: c_phone
+        nativeType: Nullable(FixedString(15))
+        nullable: true
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 9d99e290-7e8b-4d55-b303-acd5b47b07d1
+          stepCounter: 167ec77a-3bae-42e6-a163-b4f9bcb15aaf
+        config: {}
+        dataType: Decimal(12, 2)
+        defaultValue: ""
+        description: ""
+        name: c_acctbal
+        nativeType: Nullable(Decimal(12, 2))
+        nullable: true
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 100d2f2a-27b9-47da-a906-a86bdd5ac1cd
+          stepCounter: 167ec77a-3bae-42e6-a163-b4f9bcb15aaf
+        config: {}
+        dataType: FixedString(10)
+        defaultValue: ""
+        description: ""
+        name: c_mktsegment
+        nativeType: Nullable(FixedString(10))
+        nullable: true
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: bb511834-77fd-4fa2-9edc-96c7ccffda8d
+          stepCounter: 167ec77a-3bae-42e6-a163-b4f9bcb15aaf
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: c_comment
+        nativeType: Nullable(String)
+        nullable: true
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: STG_customer
+  schema: ""
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node
