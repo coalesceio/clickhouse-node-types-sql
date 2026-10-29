@@ -1,0 +1,178 @@
+fileVersion: 1
+id: 3e387fdd-114f-459a-ab64-45be09b47c79
+name: part
+operation:
+  database: ""
+  deployEnabled: true
+  description: ""
+  locationName: SRC
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: c6c6bfbb-b992-4107-ab58-a1abf674eda8
+          stepCounter: 3e387fdd-114f-459a-ab64-45be09b47c79
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: p_partkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: be4dcbdf-68fe-4f86-9f0d-2496d20769a7
+          stepCounter: 3e387fdd-114f-459a-ab64-45be09b47c79
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: p_name
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 12eff3cc-8bfd-4589-b226-85e52a7fd621
+          stepCounter: 3e387fdd-114f-459a-ab64-45be09b47c79
+        config: {}
+        dataType: FixedString(25)
+        defaultValue: ""
+        description: ""
+        name: p_mfgr
+        nativeType: FixedString(25)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 17d7c530-b1ea-43c7-846d-c551ebfe17d1
+          stepCounter: 3e387fdd-114f-459a-ab64-45be09b47c79
+        config: {}
+        dataType: FixedString(10)
+        defaultValue: ""
+        description: ""
+        name: p_brand
+        nativeType: FixedString(10)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 9eeae4c2-32a9-49f4-bdf4-4e5a602c3078
+          stepCounter: 3e387fdd-114f-459a-ab64-45be09b47c79
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: p_type
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 412e76f2-44e7-44ec-a401-25866717aed3
+          stepCounter: 3e387fdd-114f-459a-ab64-45be09b47c79
+        config: {}
+        dataType: Int32
+        defaultValue: ""
+        description: ""
+        name: p_size
+        nativeType: Int32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 984814f8-3f8e-4db8-a413-e8a8da3240be
+          stepCounter: 3e387fdd-114f-459a-ab64-45be09b47c79
+        config: {}
+        dataType: FixedString(10)
+        defaultValue: ""
+        description: ""
+        name: p_container
+        nativeType: FixedString(10)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 3041ee79-77c8-4964-ab60-003cb6b14223
+          stepCounter: 3e387fdd-114f-459a-ab64-45be09b47c79
+        config: {}
+        dataType: Decimal(12, 2)
+        defaultValue: ""
+        description: ""
+        name: p_retailprice
+        nativeType: Decimal(12, 2)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 6c4ed23d-959d-4157-9a69-f8b55b68c249
+          stepCounter: 3e387fdd-114f-459a-ab64-45be09b47c79
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: p_comment
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: part
+  schema: ""
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node

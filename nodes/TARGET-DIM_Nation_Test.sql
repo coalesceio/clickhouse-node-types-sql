@@ -2,6 +2,7 @@
 @nodeType("SQLDimension")
 @orderBy("n_Nationkey", "SYSTEM_VERSION")
 @mergeStrategy("lastModified")
+@zeroKey(0, "'UNKNOWN'", "1900-01-01 00:00:00", true)
 SELECT
     generateUUIDv4()                         AS "DIM_Nation_Test_KEY" @id("f8e055") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
     "n_Nationkey"                            AS "n_Nationkey"         @id("4fdd08") @isBusinessKey,

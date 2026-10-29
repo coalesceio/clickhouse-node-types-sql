@@ -1,0 +1,178 @@
+fileVersion: 1
+id: 3bfc8b24-10b5-40ea-8e27-21f2eb45f921
+name: orders
+operation:
+  database: ""
+  deployEnabled: true
+  description: ""
+  locationName: SRC
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: ed970051-732e-4dde-9443-47f67e8df7b5
+          stepCounter: 3bfc8b24-10b5-40ea-8e27-21f2eb45f921
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: o_orderkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 8736a3e8-11e2-4135-a178-8a4543c2736b
+          stepCounter: 3bfc8b24-10b5-40ea-8e27-21f2eb45f921
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: o_custkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 6581e836-b5ab-435c-bc7c-e0ab995e7e9b
+          stepCounter: 3bfc8b24-10b5-40ea-8e27-21f2eb45f921
+        config: {}
+        dataType: FixedString(1)
+        defaultValue: ""
+        description: ""
+        name: o_orderstatus
+        nativeType: FixedString(1)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 4ad85e01-4ebc-4f3d-b59b-3365cfd0e426
+          stepCounter: 3bfc8b24-10b5-40ea-8e27-21f2eb45f921
+        config: {}
+        dataType: Decimal(12, 2)
+        defaultValue: ""
+        description: ""
+        name: o_totalprice
+        nativeType: Decimal(12, 2)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 4fcdca56-5e72-4027-ae3f-92427cfbbf6b
+          stepCounter: 3bfc8b24-10b5-40ea-8e27-21f2eb45f921
+        config: {}
+        dataType: Date
+        defaultValue: ""
+        description: ""
+        name: o_orderdate
+        nativeType: Date
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 5d862175-483f-41a5-a36b-50d32b9da0fb
+          stepCounter: 3bfc8b24-10b5-40ea-8e27-21f2eb45f921
+        config: {}
+        dataType: FixedString(15)
+        defaultValue: ""
+        description: ""
+        name: o_orderpriority
+        nativeType: FixedString(15)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 43f9c6a4-b27a-4435-b569-dc9e19be8773
+          stepCounter: 3bfc8b24-10b5-40ea-8e27-21f2eb45f921
+        config: {}
+        dataType: FixedString(15)
+        defaultValue: ""
+        description: ""
+        name: o_clerk
+        nativeType: FixedString(15)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 80d2448f-51e4-4467-ba5a-9750bef009c5
+          stepCounter: 3bfc8b24-10b5-40ea-8e27-21f2eb45f921
+        config: {}
+        dataType: Int32
+        defaultValue: ""
+        description: ""
+        name: o_shippriority
+        nativeType: Int32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 0a1ea698-b56e-4f9b-ba14-4e29536f4c50
+          stepCounter: 3bfc8b24-10b5-40ea-8e27-21f2eb45f921
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: o_comment
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: orders
+  schema: ""
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node
