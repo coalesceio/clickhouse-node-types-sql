@@ -1,0 +1,350 @@
+fileVersion: 2
+id: SQLWork
+isDisabled: false
+metadata:
+  defaultStorageLocation: null
+  error: null
+  nodeMetadataSpec: |-
+    capitalized: Work
+    short: WRK
+    plural: Works
+    tagColor: '#2EB67D'
+
+    deployStrategy: advanced
+    enableCTESupport: true
+
+    annotations:
+        node:
+
+        - name: materializationType
+          description: |-
+            • Controls node's materialization type — supports 𝘁𝗮𝗯𝗹𝗲 and 𝘃𝗶𝗲𝘄.
+          isRequired: false
+          parameters:
+            - name: type
+              type: string
+              isRequired: true
+              default: table
+              example: view
+              options:
+                - table
+                - view
+
+        - name: partitionBy
+          description: |-
+            • The table's PARTITION BY key. Each argument is one term — a column or an expression, written as it should appear in the SQL; several terms are partitioned together.
+              Ex. partitionBy("toYYYYMM(`order_Date`)")
+              Ex. partitionBy("toYYYYMM(`order_Date`)", "`region`")
+            • Keep it coarse (e.g. one partition per month): each partition is stored separately, and too many partitions slow inserts down and eventually make them fail.
+            • Without partitionBy the table is not partitioned. Ignored on views.
+            • ⚠️ Changing partitionBy (or renaming / retyping a column used in it) on redeploy recreates the table — existing data is lost.
+          isRequired: false
+          parameters:
+            - name: term
+              type: string
+              isRequired: true
+              example: toYYYYMM(<col_name>)
+
+        - name: orderBy
+          description: |-
+            • The table's ORDER BY (sort) key. Each argument is one term — a column or an expression, written as it should appear in the SQL.
+              Ex. orderBy("`n_Nationkey`")
+              Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)")
+            • Without orderBy (and primaryKey) the table uses ORDER BY tuple(). Ignored on views.
+            • ⚠️ On redeploy, removing trailing terms or adding new columns (without a default) is altered in place when primaryKey is set; any other orderBy change (or renaming / retyping a column used in it) recreates the table — existing data is lost.
+          isRequired: false
+          parameters:
+            - name: term
+              type: string
+              isRequired: true
+              example: toYYYYMM(<col_name>)
+
+        - name: primaryKey
+          description: |-
+            • The table's PRIMARY KEY. Each argument is one term, as in orderBy.
+            • ClickHouse requires the primary key to be the leading terms of ORDER BY, in the same order — the create fails otherwise.
+              Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)") primaryKey("`n_Nationkey`", "`n_Name`")
+            • Without orderBy, the primary key is also the sort key: primaryKey("`n_Nationkey`") → ORDER BY (`n_Nationkey`).
+            • When it is the same as orderBy, it is not written separately. Ignored on views.
+            • ⚠️ Changing primaryKey (or renaming / retyping a column used in it) on redeploy recreates the table — existing data is lost.
+          isRequired: false
+          parameters:
+            - name: term
+              type: string
+              isRequired: true
+              example: <col_name>
+
+        - name: settings
+          description: |-
+            • The table's MergeTree SETTINGS. Each argument is one setting, written as name = value.
+              Ex. settings("index_granularity = 8192")
+              Ex. settings("index_granularity = 8192", "min_bytes_for_wide_part = 0")
+            • allow_nullable_key = 1 is added automatically when the table has an orderBy, primaryKey or partitionBy, so nullable columns can be key terms — set it here to override it.
+            • Ignored on views.
+            • On redeploy, changes are applied in place with MODIFY SETTING / RESET SETTING.
+          isRequired: false
+          parameters:
+            - name: setting
+              type: string
+              isRequired: true
+              example: index_granularity = 8192
+
+        - name: writeMode
+          description: |-
+            • Controls how data is written to the target table. 
+            • 𝘁𝗿𝘂𝗻𝗰𝗮𝘁𝗲𝗜𝗻𝘀𝗲𝗿𝘁 clears the table before loading, replacing its contents entirely;
+            • 𝗮𝗽𝗽𝗲𝗻𝗱 inserts the new rows alongside whatever is already there.
+            • If not specified in the SQL, defaults to 𝘁𝗿𝘂𝗻𝗰𝗮𝘁𝗲𝗜𝗻𝘀𝗲𝗿𝘁. 
+            • Ignored on views.
+          isRequired: false
+          parameters:
+            - name: mode
+              type: string
+              description: Whether to 𝗧𝗥𝗨𝗡𝗖𝗔𝗧𝗘 the target table before inserting, or 𝗔𝗣𝗣𝗘𝗡𝗗 to it.
+              isRequired: true
+              default: truncateInsert
+              example: append
+              options:
+                - truncateInsert
+                - append
+
+        - name: disableTests
+          description: |-
+            • Controls whether configured tests are skipped.
+            • Useful while developing a node — skip node-level and column-level tests without deleting them, so you can iterate on the SQL first and turn tests back on once the logic is settled.
+          isRequired: false
+
+        - name: tests
+          description: |-
+            • 🚦Node-level data quality test.
+            • Runs the given 𝗾𝘂𝗲𝗿𝘆𝗦𝗤𝗟 against the target and fails the test if it returns any records — write the query so it selects only the rows that violate your condition.
+            • Skipped entirely when 𝗱𝗶𝘀𝗮𝗯𝗹𝗲𝗧𝗲𝘀𝘁𝘀 is set.
+          allowsMultiple: true
+          parameters:
+            - name: querySQL
+              type: string
+              description: SQL statement to execute as a validation test.
+              isRequired: true
+              example: 'SELECT 1'
+
+            - name: continueOnFailure
+              type: boolean
+              description: Determines whether execution continues when the test fails.
+              isRequired: false
+              default: true
+
+            - name: runOrder
+              type: string
+              description: Determines whether the test is executed before or after the load operation.
+              isRequired: false
+              default: After
+              options:
+                - Before
+                - After
+
+        - name: preSQL
+          description: |-
+            • SQL statement to execute before the data load operation — e.g. staging setup, dropping temp tables, or capturing pre-load state.
+            • Repeat the annotation to run multiple statements in the order they appear.
+            • Ignored on views.
+          allowsMultiple: true
+          parameters:
+          - name: querySQL
+            type: string
+            description: Query to be executed.
+            isRequired: true
+            example: 'SELECT 1'
+
+        - name: postSQL
+          description: |-
+            • SQL statement to execute after the data load operation — e.g. updating dependent tables, cleaning up temp objects, or logging load completion.
+            • Repeat the annotation to run multiple statements in the order they appear.
+            • Ignored on views.
+          allowsMultiple: true
+          parameters:
+          - name: querySQL
+            type: string
+            description: Query to be executed.
+            isRequired: true
+            example: 'SELECT 1'
+
+        column:
+
+        - name: inHash
+          description: |-
+                • Marks a column as an input to a generated hash key, grouped by 𝗵𝗮𝘀𝗵𝗡𝗮𝗺𝗲 and ordered within that group by 𝗵𝗮𝘀𝗵𝗢𝗿𝗱𝗲𝗿.
+                • Mark every column that should feed a given hash with the same 𝗵𝗮𝘀𝗵𝗡𝗮𝗺𝗲, then call the 𝐠𝐞𝐭_𝐡𝐚𝐬𝐡("<hashName>") macro elsewhere in the SELECT to produce the actual hash column from those marked columns.
+                • 𝗦𝗲𝗲 𝗱𝗼𝗰𝘂𝗺𝗲𝗻𝘁𝗮𝘁𝗶𝗼𝗻 𝗳𝗼𝗿 𝗱𝗲𝘁𝗮𝗶𝗹𝘀.
+          allowsMultiple: true
+          parameters:
+            - name: hashName
+              isRequired: true
+              type: string
+              description: Group hash name shared by every column feeding the same hash.
+              example: GH_COL
+
+            - name: hashOrder
+              isRequired: true
+              type: number
+              description: Position of this column within its hash group, lowest first.
+              example: 1
+
+        - name: not_null
+          description: |-
+           🚦 Column-level data quality test.
+            • Fails on rows where the column is 𝗡𝗨𝗟𝗟.
+            • Presence enables the test — remove the annotation to turn it off.
+            • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
+
+        - name: uniqueness
+          description: |- 
+           🚦 Column-level data quality test.
+            • Fails when a value appears on more than one row.
+            • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
+
+        - name: empty
+          description: |-
+            🚦 Column-level data quality test.
+            • Fails on rows where the column trims to the empty string;
+            • 𝗡𝗨𝗟𝗟 values pass this test and are instead caught by not_null.
+            • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
+
+        - name: accepted_values
+          description: |-
+            🚦 Column-level data quality test.
+            • Fails on rows whose value is outside the allow list.
+            • Repeatable — every occurrence on the column is merged into one list. Each call takes a comma-separated list or any number of separate arguments; every argument is itself comma-splittable.
+                accepted_values("0, 1, 2")
+                accepted_values("0", "1", "2")
+                accepted_values("0") accepted_values("1, 2")
+            • Each value is pasted into the SQL verbatim, so quote it to match the column's data type
+                positive number/float/decimal/bool as "<val>" or <val>
+                negative number/float/decimal as "-<val>"
+                string as "'<val>'"
+            • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
+          parameters:
+            - name: value
+              type: string
+              isRequired: true
+          allowsMultiple: true
+
+        - name: rejected_values
+          description: |-
+            🚦 Column-level data quality test.
+            • Fails on rows whose value is in the deny list.
+            • Repeatable — every occurrence on the column is merged into one list. Each call takes a comma-separated list or any number of separate arguments; every argument is itself comma-splittable.
+                rejected_values("'A', 'B'")
+                rejected_values("'A'", "'B'", "'C'")
+                rejected_values("'A'") rejected_values("'B', 'C'")
+            • Each value is pasted into the SQL verbatim, so quote it to match the column's data type
+                positive number/float/decimal/bool as "<val>" or <val>
+                negative number/float/decimal as "-<val>"
+                string as "'<val>'"
+            • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
+          parameters:
+            - name: value
+              type: string
+              isRequired: true
+              example: "'<string>'"
+          allowsMultiple: true
+
+        - name: min_max
+          description: |-
+            🚦 Column-level data quality test.
+            • Fails on rows outside the inclusive range. NULL values pass.
+            • Applies to numeric and temporal (date/time related) columns only.
+            • Each bound is pasted into the SQL verbatim, so quote it to match the column's data type —
+                positive number as "<num>" or <num>
+                negative number as "-<num>"
+                float/decimal number as "<num>" or <num> (a trailing .0 may render as a whole number, e.g. 3.0 → 3)
+                date as "'<date/time>'" or "<date/time_expression>"
+            • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
+          parameters:
+            - name: min
+              type: string
+              description: Inclusive lower bound the column value must not fall below.
+              isRequired: true
+              example: -5
+            - name: max
+              type: string
+              description: Inclusive upper bound the column value must not exceed.
+              isRequired: true
+              example: 0
+
+        - name: min_value
+          description: |-
+            🚦 Column-level data quality test.
+            • Fails on rows below the bound. NULL values pass.
+            • Applies to numeric and temporal (date/time related) columns only.
+            • Pasted into the SQL verbatim, so quote it to match the column's data type —
+                positive number as "<num>" or <num>
+                negative number as "-<num>"
+                float/decimal number as "<num>" or <num> (a trailing .0 may render as a whole number, e.g. 3.0 → 3)
+                date as "'<date/time>'" or "<date/time_expression>"
+            • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
+          parameters:
+            - name: min
+              type: string
+              description: Inclusive lower bound the column value must not fall below.
+              isRequired: true
+              example: -5
+
+        - name: max_value
+          description: |-
+            🚦 Column-level data quality test.
+            • Fails on rows above the bound. NULL values pass.
+            • Applies to numeric and temporal (date/time related) columns only.
+            • Pasted into the SQL verbatim, so quote it to match the column's data type —
+                positive number as "<num>" or <num>
+                negative number as "-<num>"
+                float/decimal number as "<num>" or <num> (a trailing .0 may render as a whole number, e.g. 3.0 → 3)
+                date as "'<date/time>'" or "<date/time_expression>"
+            • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
+          parameters:
+            - name: max
+              type: string
+              description: Inclusive upper bound the column value must not exceed.
+              isRequired: true
+              example: 0
+
+        - name: freshness
+          description: |-
+           🚦 Column-level data quality test.
+            • Checks that the data is fresh — fails when the column's value is older than the given interval, or when the table has no rows at all.
+            • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
+            𝗡𝗼𝘁𝗲: on a DATE column the value is truncated to midnight.
+          parameters:
+            - name: interval
+              description: |-
+                How far back from now the newest value is allowed to be, expressed in the unit given by 𝘂𝗻𝗶𝘁.
+              type: number
+              isRequired: true
+              example: 1
+
+            - name: unit
+              type: string
+              options: [SECOND, MINUTE, HOUR, DAY, WEEK, MONTH, YEAR]
+              default: DAY
+
+        - name: relative_time
+          description: |-
+           🚦 Column-level data quality test.
+            • Compares this column against another date/time column on the same node using the given operator.
+            • E.g. @relative_time("<=", "END_DATE") fails any row where this column's value is not less than or equal to END_DATE.
+            • A row with either side 𝗡𝗨𝗟𝗟 is left out of the check and passes.
+            • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
+          parameters:
+            - name: operator
+              type: string
+              description: Comparison operator used to compare this column against the other column.
+              isRequired: true
+              options: ["<", "<=", ">", ">=", "=", "<>"]
+              example: "="
+
+            - name: column
+              type: string
+              description: Name of the other date/time column on this node to compare against.
+              isRequired: true
+              example: "<other_column>"
+name: Work
+type: NodeType

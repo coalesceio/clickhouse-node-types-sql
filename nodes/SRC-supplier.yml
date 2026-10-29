@@ -1,0 +1,142 @@
+fileVersion: 1
+id: d2809977-0c3f-4c24-a945-90f065cf7da5
+name: supplier
+operation:
+  database: ""
+  deployEnabled: true
+  description: ""
+  locationName: SRC
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 283c00e6-1337-4df1-b45e-22fba8ffdebc
+          stepCounter: d2809977-0c3f-4c24-a945-90f065cf7da5
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: s_suppkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 58a860f7-8f51-4f65-8cf2-9a8b33c5b526
+          stepCounter: d2809977-0c3f-4c24-a945-90f065cf7da5
+        config: {}
+        dataType: FixedString(25)
+        defaultValue: ""
+        description: ""
+        name: s_name
+        nativeType: FixedString(25)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 1f14194a-f307-4542-a7d8-c07fca889bad
+          stepCounter: d2809977-0c3f-4c24-a945-90f065cf7da5
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: s_address
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: d1a46a63-1466-45bc-97c9-962cf8fdfb4d
+          stepCounter: d2809977-0c3f-4c24-a945-90f065cf7da5
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: s_nationkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: fc89cb52-0124-495d-b499-1a92c53e4cfc
+          stepCounter: d2809977-0c3f-4c24-a945-90f065cf7da5
+        config: {}
+        dataType: FixedString(15)
+        defaultValue: ""
+        description: ""
+        name: s_phone
+        nativeType: FixedString(15)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 05cca318-ebb5-4198-a529-45775e679619
+          stepCounter: d2809977-0c3f-4c24-a945-90f065cf7da5
+        config: {}
+        dataType: Decimal(12, 2)
+        defaultValue: ""
+        description: ""
+        name: s_acctbal
+        nativeType: Decimal(12, 2)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 67eae199-3da3-464e-b52f-ac90b8ec9f7f
+          stepCounter: d2809977-0c3f-4c24-a945-90f065cf7da5
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: s_comment
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: supplier
+  schema: ""
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node
