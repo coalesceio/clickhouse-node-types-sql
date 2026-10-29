@@ -15,20 +15,21 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
       SYSTEM_UPDATE_DATE is kept, so a plain SELECT is correct right after the run (the table is plain MergeTree).
 #}
 
-{#- High date for an open SYSTEM_END_DATE, within the column type's range (DateTime64 ends in 2299, DateTime in 2106) #}
+{#- High date for an open SYSTEM_END_DATE: the largest value the column type can hold (ClickHouse cannot store
+    Snowflake's 2999-12-31: DateTime64 / Date32 end in 2299, DateTime at 2106-02-07 06:28:15, Date at 2149-06-06) #}
 {%- macro ch_high_date(col) -%}
     {%- set dt = col.dataType | default('', true) | lower | replace(' ', '') -%}
     {%- set dt = dt[9:-1] if dt.startswith('nullable(') else dt -%}
     {%- if dt.startswith('datetime64') -%}
-        toDateTime64('2299-12-31 00:00:00', 6)
+        toDateTime64('2299-12-31 23:59:59.999999', 6)
     {%- elif dt.startswith('datetime') -%}
-        toDateTime('2105-12-31 00:00:00')
+        toDateTime(4294967295)
     {%- elif dt.startswith('date32') -%}
         toDate32('2299-12-31')
     {%- elif dt.startswith('date') -%}
         toDate('2149-06-06')
     {%- else -%}
-        '2999-12-31 00:00:00'
+        '2299-12-31 23:59:59.999999'
     {%- endif -%}
 {%- endmacro -%}
 
@@ -100,6 +101,17 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- set targetPath = ref_no_link(node.location.name, node.name) %}
     {%- set loadTimestamp = 'now64(6)' %}
 
+    {# The zero record is kept out of change detection: its business key (e.g. 0) can equal a real key, which would
+       otherwise match it and overwrite it with that row's data #}
+    {%- set excludeZeroRecord = config.zeroKey is defined and hasSurrogateKey %}
+    {%- if excludeZeroRecord %}
+        {%- set notZeroRecord %}
+            {%- for col in columns if col.isSurrogateKey %}
+                {%- if not loop.first %} AND {% endif %}`{{ col.name }}` != {{ zero_key_surrogate_value(col) }}
+            {%- endfor %}
+        {%- endset %}
+    {%- endif %}
+
     {%- if lastModifiedComparison %}
         {# Test stage for checking NULL values in source - last modified column (any datatype: a NULL date/time or numeric value can never compare as newer, so the row would never be picked up as changed) #}
         {{ test_stage('Check NULL values for ' ~ lastModifiedColName ~ ' column', false) }}
@@ -136,7 +148,6 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- endif %}
 
     {%- if config.zeroKey is defined and hasSurrogateKey %}
-        {%- set zeroKeySurrogateValue = config.zeroKey.parameters[0] if (config.zeroKey.parameters is defined and config.zeroKey.parameters | length > 0) else '0' %}
         {%- set zeroKeyCreateDateCols = columns | selectattr("isSystemCreateDate") | list %}
         {{ stage('Load ' + materializationType + ' Using Merge - Zero Key Record') }}
             {# Re-inserted on every run: the newer SYSTEM_UPDATE_DATE replaces the previous zero record.
@@ -163,11 +174,13 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 SELECT
                 {%- for col in source.columns %}
                     {%- if col.isSurrogateKey %}
-                        {{ zeroKeySurrogateValue }}
+                        {{ zero_key_surrogate_value(col) }}
                     {%- elif col.isSystemCurrentFlag %}
                         'Y'
-                    {%- elif col.isSystemEndDate or col.isSystemUpdateDate or col.isSystemCreateDate %}
-                        {{ get_source_transform(col) }}
+                    {%- elif col.isSystemEndDate %}
+                        {{ ch_high_date(col) }}
+                    {%- elif col.isSystemUpdateDate or col.isSystemCreateDate %}
+                        {{ loadTimestamp }}
                     {%- elif col.isSystemVersion %}
                         1
                     {%- else %}
@@ -189,7 +202,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 WHERE
                 {%- for col in columns if col.isSurrogateKey %}
                     {%- if not loop.first %} AND {%- endif %}
-                    `{{ col.name }}` = {{ zeroKeySurrogateValue }}
+                    `{{ col.name }}` = {{ zero_key_surrogate_value(col) }}
                 {%- endfor %}
             ) AS `EXISTING_ZERO`
     {%- endif %}
@@ -243,6 +256,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 /* Only the current (SYSTEM_CURRENT_FLAG = 'Y') version of each business key —
                    history rows are irrelevant for change detection */
                 SELECT
+                    1 AS `TGT_ROW_EXISTS`,
                 {%- for col in columns %}
                     {%- if col.isSurrogateKey %}
                     `{{ col.name }}` AS `TGT_{{ col.name }}`
@@ -255,6 +269,9 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 {%- endfor %}
                 FROM {{ targetPath }}
                 WHERE `{{ sysCurrentFlagCol }}` = 'Y'
+                {%- if excludeZeroRecord %}
+                  AND {{ notZeroRecord }}
+                {%- endif %}
             ),
 
             `CHANGE_DETECTION` AS (
@@ -270,7 +287,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {%- endfor %}
                     CASE
                         -- No matching business key in the target at all — this is a brand-new dimension member
-                        WHEN `TARGET_CURRENT`.`{{ sysVersionCol }}` IS NULL THEN 'NEW'
+                        WHEN ifNull(`TARGET_CURRENT`.`TGT_ROW_EXISTS`, 0) = 0 THEN 'NEW'
                         {%- if lastModifiedComparison %}
                         -- Last-modified-driven: a newer source timestamp than the current target row means a change
                         WHEN `SOURCE_DATA`.`{{ lastModifiedColName }}` > `TARGET_CURRENT`.`TGT_{{ lastModifiedColName }}` THEN 'CHANGED'
@@ -442,6 +459,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 /* SCD1 = one row per key, so no current-flag filter is needed here. SYSTEM_VERSION,
                    if present at all, rides along but is never used to detect a NEW row. */
                 SELECT
+                    1 AS `TGT_ROW_EXISTS`,
                 {%- for col in columns if not (col.isSystemCurrentFlag or col.isSystemUpdateDate or col.isSystemEndDate) %}
                     {%- if col.isBusinessKey or col.isSystemVersion or col.isSystemCreateDate %}
                     `{{ col.name }}`
@@ -451,6 +469,9 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {%- if not loop.last %}, {%- endif %}
                 {%- endfor %}
                 FROM {{ targetPath }}
+                {%- if excludeZeroRecord %}
+                WHERE {{ notZeroRecord }}
+                {%- endif %}
             ),
 
             `CHANGE_DETECTION` AS (
@@ -467,7 +488,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     CASE
                         -- NEW is detected off the business key match, not SYSTEM_VERSION — SCD1 works
                         -- the same whether SYSTEM_VERSION exists on this node or not.
-                        WHEN `TARGET_CURRENT`.`{{ firstBizKeyCol }}` IS NULL THEN 'NEW'
+                        WHEN ifNull(`TARGET_CURRENT`.`TGT_ROW_EXISTS`, 0) = 0 THEN 'NEW'
                         {%- if lastModifiedComparison %}
                         -- Last-modified-driven: a newer source timestamp than the current target row means a change
                         WHEN `SOURCE_DATA`.`{{ lastModifiedColName }}` > `TARGET_CURRENT`.`TGT_{{ lastModifiedColName }}` THEN 'CHANGED'
@@ -521,15 +542,16 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             FROM `CHANGE_DETECTION`
             WHERE `CHANGE_TYPE` IN ('NEW', 'CHANGED')
         {%- endif %}
-    {# Unmatched LEFT JOIN columns must be NULL (ClickHouse defaults them to 0 / '') for the NEW checks above #}
-    SETTINGS join_use_nulls = 1
+    {# NEW rows are found with TGT_ROW_EXISTS (0 or NULL when unmatched), not by a target column being NULL, so the
+       load needs no join_use_nulls: the node's own SELECT and JOINs run with the user's settings, as in Preview #}
 
     {# == Update: delete the copies the INSERT replaced (and the previous zero key record) — per business key
           (+ SYSTEM_VERSION for SCD2, + the surrogate key, which keeps the zero record apart from a real row with
           the same business key value) only the row with the latest SYSTEM_UPDATE_DATE is kept.
-          Only this run's business keys (and the zero record) can have replaced copies, so the DELETE and its
-          subquery read just those keys instead of the whole table == #}
-    {%- set businessKeyCols = source.columns | selectattr("isBusinessKey") | list %}
+          Only keys with more than one row (this includes the re-inserted zero record) can have replaced copies, so the
+          DELETE and its subquery read just those keys. The clean-up reads only the target, never the source: a DELETE
+          cannot use the node's own CTEs (ClickHouse resolves a CTE name inside a DELETE as a table) == #}
+    {%- set businessKeyCols = columns | selectattr("isBusinessKey") | list %}
     {%- set surrogateKeyCols = columns | selectattr("isSurrogateKey") | map(attribute="name") | list %}
     {%- set replaceKeyCols = (businessKeyCols | map(attribute="name") | list)
                              + (columns | selectattr("isSystemVersion") | map(attribute="name") | list if type2Dimension else [])
@@ -538,21 +560,12 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- if businessKeyCols | length > 0 and updateDateCols | length > 0 %}
         {%- set replaceKey = '`' ~ (replaceKeyCols | join('`, `')) ~ '`' %}
         {%- set touchedKeys %}
-            ((`{{ businessKeyCols | map(attribute="name") | join('`, `') }}`) IN (
-                {{ source.cteString }}
-                SELECT
-                {%- for col in businessKeyCols %}
-                    {{ get_source_transform(col) }}
-                    {%- if not loop.last %}, {%- endif %}
-                {%- endfor %}
-                {{ joinclause }}
+            ({{ replaceKey }}) IN (
+                SELECT {{ replaceKey }}
+                FROM {{ targetPath }}
+                GROUP BY {{ replaceKey }}
+                HAVING count() > 1
             )
-            {%- if config.zeroKey is defined and hasSurrogateKey %}
-            OR (
-                {%- for colName in surrogateKeyCols %}
-                {%- if not loop.first %} AND {%- endif %} `{{ colName }}` = {{ zeroKeySurrogateValue }}
-                {%- endfor %})
-            {%- endif %})
         {%- endset %}
         {{ stage('Load ' + materializationType + ' Using Merge - Clean Up Data') }}
         DELETE FROM {{ targetPath }}

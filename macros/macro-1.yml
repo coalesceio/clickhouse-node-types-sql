@@ -430,7 +430,7 @@ macroString: |-
       {%- endif -%}
 
       {%- if isChangeTrackingStrategy and lastModifiedCount > 0 %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
+          {{ test_stage('Warning: mergeStrategy', true) }}
           -- @mergeStrategy("changeTracking") does not use @lastModifiedTracking — that column would be silently ignored. Remove it, or switch mergeStrategy to "lastModified".
           SELECT 1
       {%- endif -%}
@@ -451,7 +451,7 @@ macroString: |-
       {%- endif -%}
 
       {%- if isLastModifiedStrategy and changeTrackingCount > 0 %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
+          {{ test_stage('Warning: mergeStrategy', true) }}
           -- @mergeStrategy("lastModified") does not use @isChangeTracking — those columns would be silently ignored (the last-modified comparison takes priority). Remove them, or switch mergeStrategy to "changeTracking" to use them.
           SELECT 1
       {%- endif -%}
@@ -573,7 +573,7 @@ macroString: |-
               {%- set missingSystemColumns.items = missingSystemColumns.items + [{
                   'required': true,
                   'annotation': '@isSystemEndDate',
-                  'example': 'CAST(\'2999-12-31 00:00:00\' AS TIMESTAMP) AS `SYSTEM_END_DATE` @isSystemEndDate',
+                  'example': 'CAST(\'2299-12-31 23:59:59.999999\' AS DateTime64(6)) AS `SYSTEM_END_DATE` @isSystemEndDate',
                   'reason': 'Required because this is an SCD Type 2 dimension: SYSTEM_END_DATE is what gets set to the expiry timestamp when a changed row\'s prior version is expired, and to the far-future sentinel on every newly inserted current version — without it there\'s no way to bound how long each historical version was active.'
               }] -%}
           {%- endif -%}
@@ -583,7 +583,8 @@ macroString: |-
           {%- set anyRequired = missingSystemColumns.items | selectattr('required') | list | length > 0 %}
           {# If @isSurrogateKey is the only thing flagged, use a neutral heading since it may just be a custom surrogate key setup. #}
           {%- set onlySurrogateKeyFlagged = missingSystemColumns.items | length == 1 and missingSystemColumns.items[0].annotation == '@isSurrogateKey' and not missingSystemColumns.items[0].required -%}
-          {%- set stageName = 'Surrogate Key Not Set/Using Custom Surrogate Key Logic' if onlySurrogateKeyFlagged else 'Missing Required System Columns' %}
+          {%- set stageName = 'Surrogate Key Not Set/Using Custom Surrogate Key Logic' if onlySurrogateKeyFlagged
+                              else ('Missing Required System Columns' if anyRequired else 'Missing Recommended System Columns') %}
           {{ test_stage(stageName, not anyRequired) }}
           {%- for item in missingSystemColumns.items %}
           -- {{ loop.index }}. [{{ 'REQUIRED' if item.required else 'RECOMMENDED' }}] {{ item.annotation }}
@@ -600,22 +601,29 @@ macroString: |-
           {%- endif -%}
       {%- endif -%}
 
-      {# Zero key record: a string value longer than its column's declared length is rejected by Snowflake. Warn only. #}
+      {# Zero key record: FixedString(n) is the only ClickHouse string type with a length limit (String has none).
+         A longer value is stored as NULL in a Nullable(FixedString(n)) column without any error, and fails the
+         Zero Key Record stage in a non-Nullable one. Warn only. #}
       {%- if config.zeroKey is defined and hasSurrogateKey -%}
           {%- set zk = namespace(tooLong=[]) -%}
           {%- set zkParams = config.zeroKey.parameters if config.zeroKey.parameters is defined else [] -%}
           {%- for col in columns if not (col.isSurrogateKey or col.isSystemCurrentFlag or col.isSystemEndDate
                                          or col.isSystemUpdateDate or col.isSystemCreateDate or col.isSystemVersion) -%}
-              {%- set dt = col.dataType | upper | replace(' ', '') -%}
-              {%- if dt[:3] in ('VAR', 'CHA', 'STR', 'TEX') -%}
-                  {%- set maxLen = (dt.split('(')[1].split(')')[0] | int) if '(' in dt else (1 if dt in ('CHAR', 'CHARACTER') else none) -%}
+              {%- set ns = namespace(dt=(col.dataType | default('', true) | replace(' ', ''))) -%}
+              {%- for wrapper in ['lowcardinality(', 'nullable('] -%}
+                  {%- if (ns.dt | lower).startswith(wrapper) and ns.dt.endswith(')') -%}
+                      {%- set ns.dt = ns.dt[(wrapper | length):-1] -%}
+                  {%- endif -%}
+              {%- endfor -%}
+              {%- if (ns.dt | lower).startswith('fixedstring(') -%}
+                  {%- set maxLen = ns.dt.split('(')[1].split(')')[0] | int -%}
                   {%- if col.zeroKey is defined and col.zeroKey.parameters is defined and col.zeroKey.parameters | length > 0 -%}
                       {%- set zkValue = col.zeroKey.parameters[0] | string | trim -%}
                   {%- else -%}
                       {%- set zkValue = (zkParams[1] if zkParams | length > 1 else "'UNKNOWN'") | string | trim -%}
                   {%- endif -%}
                   {%- set zkText = zkValue[1:-1] | replace("''", "'") if (zkValue | length > 1 and zkValue[:1] == "'" and zkValue[-1:] == "'") else zkValue -%}
-                  {%- if maxLen is not none and zkText | length > maxLen -%}
+                  {%- if zkText | length > maxLen -%}
                       {%- set zk.tooLong = zk.tooLong + [col.name ~ ' ' ~ col.dataType ~ ' gets ' ~ zkValue ~ ' (' ~ zkText | length ~ ' characters)'] -%}
                   {%- endif -%}
               {%- endif -%}
@@ -626,7 +634,8 @@ macroString: |-
           {%- for item in zk.tooLong %}
           -- {{ item }}.
           {%- endfor %}
-          -- Snowflake rejects a value longer than the column, so the Zero Key Record stage will fail ("String is too long and would be truncated").
+          -- FixedString(n) holds at most n bytes. In a Nullable column ClickHouse stores the zero record's value as NULL
+          -- without an error; in a non-Nullable column the Zero Key Record stage fails.
           -- Set a shorter value on the column with @zeroKey("'<value>'"), or widen the column.
           SELECT 1 AS MESSAGE
           {%- endif %}
@@ -679,26 +688,26 @@ macroString: |-
 
       {# No @mergeStrategy and no business key = plain insert, so @lastModifiedTracking is never read. Warn only — the insert still runs. #}
       {%- if not hasBusinessKey and not mergeStrategyExplicit and lastModifiedCount > 0 %}
-          {{ test_stage('Invalid configuration: No Business Key', true) }}
+          {{ test_stage('Warning: No Business Key', true) }}
           -- No @mergeStrategy and no column marked @isBusinessKey, so this node is loaded as a plain insert — @lastModifiedTracking will be ignored. Mark the business key column(s) with @isBusinessKey and set @mergeStrategy("lastModified") to use it, or remove the annotation.
           SELECT 1
       {%- endif -%}
 
       {# allColumnMatch matches on every non-system column, so @isBusinessKey / @lastModifiedTracking are never read. Warn only — the merge still runs. #}
       {%- if isAllColumnMatch and hasBusinessKey %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
+          {{ test_stage('Warning: mergeStrategy', true) }}
           -- @mergeStrategy("allColumnMatch") matches on every non-system column, so @isBusinessKey is ignored — all columns are used as the business key for comparison. Remove @isBusinessKey, or switch mergeStrategy to use it.
           SELECT 1
       {%- endif -%}
 
       {%- if isAllColumnMatch and lastModifiedCount > 0 %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
+          {{ test_stage('Warning: mergeStrategy', true) }}
           -- @mergeStrategy("allColumnMatch") performs no change detection, so @lastModifiedTracking columns are never read. Remove them, or switch mergeStrategy to "lastModified" to use them.
           SELECT 1
       {%- endif -%}
 
       {%- if hasBusinessKey and isChangeTrackingStrategy and lastModifiedCount > 0 %}
-          {{ test_stage('Invalid configuration: mergeStrategy', true) }}
+          {{ test_stage('Warning: mergeStrategy', true) }}
           -- @mergeStrategy("changeTracking") does not use @lastModifiedTracking — that column would be silently ignored. Remove it, or switch mergeStrategy to "lastModified".
           SELECT 1
       {%- endif -%}
@@ -765,15 +774,17 @@ macroString: |-
   ===========================================================================#}
 
   {#===========================================================================
-    view_definition_sql(state): everything after CREATE OR REPLACE VIEW <path> for a state —
-    a typed column list with the column COMMENTs, then AS SELECT. ClickHouse takes column
-    comments only in a typed list, and the view's own comment is set separately
-    (view_comment_sql()): a trailing COMMENT '...' after the SELECT is read as a table alias
-    when the FROM has none. Types come from ch_column_type() (nullability folded in).
+    view_definition_sql(state, comment): everything after CREATE OR REPLACE VIEW <path> for a
+    state — a typed column list with the column COMMENTs, the view's COMMENT when `comment` is
+    given, then AS SELECT. ClickHouse takes column comments only in a typed list, and the view
+    comment only before AS (COMMENT 'x', not COMMENT = 'x'): a trailing COMMENT '...' after the
+    SELECT is read as a table alias when the FROM has none. The definitions compared on
+    redeploy are rendered without the comment, so a description change alone does not
+    recreate the view. Types come from ch_column_type() (nullability folded in).
     Surrogate key and system columns (Dimension/Fact) select NULL, or the type's default value
     when the column is not Nullable (ClickHouse cannot CAST NULL to a non-Nullable type).
   ===========================================================================#}
-  {%- macro view_definition_sql(state) -%}
+  {%- macro view_definition_sql(state, comment='') -%}
       (
           {%- for col in state.columns %}
               `{{ col.name }}` {{ ch_column_type(col) }}
@@ -781,6 +792,9 @@ macroString: |-
               {%- if not loop.last -%}, {%- endif %}
           {%- endfor %}
       )
+      {%- if comment %}
+      COMMENT '{{ ch_string(comment) }}'
+      {%- endif %}
       AS
       {{ state.sources[0].cteString }}
       SELECT {{ state.sources[0].selectModifier | default('', true) }}
@@ -803,7 +817,7 @@ macroString: |-
 
   {#===========================================================================
     view_comment_sql(path): "Set View Comment" — ALTER TABLE <view> MODIFY COMMENT with the node
-    description ('' clears it).
+    description ('' clears it), for a view that is renamed or only has a new description.
   ===========================================================================#}
   {%- macro view_comment_sql(path) -%}
       {{ stage('Set View Comment') }}
@@ -815,7 +829,7 @@ macroString: |-
     view_redeploy_sql(): the view branch of create.sql.j2 for every node type, after
     object_drop_sql() has dropped a current object of another type:
       - first deploy, type changed, or definition changed -> (Drop View at the old path when
-        renamed/moved) + Create View (CREATE OR REPLACE VIEW) + Set View Comment when there is one
+        renamed/moved) + Create View (CREATE OR REPLACE VIEW, with the view COMMENT)
       - only renamed/moved -> Rename View (RENAME TABLE), + Set View Comment if it changed
       - only the description changed -> Set View Comment
       - anything else changed (nothing in the view) -> Metadata Update-Default
@@ -861,13 +875,7 @@ macroString: |-
 
           {{ stage('Create View') }}
           CREATE OR REPLACE VIEW {{ desPath }}
-          {{ view_definition_sql(desiredState) }}
-
-          {#- CREATE OR REPLACE resets the comment, so set it again even when unchanged #}
-          {%- if desiredDescription %}
-
-          {{ view_comment_sql(desPath) }}
-          {%- endif %}
+          {{ view_definition_sql(desiredState, desiredDescription) }}
           {%- set nsNodeVariables.metaDataChanged = true -%}
 
       {%- elif pathChanged or currentDescription != desiredDescription %}
@@ -1481,82 +1489,68 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    zero_key_surrogate_value(col): the zero record's surrogate key — the nil UUID
-    00000000-0000-0000-0000-000000000000 for a UUID column, else the node-level
-    surrogateKeyValue (0 when not set).
+    zero_key_surrogate_value(col): the zero record's surrogate key — the node-level
+    surrogateKeyValue. A UUID column takes it when it is a UUID
+    (e.g. 11111111-1111-1111-1111-111111111111), otherwise the nil UUID
+    00000000-0000-0000-0000-000000000000; any other column takes it as written (0 when not set).
   ===========================================================================#}
   {%- macro zero_key_surrogate_value(col) -%}
+      {%- set zkValue = (config.zeroKey.parameters[0] | string | trim) if (config.zeroKey is defined and config.zeroKey.parameters is defined and config.zeroKey.parameters | length > 0) else '' -%}
       {%- if 'uuid' in (col.dataType | lower) -%}
-          toUUID('00000000-0000-0000-0000-000000000000')
-      {%- elif config.zeroKey.parameters is defined and config.zeroKey.parameters | length > 0 -%}
-          {{ config.zeroKey.parameters[0] }}
+          {%- set uuidText = zkValue[1:-1] if (zkValue[:1] == "'" and zkValue[-1:] == "'") else zkValue -%}
+          {%- set isUuid = uuidText | length == 36 and uuidText[8] == '-' and uuidText[13] == '-' and uuidText[18] == '-' and uuidText[23] == '-' -%}
+          toUUID('{{ uuidText if isUuid else '00000000-0000-0000-0000-000000000000' }}')
       {%- else -%}
-          0
+          {{ zkValue if zkValue else 0 }}
       {%- endif -%}
   {%- endmacro -%}
 
   {#===========================================================================
     resolve_zero_key(col): zero-key literal — column @zeroKey, else node @zeroKey by
-    dataType, else NULL.
+    ClickHouse type family (Nullable / LowCardinality unwrapped), else NULL:
+      Int* / UInt* / Float* / Decimal*  -> 0
+      String / FixedString              -> stringValue (verbatim, default 'UNKNOWN')
+      Bool                              -> booleanValue (default true)
+      Date / Date32 / DateTime / DateTime64 -> timestampValue (default 1900-01-01 00:00:00),
+                                           cast to the column's type
+      UUID                              -> the nil UUID
+    The type comes from the node's column (source columns carry no dataType).
   ===========================================================================#}
   {%- macro resolve_zero_key(col) -%}
 
-      {%- set ns = namespace(zk_type=none, zk_value=none) -%}
+      {%- set nodeCol = (columns | selectattr('name', 'equalto', col.name) | list | first) or col -%}
+      {%- set zkCol = col if (col.zeroKey is defined) else nodeCol -%}
 
-      {# Column-level zeroKey #}
-      {%- if col.zeroKey is defined
-          and col.zeroKey.parameters is defined
-          and col.zeroKey.parameters | trim | length > 0 -%}
+      {# Column-level zeroKey: pasted verbatim — the user supplies quotes for a string, or a full expression like CAST(...) #}
+      {%- if zkCol.zeroKey is defined and zkCol.zeroKey.parameters is defined and zkCol.zeroKey.parameters | length > 0 -%}
+          {{ zkCol.zeroKey.parameters[0] }}
 
-          {%- set ns.zk_value = col.zeroKey.parameters[0] -%}
-
-      {# Node-level zeroKey, matched by column dataType #}
+      {# Node-level zeroKey, matched by the column's ClickHouse type family #}
       {%- else -%}
           {%- set zkParams = config.zeroKey.parameters if (config.zeroKey is defined and config.zeroKey.parameters is defined) else [] -%}
-          {%- if col.dataType | upper == 'VARIANT' -%}
-              {%- set ns.zk_type = 'variant' -%}
-              {%- set ns.zk_value = none -%}
-          {%- elif col.dataType[:3] | upper in ('VAR', 'CHA', 'STR', 'TEX') -%}
-              {%- set ns.zk_type = 'string' -%}
-              {%- set ns.zk_value = zkParams[1] if zkParams | length > 1 else "'UNKNOWN'" -%}
-          {# Every numeric type (NUMBER/NUMERIC/DECIMAL, INT/INTEGER/BIGINT/SMALLINT/TINYINT/BYTEINT, FLOAT/DOUBLE/REAL) always gets 0 —
-             the node-level surrogateKeyValue applies to the surrogate key column only; override per column with @zeroKey(value). #}
-          {%- elif col.dataType[:3] | upper in ('NUM', 'INT', 'DEC', 'FLO', 'DOU', 'REA', 'BIG', 'SMA', 'TIN', 'BYT') -%}
-              {%- set ns.zk_type = 'numeric' -%}
-              {%- set ns.zk_value = 0 -%}
-          {%- elif col.dataType | upper == 'BOOLEAN' -%}
-              {%- set ns.zk_type = 'boolean' -%}
-              {%- set ns.zk_value = zkParams[3] if zkParams | length > 3 else true -%}
-          {%- elif col.dataType[:4] | upper in ('DATE', 'TIME') -%}
-              {%- set ns.zk_type = 'datetime' -%}
-              {%- set ns.zk_value = zkParams[2] if zkParams | length > 2 else '1900-01-01 00:00:00' -%}
-          {%- endif -%}
-      {%- endif -%}
-
-      {# Format the resolved value #}
-      {%- if ns.zk_type == 'numeric' -%}
-          {{ ns.zk_value }}
-      {%- elif ns.zk_type == 'variant' -%}
-          PARSE_JSON('null')
-      {%- elif ns.zk_value is not none -%}
-          {%- if ns.zk_type == 'boolean' -%}
-              {{ ns.zk_value | upper }}
-
-          {%- elif ns.zk_type == 'datetime' -%}
-              TO_TIMESTAMP('{{ ns.zk_value }}')
-
-          {%- elif ns.zk_type == 'string' -%}
-              {# Node-level default: pasted verbatim, same as the column-level override — supply your own quotes in the annotation, e.g. "'UNKNOWN'". #}
-              {{ ns.zk_value }}
-
+          {%- set ns = namespace(dt=(nodeCol.dataType | default('', true) | trim)) -%}
+          {%- for wrapper in ['lowcardinality(', 'nullable('] -%}
+              {%- if (ns.dt | lower).startswith(wrapper) and ns.dt.endswith(')') -%}
+                  {%- set ns.dt = ns.dt[(wrapper | length):-1] | trim -%}
+              {%- endif -%}
+          {%- endfor -%}
+          {%- set family = ns.dt.split('(')[0] | trim | lower -%}
+          {%- if family.startswith('int') or family.startswith('uint') or family.startswith('float') or family.startswith('decimal') or family == 'bfloat16' -%}
+              0
+          {%- elif family in ['string', 'fixedstring'] -%}
+              {{ zkParams[1] if zkParams | length > 1 else "'UNKNOWN'" }}
+          {%- elif family in ['bool', 'boolean'] -%}
+              {{ (zkParams[3] if zkParams | length > 3 else true) | string | lower }}
+          {%- elif family in ['date32', 'datetime64'] -%}
+              CAST(parseDateTime64BestEffort('{{ zkParams[2] if zkParams | length > 2 else '1900-01-01 00:00:00' }}', 6) AS {{ ns.dt }})
+          {%- elif family in ['date', 'datetime'] -%}
+              {# Date / DateTime start at 1970-01-01: an earlier value (e.g. the 1900 default) would wrap around, so it is clamped #}
+              CAST(greatest(parseDateTime64BestEffort('{{ zkParams[2] if zkParams | length > 2 else '1900-01-01 00:00:00' }}', 6), toDateTime64(0, 6)) AS {{ ns.dt }})
+          {%- elif family == 'uuid' -%}
+              toUUID('00000000-0000-0000-0000-000000000000')
           {%- else -%}
-              {# Column-level @zeroKey override: pasted verbatim, exactly as the user wrote it — #}
-              {# they supply their own quotes for a string, or a full expression like CAST(...). #}
-              {{ ns.zk_value }}
+              NULL
           {%- endif -%}
-
-      {%- else -%}
-          NULL
       {%- endif -%}
 
   {%- endmacro -%}
