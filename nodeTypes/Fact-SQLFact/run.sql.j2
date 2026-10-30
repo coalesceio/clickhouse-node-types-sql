@@ -16,16 +16,16 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     - @allColumnMatch only inserts rows that don't exist yet, so nothing is deleted.
 #}
 
-{# == Validate: the materialization type must be table, transient table or view == #}
+{# == Validate: the materialization type must be table or view == #}
 {{ validate_materialization_type() }}
 
-{# == Materialization type from the node, normalised (case and spaces): table / transient table / view == #}
+{# == Materialization type from the node, normalised (case and spaces): table / view == #}
 {%- set materializationType = get_materialization_type(node.materializationType) %}
 
 {# == To run data quality tests before data insertion == #}
 {{ run_tests('Before') }}
 
-{%- if materializationType in ['table', 'transient table'] %}
+{%- if materializationType == 'table' %}
 
     {{ validate_fact_requirements() }}
 

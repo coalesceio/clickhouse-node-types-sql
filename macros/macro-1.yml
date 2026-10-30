@@ -20,7 +20,7 @@ macroString: |-
 
   {#===========================================================================
     get_materialization_type(value): normalizes @materializationType — lower case,
-    spaces trimmed/collapsed ('  Transient  TABLE' -> 'transient table'); '' when missing.
+    spaces trimmed/collapsed ('  View ' -> 'view'); '' when missing.
     Kept here because initialize_node_variables() uses it.
   ===========================================================================#}
   {%- macro get_materialization_type(value) -%}
@@ -314,8 +314,7 @@ macroString: |-
 
   {#===========================================================================
     validate_materialization_type(allowedTypes): failing "Unsupported Materialization Type"
-    check when the normalized type is not allowed (ClickHouse has no transient tables, so
-    'transient table' fails here). Call first in create and run.
+    check when the normalized type is not table or view. Call first in create and run.
   ===========================================================================#}
   {%- macro validate_materialization_type(allowedTypes=['table', 'view']) -%}
       {%- if nsNodeVariables.desiredMatType not in allowedTypes %}
@@ -1554,6 +1553,40 @@ macroString: |-
               {{ sql.parameters[0] }}
           {%- endif %}
       {%- endfor %}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    ch_high_date(col): the open SYSTEM_END_DATE — the largest value the column type can hold.
+    ClickHouse cannot store 2999-12-31: DateTime64 / Date32 end in 2299, DateTime at
+    2106-02-07 06:28:15, Date at 2149-06-06.
+  ===========================================================================#}
+  {%- macro ch_high_date(col) -%}
+      {%- set dt = col.dataType | default('', true) | lower | replace(' ', '') -%}
+      {%- set dt = dt[9:-1] if dt.startswith('nullable(') else dt -%}
+      {%- if dt.startswith('datetime64') -%}
+          toDateTime64('2299-12-31 23:59:59.999999', 6)
+      {%- elif dt.startswith('datetime') -%}
+          toDateTime(4294967295)
+      {%- elif dt.startswith('date32') -%}
+          toDate32('2299-12-31')
+      {%- elif dt.startswith('date') -%}
+          toDate('2149-06-06')
+      {%- else -%}
+          '2299-12-31 23:59:59.999999'
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    new_surrogate_key(col): a new row's surrogate key (ClickHouse has no identity) — the
+    column's @defaultValue when set (e.g. generateUUIDv4()), otherwise the value the node's
+    SELECT gives it (SOURCE_DATA's SRC_<name>). Existing rows always keep their key.
+  ===========================================================================#}
+  {%- macro new_surrogate_key(col) -%}
+      {%- if col.defaultValue -%}
+          {{ col.defaultValue }}
+      {%- else -%}
+          `SRC_{{ col.name }}`
+      {%- endif -%}
   {%- endmacro -%}
 
   {#===========================================================================
