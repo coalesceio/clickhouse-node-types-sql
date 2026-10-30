@@ -229,9 +229,10 @@ macroString: |-
     in position order; NULL when no column is in the group. ClickHouse SQL:
       lower(hex(SHA1(ifNull(toString(c1), 'null') || '||' || ifNull(toString(c2), 'null'))))
     - algo MD5 / SHA1 / SHA224 / SHA256 / SHA384 / SHA512 (any case): these return raw bytes,
-      so the result is wrapped in lower(hex(...)) — a lowercase hex string, as on Snowflake.
+      so the result is wrapped in lower(hex(...)) — a lowercase hex string.
     - any other ClickHouse hash function (cityHash64, xxHash64, sipHash64, ...) is called as
-      written and returns its own type (usually UInt64).
+      written. It returns a number (usually UInt64), but Coalesce types the column as String, so the
+      number is stored as text unless the call is wrapped in toUInt64(...).
   ===========================================================================#}
   {%- macro get_hash(hash_name, algo='SHA1', delimiter='||') -%}
 
