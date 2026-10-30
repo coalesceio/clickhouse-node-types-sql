@@ -36,7 +36,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- endif %}
 
 	{# == Insert data from sources into Work table  == #}
-    {{ stage('Load ' + materializationType + ' using Insert') }}
+    {{ stage('Load ' + materializationType + ' - Insert') }}
     INSERT INTO {{ ref_no_link(node.location.name, node.name) }}
     (
         {%- for col in sources[0].columns %}

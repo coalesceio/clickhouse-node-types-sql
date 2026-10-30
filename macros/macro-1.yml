@@ -1032,7 +1032,7 @@ macroString: |-
       - A surrogate key (@isSurrogateKey) is never Nullable: every row gets a key.
       - Types ClickHouse cannot put inside Nullable stay as they are: Array, Map, Tuple,
         Nested, JSON / Object, Dynamic, Variant, (Simple)AggregateFunction and the geo types
-        (Point, Ring, LineString, MultiLineString, Polygon, MultiPolygon).
+        (Point, Ring, LineString, MultiLineString, Polygon, MultiPolygon, Geometry).
       - LowCardinality takes the nullability inside: LowCardinality(Nullable(<type>)).
       - Anything else: Nullable(<type>) when nullable, else <type>.
   ===========================================================================#}
@@ -1044,7 +1044,7 @@ macroString: |-
       {%- set family = baseType.split('(')[0] | trim | lower -%}
       {%- if family in ['array', 'map', 'tuple', 'nested', 'json', 'object', 'dynamic', 'variant',
                         'aggregatefunction', 'simpleaggregatefunction',
-                        'point', 'ring', 'linestring', 'multilinestring', 'polygon', 'multipolygon'] -%}
+                        'point', 'ring', 'linestring', 'multilinestring', 'polygon', 'multipolygon', 'geometry'] -%}
           {{- baseType -}}
       {%- elif family == 'lowcardinality' -%}
           {%- set inner = baseType[15:-1] | trim -%}

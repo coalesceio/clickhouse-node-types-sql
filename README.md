@@ -221,7 +221,7 @@ Every run of a Work Node of materialization type table executes these stages:
 | **Pre Load Test `<n>`** | Node-level `@tests(..., "Before")` tests, in the order they appear. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only for `@writeMode("truncateInsert")` (the Work default) — `TRUNCATE TABLE IF EXISTS`. ClickHouse has no `INSERT OVERWRITE`, so this is a separate stage. |
-| **Load table using Insert** | `INSERT INTO … SELECT` with the node's CTEs, `DISTINCT` and joins. |
+| **Load table - Insert** | `INSERT INTO … SELECT` with the node's CTEs, `DISTINCT` and joins. |
 | **Post-SQL `<n>`** | Each `@postSQL` statement, in the order they appear. |
 | **`<column>: <test>` \| Post Load Test `<n>`** | Column-level data quality tests and node-level `@tests(..., "After")` tests, run after the load. |
 
@@ -353,12 +353,14 @@ Zero record value by column type (`Nullable(...)` and `LowCardinality(...)` are 
 | `Date32`, `DateTime64` | **timestampValue** |
 | `Date`, `DateTime` | **timestampValue**, raised to `1970-01-01` when earlier — these types start at 1970, so the `1900-01-01` default is stored as `1970-01-01` |
 | `UUID` (not the surrogate key) | The nil UUID `00000000-0000-0000-0000-000000000000` |
+| `Point`, `Geometry` | The point `(0, 0)` |
+| `Ring`, `LineString`, `MultiLineString`, `Polygon`, `MultiPolygon` | An empty shape `[]` |
 | Anything else | `NULL` |
 | System columns | Version `1`, current flag `'Y'`, end date the [open end date](#scd-type-2-end-date), create/update date the load time |
 
 * Override any column with a column-level `@zeroKey(value)`.
 * Changing **surrogateKeyValue** later inserts a new zero record with the new key; the old one stays in the table (the clean-up only replaces rows with the same key) and is from then on treated as an ordinary row. Delete it once: `DELETE FROM <table> WHERE <surrogate key> = <old value>`.
-* The zero record is written by its own stage, **Load table Using Merge - Zero Key Record**, on every run: it is re-inserted with the current values and the previous one is removed by the clean-up, keeping its first `SYSTEM_CREATE_DATE`.
+* The zero record is written by its own stage, **Load table - Zero Key Record**, on every run: it is re-inserted with the current values and the previous one is removed by the clean-up, keeping its first `SYSTEM_CREATE_DATE`.
 * The zero record is left out of change detection, so a real source row whose business key equals the zero record's (e.g. `0`) is loaded as its own row and never overwrites it.
 * `String` has no length limit in ClickHouse. A value longer than a `FixedString(n)` column raises a non-failing **Warning: Zero Key Value Too Long** stage that lists each such column: in a `Nullable(FixedString(n))` column ClickHouse stores the zero record's value as **NULL without an error**; in a non-Nullable one the **Zero Key Record** stage fails. Set a shorter value on the column with `@zeroKey("'<value>'")`, or widen the column.
 * Requires a column marked `@isSurrogateKey` — without one, the **Missing Required System Columns** check stops the deploy and the run.
@@ -565,14 +567,14 @@ Every run of a Dimension Node of materialization type table runs its configured 
 | **Check NULL values for `<column>` column** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only when `@writeMode("truncateInsert")` is set — clears the target before the load. |
-| **Load table Using Merge - Zero Key Record** | Executed only when node-level `@zeroKey` is set and a surrogate key column exists — inserts the placeholder "zero key" row. |
-| **Load table Using Merge - Last Modified Comparison - SCD1 \| SCD2** | Executed for `@mergeStrategy("lastModified")` — compares the `@lastModifiedTracking` column against the current target row, then inserts new keys and the changed rows (SCD1: the new values; SCD2: the new version plus the expired old version). |
-| **Load table Using Merge - Change Tracking - SCD1 \| SCD2** | Executed for `@mergeStrategy("changeTracking")` (the default) — compares `@isChangeTracking` columns (or, absent any, every plain attribute column) against the current target row, then inserts new keys and the changed rows. Under SCD2, a change only in a plain attribute column re-inserts the current version with the new values. |
-| **Load table Using Merge - Clean Up Data** | Deletes the copies the insert replaced — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). Runs when the node has `@isBusinessKey` and `@isSystemUpdateDate` columns. |
+| **Load table - Zero Key Record** | Executed only when node-level `@zeroKey` is set and a surrogate key column exists — inserts the placeholder "zero key" row. |
+| **Load table - Last Modified Comparison - SCD1 \| SCD2** | Executed for `@mergeStrategy("lastModified")` — compares the `@lastModifiedTracking` column against the current target row, then inserts new keys and the changed rows (SCD1: the new values; SCD2: the new version plus the expired old version). |
+| **Load table - Change Tracking - SCD1 \| SCD2** | Executed for `@mergeStrategy("changeTracking")` (the default) — compares `@isChangeTracking` columns (or, absent any, every plain attribute column) against the current target row, then inserts new keys and the changed rows. Under SCD2, a change only in a plain attribute column re-inserts the current version with the new values. |
+| **Clean Up Previous Data** | Deletes the copies the insert replaced — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). Runs when the node has `@isBusinessKey` and `@isSystemUpdateDate` columns. |
 | **Post-SQL `<n>`** | Each `@postSQL` statement, in the order they appear. |
 | **`<column>: <test>` \| Post Load Test `<n>`** | Column-level data quality tests and node-level `@tests(..., "After")` tests, run after the load. |
 
-> **Note:** ClickHouse has no `MERGE` statement; the "Using Merge" stages insert the rows a merge would apply and clean up the replaced copies — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact).
+> **Note:** ClickHouse has no `MERGE` statement; the load stages insert the new and changed rows, and **Clean Up Previous Data** deletes the replaced copies — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact).
 
 #### Dimension Redeployment
 
@@ -786,11 +788,11 @@ Every run of a Fact Node of materialization type table runs its configured data 
 | **Check NULL values for `<column>` column** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only when `@writeMode("truncateInsert")` is set — clears the target before the load. |
-| **Load table using Insert** | Executed when no `@mergeStrategy` is set and no column is marked `@isBusinessKey` — inserts every source row with `INSERT INTO … SELECT`. |
-| **Load table Using Merge - Change Tracking - SCD1** | Executed for `@mergeStrategy("changeTracking")`, and by default when no `@mergeStrategy` is set and a column is marked `@isBusinessKey` — compares every plain attribute column against the target, then inserts new keys and changed rows. |
-| **Load table Using Merge - Last Modified Comparison - SCD1** | Executed for `@mergeStrategy("lastModified")` — compares the `@lastModifiedTracking` column against the target, then inserts new keys and newer rows. |
-| **Load table Using Merge - All Column Match** | Executed for `@mergeStrategy("allColumnMatch")` — matches on every non-system column and inserts only rows that don't already exist; nothing is updated or deleted. |
-| **Load table Using Merge - Clean Up Data** | Deletes the copies the insert replaced — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). Runs for `changeTracking` / `lastModified` when the node has an `@isSystemUpdateDate` column. |
+| **Load table - Insert** | Executed when no `@mergeStrategy` is set and no column is marked `@isBusinessKey` — inserts every source row with `INSERT INTO … SELECT`. |
+| **Load table - Change Tracking - SCD1** | Executed for `@mergeStrategy("changeTracking")`, and by default when no `@mergeStrategy` is set and a column is marked `@isBusinessKey` — compares every plain attribute column against the target, then inserts new keys and changed rows. |
+| **Load table - Last Modified Comparison - SCD1** | Executed for `@mergeStrategy("lastModified")` — compares the `@lastModifiedTracking` column against the target, then inserts new keys and newer rows. |
+| **Load table - All Column Match** | Executed for `@mergeStrategy("allColumnMatch")` — matches on every non-system column and inserts only rows that don't already exist; nothing is updated or deleted. |
+| **Clean Up Previous Data** | Deletes the copies the insert replaced — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). Runs for `changeTracking` / `lastModified` when the node has an `@isSystemUpdateDate` column. |
 | **Post-SQL `<n>`** | Each `@postSQL` statement, in the order they appear. |
 | **`<column>: <test>` \| Post Load Test `<n>`** | Column-level data quality tests and node-level `@tests(..., "After")` tests, run after the load. |
 
@@ -857,7 +859,7 @@ Each column is created with the type Coalesce infers for it, with its nullabilit
 | Marked `@notNull` | `<type>` |
 | `@isSurrogateKey` (Dimension) | `<type>`, with or without `@notNull` — every row gets a key |
 | `LowCardinality(<type>)`, nullable | `LowCardinality(Nullable(<type>))` |
-| `Array`, `Map`, `Tuple`, `Nested`, `JSON` / `Object`, `Dynamic`, `Variant`, `AggregateFunction`, `SimpleAggregateFunction`, geo types (`Point`, `Ring`, `LineString`, `MultiLineString`, `Polygon`, `MultiPolygon`) | `<type>` — ClickHouse cannot make these `Nullable` |
+| `Array`, `Map`, `Tuple`, `Nested`, `JSON` / `Object`, `Dynamic`, `Variant`, `AggregateFunction`, `SimpleAggregateFunction`, geo types (`Point`, `Ring`, `LineString`, `MultiLineString`, `Polygon`, `MultiPolygon`, `Geometry`) | `<type>` — ClickHouse cannot make these `Nullable` |
 
 The same type is used by the `CREATE`, **Add Column**, **Alter Column** and the view's column list, so they always agree. See [Array and Map Columns](#known-limitations) and [`Variant` Columns](#known-limitations) for the related limitations.
 
@@ -949,7 +951,7 @@ A view is also recreated (**Create View**) when the mapping of a location it **r
 ClickHouse has no `MERGE`, and the tables are plain MergeTree. A Dimension or Fact load therefore runs in two stages:
 
 1. **INSERT** the row set a `MERGE` would have applied: new keys, plus a new copy of every changed row. An "update" re-inserts the same business key with a newer `SYSTEM_UPDATE_DATE`; an SCD Type 2 expiry re-inserts the old version with `SYSTEM_CURRENT_FLAG = 'N'` and its end date.
-2. **Load table Using Merge - Clean Up Data** — a `DELETE` of the copies the insert replaced: per business key (plus `SYSTEM_VERSION` for SCD Type 2, plus the surrogate key on a Dimension) only the row with the latest `SYSTEM_UPDATE_DATE` is kept. Only keys that now have more than one row are read, and only the target is read — never the source.
+2. **Clean Up Previous Data** — a `DELETE` of the copies the insert replaced: per business key (plus `SYSTEM_VERSION` for SCD Type 2, plus the surrogate key on a Dimension) only the row with the latest `SYSTEM_UPDATE_DATE` is kept. Only keys that now have more than one row are read, and only the target is read — never the source.
 
 A plain `SELECT` on the table is correct right after the run; no `FINAL` or de-duplicating view is needed.
 
@@ -1526,7 +1528,7 @@ They are stored as the column's default (`0`, `''`, ...) instead of failing, unl
 **Truncate table** and the load are separate statements. If the load fails after the truncate, the table is left empty, or holding the blocks written before the failure (ClickHouse writes an `INSERT ... SELECT` in blocks). Re-run the node to reload it.
 
 * **Two-Step Dimension / Fact Loads**:  
-The load inserts the new copies first and deletes the replaced ones in **Clean Up Data**, so between the two stages (or after a failed clean-up, until the next run) a changed key can have two rows. See [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact).
+The load inserts the new copies first and deletes the replaced ones in **Clean Up Previous Data**, so between the two stages (or after a failed clean-up, until the next run) a changed key can have two rows. See [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact).
 
 * **Loads Within the Same Second**:  
 The default system column expression `CAST(CURRENT_TIMESTAMP AS TIMESTAMP)` gives a `DateTime` column, which stores whole seconds. The clean-up tells a row's copies apart by `SYSTEM_UPDATE_DATE`, so if two loads change the same key within one second both copies have the same value and both are kept. Use a `DateTime64` type for `SYSTEM_UPDATE_DATE` (e.g. `CAST(now64(6) AS DateTime64(6))`) if a node can run more than once a second.
