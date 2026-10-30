@@ -5,6 +5,7 @@
 SELECT
     "l_orderkey"                          AS "l_orderkey"        @id("e50001") @isBusinessKey @notNull @not_null,
     "l_linenumber"                        AS "l_linenumber"      @id("e50002") @isBusinessKey @notNull @not_null,
+    "l_shipdate"                          AS "l_shipdate"        @id("e5000b") @notNull @lastModifiedTracking,
     "l_partkey"                           AS "l_partkey"         @id("e50003") @notNull @not_null,
     "l_suppkey"                           AS "l_suppkey"         @id("e50004") @notNull @not_null,
     "l_quantity"                          AS "l_quantity"        @id("e50005") @notNull @min_value(0),
@@ -13,7 +14,6 @@ SELECT
     "l_tax"                               AS "l_tax"             @id("e50008") @notNull @min_max(0, 1),
     "l_returnflag"                        AS "l_returnflag"      @id("e50009") @notNull @accepted_values("'A'", "'N'", "'R'"),
     "l_linestatus"                        AS "l_linestatus"      @id("e5000a") @notNull @accepted_values("'O'", "'F'"),
-    "l_shipdate"                          AS "l_shipdate"        @id("e5000b") @notNull @lastModifiedTracking,
     "l_commitdate"                        AS "l_commitdate"      @id("e5000c") @notNull,
     "l_receiptdate"                       AS "l_receiptdate"     @id("e5000d") @notNull,
     "l_shipinstruct"                      AS "l_shipinstruct"    @id("e5000e"),
