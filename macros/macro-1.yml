@@ -20,7 +20,7 @@ macroString: |-
 
   {#===========================================================================
     get_materialization_type(value): normalizes @materializationType — lower case,
-    spaces trimmed/collapsed ('  Transient  TABLE' -> 'transient table'); '' when missing.
+    spaces trimmed/collapsed ('  View ' -> 'view'); '' when missing.
     Kept here because initialize_node_variables() uses it.
   ===========================================================================#}
   {%- macro get_materialization_type(value) -%}
@@ -229,9 +229,10 @@ macroString: |-
     in position order; NULL when no column is in the group. ClickHouse SQL:
       lower(hex(SHA1(ifNull(toString(c1), 'null') || '||' || ifNull(toString(c2), 'null'))))
     - algo MD5 / SHA1 / SHA224 / SHA256 / SHA384 / SHA512 (any case): these return raw bytes,
-      so the result is wrapped in lower(hex(...)) — a lowercase hex string, as on Snowflake.
+      so the result is wrapped in lower(hex(...)) — a lowercase hex string.
     - any other ClickHouse hash function (cityHash64, xxHash64, sipHash64, ...) is called as
-      written and returns its own type (usually UInt64).
+      written. It returns a number (usually UInt64), but Coalesce types the column as String, so the
+      number is stored as text unless the call is wrapped in toUInt64(...).
   ===========================================================================#}
   {%- macro get_hash(hash_name, algo='SHA1', delimiter='||') -%}
 
@@ -314,8 +315,7 @@ macroString: |-
 
   {#===========================================================================
     validate_materialization_type(allowedTypes): failing "Unsupported Materialization Type"
-    check when the normalized type is not allowed (ClickHouse has no transient tables, so
-    'transient table' fails here). Call first in create and run.
+    check when the normalized type is not table or view. Call first in create and run.
   ===========================================================================#}
   {%- macro validate_materialization_type(allowedTypes=['table', 'view']) -%}
       {%- if nsNodeVariables.desiredMatType not in allowedTypes %}
@@ -390,6 +390,66 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
+    validate_last_modified_column(hardFail): the single @lastModifiedTracking column must be a
+    source value that increases when the row changes: not a business key, surrogate key or
+    system column, a date/time or numeric type, and derived from at least one source column
+    (Coalesce's column lineage in sources[0].columns[].sourceColumns; a constant or
+    CURRENT_TIMESTAMP has none). Used by the Dimension and Fact validators under
+    @mergeStrategy("lastModified").
+  ===========================================================================#}
+  {%- macro validate_last_modified_column(hardFail=false) -%}
+      {%- set lmCols = columns | selectattr("lastModifiedTracking") | list -%}
+      {%- if lmCols | length == 1 -%}
+          {%- set col = lmCols[0] -%}
+          {%- set ns = namespace(problems=[], roles=[], refs=0, dt=(col.dataType | default('', true) | replace(' ', '') | lower)) -%}
+
+          {%- for attr, label in [('isBusinessKey', '@isBusinessKey'), ('isSurrogateKey', '@isSurrogateKey'),
+                                  ('isSystemVersion', '@isSystemVersion'), ('isSystemCurrentFlag', '@isSystemCurrentFlag'),
+                                  ('isSystemCreateDate', '@isSystemCreateDate'), ('isSystemUpdateDate', '@isSystemUpdateDate'),
+                                  ('isSystemEndDate', '@isSystemEndDate')] if col[attr] -%}
+              {%- set ns.roles = ns.roles + [label] -%}
+          {%- endfor -%}
+          {%- if ns.roles -%}
+              {%- set ns.problems = ns.problems + ['it is also marked ' ~ (ns.roles | join(', ')) ~ ': a key identifies the row and never changes, and system columns are written by the load, so neither can tell whether the source row is newer'] -%}
+          {%- endif -%}
+
+          {%- for wrapper in ['lowcardinality(', 'nullable('] -%}
+              {%- if ns.dt.startswith(wrapper) and ns.dt.endswith(')') -%}
+                  {%- set ns.dt = ns.dt[(wrapper | length):-1] -%}
+              {%- endif -%}
+          {%- endfor -%}
+          {%- if not (ns.dt.startswith('date') or ns.dt.startswith('uint') or ns.dt.startswith('float')
+                      or ns.dt.startswith('decimal') or (ns.dt.startswith('int') and not ns.dt.startswith('interval'))) -%}
+              {%- set ns.problems = ns.problems + ['its type is ' ~ col.dataType ~ ': use a date/time (Date, DateTime, DateTime64) or numeric (Int, UInt, Float, Decimal) column whose value increases when the row changes, not a string, UUID or Bool'] -%}
+          {%- endif -%}
+
+          {#- Lineage: the source column(s) Coalesce resolved from the SELECT expression. Coalesce does not follow a
+              column through the node's own CTEs, so the check is skipped when the node has one #}
+          {%- set source = sources[0] if sources is defined and sources else none -%}
+          {%- set hasCte = source is not none and (source.cteString | default('', true) | trim | length > 0) -%}
+          {%- if source is not none and not hasCte -%}
+              {%- for srcCol in source.columns if srcCol.name == col.name -%}
+                  {%- for ref in srcCol.sourceColumns | default([], true) if ref is mapping and ref.column is defined -%}
+                      {%- set ns.refs = ns.refs + 1 -%}
+                  {%- endfor -%}
+              {%- endfor -%}
+          {%- endif -%}
+          {%- if source is not none and not hasCte and ns.refs == 0 -%}
+              {%- set ns.problems = ns.problems + ['it is not derived from any source column: use a source column, or an expression on source columns, so its value comes from the source'] -%}
+          {%- endif -%}
+
+          {%- if ns.problems %}
+              {{ test_stage('Invalid configuration: Last Modified Column', false) }}
+              -- @lastModifiedTracking on {{ col.name }} cannot detect newer source rows:
+              {%- for p in ns.problems %}
+              -- {{ loop.index }}. {{ p }}.
+              {%- endfor %}
+              {{ fail_sql(hardFail, 'Invalid configuration: Last Modified Column') }}
+          {%- endif -%}
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
     validate_dimension_requirements(hardFail): Dimension checks (column ids, business key,
     mergeStrategy, system columns). hardFail = true from create.
   ===========================================================================#}
@@ -448,6 +508,10 @@ macroString: |-
           {{ test_stage('Invalid configuration: Last Modified Column', false) }}
           -- {{ reason }}
           {{ fail_sql(hardFail, 'Invalid configuration: Last Modified Column') }}
+      {%- endif -%}
+
+      {%- if isLastModifiedStrategy -%}
+          {{ validate_last_modified_column(hardFail) }}
       {%- endif -%}
 
       {%- if isLastModifiedStrategy and changeTrackingCount > 0 %}
@@ -725,6 +789,10 @@ macroString: |-
           {{ test_stage('Invalid configuration: Last Modified Column', false) }}
           -- {{ reason }}
           {{ fail_sql(hardFail, 'Invalid configuration: Last Modified Column') }}
+      {%- endif -%}
+
+      {%- if hasBusinessKey and isLastModifiedStrategy -%}
+          {{ validate_last_modified_column(hardFail) }}
       {%- endif -%}
 
       {# Collect every missing/misconfigured system column here so one run reports them all together instead of one at a time. #}
@@ -1489,6 +1557,40 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
+    ch_high_date(col): the open SYSTEM_END_DATE — the largest value the column type can hold.
+    ClickHouse cannot store 2999-12-31: DateTime64 / Date32 end in 2299, DateTime at
+    2106-02-07 06:28:15, Date at 2149-06-06.
+  ===========================================================================#}
+  {%- macro ch_high_date(col) -%}
+      {%- set dt = col.dataType | default('', true) | lower | replace(' ', '') -%}
+      {%- set dt = dt[9:-1] if dt.startswith('nullable(') else dt -%}
+      {%- if dt.startswith('datetime64') -%}
+          toDateTime64('2299-12-31 23:59:59.999999', 6)
+      {%- elif dt.startswith('datetime') -%}
+          toDateTime(4294967295)
+      {%- elif dt.startswith('date32') -%}
+          toDate32('2299-12-31')
+      {%- elif dt.startswith('date') -%}
+          toDate('2149-06-06')
+      {%- else -%}
+          '2299-12-31 23:59:59.999999'
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    new_surrogate_key(col): a new row's surrogate key (ClickHouse has no identity) — the
+    column's @defaultValue when set (e.g. generateUUIDv4()), otherwise the value the node's
+    SELECT gives it (SOURCE_DATA's SRC_<name>). Existing rows always keep their key.
+  ===========================================================================#}
+  {%- macro new_surrogate_key(col) -%}
+      {%- if col.defaultValue -%}
+          {{ col.defaultValue }}
+      {%- else -%}
+          `SRC_{{ col.name }}`
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
     zero_key_surrogate_value(col): the zero record's surrogate key — the node-level
     surrogateKeyValue. A UUID column takes it when it is a UUID
     (e.g. 11111111-1111-1111-1111-111111111111), otherwise the nil UUID
@@ -1514,6 +1616,8 @@ macroString: |-
       Date / Date32 / DateTime / DateTime64 -> timestampValue (default 1900-01-01 00:00:00),
                                            cast to the column's type
       UUID                              -> the nil UUID
+      Point / Geometry                  -> the point (0, 0)
+      Ring / LineString / MultiLineString / Polygon / MultiPolygon -> an empty shape
     The type comes from the node's column (source columns carry no dataType).
   ===========================================================================#}
   {%- macro resolve_zero_key(col) -%}
@@ -1548,6 +1652,11 @@ macroString: |-
               CAST(greatest(parseDateTime64BestEffort('{{ zkParams[2] if zkParams | length > 2 else '1900-01-01 00:00:00' }}', 6), toDateTime64(0, 6)) AS {{ ns.dt }})
           {%- elif family == 'uuid' -%}
               toUUID('00000000-0000-0000-0000-000000000000')
+          {# Geo types cannot be Nullable, so NULL fails the insert: a point (0, 0) — Snowflake's ST_POINT(0, 0) — or an empty shape #}
+          {%- elif family in ['point', 'geometry'] -%}
+              CAST((0, 0) AS Point)
+          {%- elif family in ['ring', 'linestring', 'multilinestring', 'polygon', 'multipolygon'] -%}
+              CAST([] AS {{ ns.dt }})
           {%- else -%}
               NULL
           {%- endif -%}
