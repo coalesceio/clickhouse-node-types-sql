@@ -564,7 +564,7 @@ Every run of a Dimension Node of materialization type table runs its configured 
 |-----------|----------------|
 | **Pre Load Test `<n>`** | Node-level `@tests(..., "Before")` tests, in the order they appear. |
 | **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Missing Business Key \| Invalid configuration: … \| Warning: mergeStrategy \| Missing Required System Columns \| Missing Recommended System Columns \| Surrogate Key Not Set/Using Custom Surrogate Key Logic \| Warning: Zero Key Value Too Long** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, no `@isBusinessKey`, an unrecognised `@mergeStrategy`, a missing or repeated `@lastModifiedTracking` column, a `@lastModifiedTracking` column that cannot detect newer rows, an `scdType` other than 1 or 2, a tracking annotation the strategy ignores (non-failing), a missing system column, a missing `@defaultValue` on the surrogate key, a surrogate key that is only recommended (non-failing), or a zero key string longer than its `FixedString` column (non-failing)). |
-| **Check NULL values for `<column>` column** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
+| **Check Last Modified Column - NULL Values (`<column>`)** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only when `@writeMode("truncateInsert")` is set — clears the target before the load. |
 | **Load table - Zero Key Record** | Executed only when node-level `@zeroKey` is set and a surrogate key column exists — inserts the placeholder "zero key" row. |
@@ -785,7 +785,7 @@ Every run of a Fact Node of materialization type table runs its configured data 
 |-----------|----------------|
 | **Pre Load Test `<n>`** | Node-level `@tests(..., "Before")` tests, in the order they appear. |
 | **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Invalid configuration: … \| Warning: mergeStrategy \| Warning: No Business Key \| Missing Required System Columns** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, an unrecognised `@mergeStrategy`, an explicit strategy without a business key, a missing or repeated `@lastModifiedTracking` column, a `@lastModifiedTracking` column that cannot detect newer rows, a tracking/key annotation the strategy ignores (non-failing), or a missing system column). |
-| **Check NULL values for `<column>` column** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
+| **Check Last Modified Column - NULL Values (`<column>`)** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only when `@writeMode("truncateInsert")` is set — clears the target before the load. |
 | **Load table - Insert** | Executed when no `@mergeStrategy` is set and no column is marked `@isBusinessKey` — inserts every source row with `INSERT INTO … SELECT`. |
@@ -1358,7 +1358,7 @@ Marks the column used to detect newer source rows for an incremental load.
   * is not a date/time (`Date`, `Date32`, `DateTime`, `DateTime64`) or numeric (`Int*`, `UInt*`, `Float*`, `Decimal*`) type — e.g. a `String`, `UUID` or `Bool`;
   * is not derived from any source column, e.g. a constant or `now64()`. A transformation is fine as long as it uses a source column (`toDateTime(src.updated_epoch)`). This is read from Coalesce's column lineage, which does not follow a column through the node's own CTEs, so it is not checked on a node with a `WITH` clause.
 * Can only be applied to one column.
-* Must not be NULL in the source — the **Check NULL values for `<column>` column** stage fails the run, since a NULL value can never compare as newer: a row loaded with a NULL tracking value is never updated again.
+* Must not be NULL in the source — the **Check Last Modified Column - NULL Values (`<column>`)** stage fails the run, since a NULL value can never compare as newer: a row loaded with a NULL tracking value is never updated again.
 * **Note:** Ignored on Views.
 
 **Dimension:**

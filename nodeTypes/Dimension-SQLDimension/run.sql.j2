@@ -86,7 +86,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
     {%- if lastModifiedComparison %}
         {# Test stage for checking NULL values in source - last modified column (any datatype: a NULL date/time or numeric value can never compare as newer, so the row would never be picked up as changed) #}
-        {{ test_stage('Check NULL values for ' ~ lastModifiedColName ~ ' column', false) }}
+        {{ test_stage('Check Last Modified Column - NULL Values (' ~ lastModifiedColName ~ ')', false) }}
         /* If NULL values are detected, this stage will fail and execution will be terminated */
         {%- set ns = namespace(first=true) %}
         {%- for col in source.columns if col.name == lastModifiedColName %}

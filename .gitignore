@@ -5,6 +5,9 @@ AGENTS.md
 CLAUDE.md
 git
 coa-plan.json
+plan.json
+deploy.json
+refresh.json
 
 # Node types Coalesce re-syncs from the workspace; not part of the ClickHouse SQL set
 nodeTypes/Dimension-Dimension/
