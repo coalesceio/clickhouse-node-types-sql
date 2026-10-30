@@ -357,6 +357,7 @@ Zero record value by column type (`Nullable(...)` and `LowCardinality(...)` are 
 | System columns | Version `1`, current flag `'Y'`, end date the [open end date](#scd-type-2-end-date), create/update date the load time |
 
 * Override any column with a column-level `@zeroKey(value)`.
+* Changing **surrogateKeyValue** later inserts a new zero record with the new key; the old one stays in the table (the clean-up only replaces rows with the same key) and is from then on treated as an ordinary row. Delete it once: `DELETE FROM <table> WHERE <surrogate key> = <old value>`.
 * The zero record is written by its own stage, **Load table Using Merge - Zero Key Record**, on every run: it is re-inserted with the current values and the previous one is removed by the clean-up, keeping its first `SYSTEM_CREATE_DATE`.
 * The zero record is left out of change detection, so a real source row whose business key equals the zero record's (e.g. `0`) is loaded as its own row and never overwrites it.
 * `String` has no length limit in ClickHouse. A value longer than a `FixedString(n)` column raises a non-failing **Warning: Zero Key Value Too Long** stage that lists each such column: in a `Nullable(FixedString(n))` column ClickHouse stores the zero record's value as **NULL without an error**; in a non-Nullable one the **Zero Key Record** stage fails. Set a shorter value on the column with `@zeroKey("'<value>'")`, or widen the column.
@@ -560,7 +561,7 @@ Every run of a Dimension Node of materialization type table runs its configured 
 | **Stage** | **Description** |
 |-----------|----------------|
 | **Pre Load Test `<n>`** | Node-level `@tests(..., "Before")` tests, in the order they appear. |
-| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Missing Business Key \| Invalid configuration: … \| Warning: mergeStrategy \| Missing Required System Columns \| Missing Recommended System Columns \| Surrogate Key Not Set/Using Custom Surrogate Key Logic \| Warning: Zero Key Value Too Long** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, no `@isBusinessKey`, an unrecognised `@mergeStrategy`, a missing or repeated `@lastModifiedTracking` column, an `scdType` other than 1 or 2, a tracking annotation the strategy ignores (non-failing), a missing system column, a missing `@defaultValue` on the surrogate key, a surrogate key that is only recommended (non-failing), or a zero key string longer than its `FixedString` column (non-failing)). |
+| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Missing Business Key \| Invalid configuration: … \| Warning: mergeStrategy \| Missing Required System Columns \| Missing Recommended System Columns \| Surrogate Key Not Set/Using Custom Surrogate Key Logic \| Warning: Zero Key Value Too Long** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, no `@isBusinessKey`, an unrecognised `@mergeStrategy`, a missing or repeated `@lastModifiedTracking` column, a `@lastModifiedTracking` column that cannot detect newer rows, an `scdType` other than 1 or 2, a tracking annotation the strategy ignores (non-failing), a missing system column, a missing `@defaultValue` on the surrogate key, a surrogate key that is only recommended (non-failing), or a zero key string longer than its `FixedString` column (non-failing)). |
 | **Check NULL values for `<column>` column** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only when `@writeMode("truncateInsert")` is set — clears the target before the load. |
@@ -781,7 +782,7 @@ Every run of a Fact Node of materialization type table runs its configured data 
 | **Stage** | **Description** |
 |-----------|----------------|
 | **Pre Load Test `<n>`** | Node-level `@tests(..., "Before")` tests, in the order they appear. |
-| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Invalid configuration: … \| Warning: mergeStrategy \| Warning: No Business Key \| Missing Required System Columns** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, an unrecognised `@mergeStrategy`, an explicit strategy without a business key, a missing or repeated `@lastModifiedTracking` column, a tracking/key annotation the strategy ignores (non-failing), or a missing system column). |
+| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Invalid configuration: … \| Warning: mergeStrategy \| Warning: No Business Key \| Missing Required System Columns** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, an unrecognised `@mergeStrategy`, an explicit strategy without a business key, a missing or repeated `@lastModifiedTracking` column, a `@lastModifiedTracking` column that cannot detect newer rows, a tracking/key annotation the strategy ignores (non-failing), or a missing system column). |
 | **Check NULL values for `<column>` column** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only when `@writeMode("truncateInsert")` is set — clears the target before the load. |
@@ -1296,7 +1297,7 @@ Adds a `DEFAULT` expression to the column.
 | Parameter | Description |
 |-----------|-------------|
 | `hash_name` | Hash name used across columns to identify the columns included in the hash. |
-| `algo` | **(optional)** Hashing function. `MD5`, `SHA1`, `SHA224`, `SHA256`, `SHA384` and `SHA512` (any case) return a lowercase hex `String`. Any other ClickHouse hash function (e.g. `cityHash64`, `xxHash64`, `sipHash64`) is called as written and returns its own type (usually `UInt64`). Defaults to `SHA1`. |
+| `algo` | **(optional)** Hashing function. `MD5`, `SHA1`, `SHA224`, `SHA256`, `SHA384` and `SHA512` (any case) return a lowercase hex `String`. Any other ClickHouse hash function (e.g. `cityHash64`, `xxHash64`, `sipHash64`) is called as written. These return a `UInt64`, but Coalesce types every `get_hash` column as `String`, so the number is stored as its digits (e.g. `'7740249813402470115'`); wrap the call for a numeric column: `toUInt64({{ get_hash('GH', 'cityHash64') }})`. Defaults to `SHA1`. |
 | `delimiter` | **(optional)** Delimiter used to separate column values when generating the hash. Defaults to `\|\|` and can be customized; `''` concatenates without one. |
 
 * Each value is converted with `toString()`, and NULL is hashed as the text `'null'`.
@@ -1350,7 +1351,10 @@ Dimension: `@lastModifiedTracking(scdType?)` · Fact: `@lastModifiedTracking`
 
 Marks the column used to detect newer source rows for an incremental load.
 
-* Datatype — `Date` / `DateTime` types or any incrementing numeric type.
+* Must hold a source value that increases whenever the row changes, such as a last-updated timestamp or a change sequence number. Under `@mergeStrategy("lastModified")` the **Invalid configuration: Last Modified Column** check stops the deploy and the run when the column:
+  * is also a key or system column (`@isBusinessKey`, `@isSurrogateKey`, `@isSystemVersion`, `@isSystemCurrentFlag`, `@isSystemCreateDate`, `@isSystemUpdateDate`, `@isSystemEndDate`): a key never changes, and system columns are written by the load;
+  * is not a date/time (`Date`, `Date32`, `DateTime`, `DateTime64`) or numeric (`Int*`, `UInt*`, `Float*`, `Decimal*`) type — e.g. a `String`, `UUID` or `Bool`;
+  * is not derived from any source column, e.g. a constant or `now64()`. A transformation is fine as long as it uses a source column (`toDateTime(src.updated_epoch)`). This is read from Coalesce's column lineage, which does not follow a column through the node's own CTEs, so it is not checked on a node with a `WITH` clause.
 * Can only be applied to one column.
 * Must not be NULL in the source — the **Check NULL values for `<column>` column** stage fails the run, since a NULL value can never compare as newer: a row loaded with a NULL tracking value is never updated again.
 * **Note:** Ignored on Views.
@@ -1455,6 +1459,9 @@ Key annotation terms (`@orderBy`, `@primaryKey`, `@partitionBy`) are written int
 | `@max_value("<max>")` | Fails on rows above the bound. NULL values pass.<br/>Value formatting — see `min_max`.<br/>Example: `@max_value("100")` |
 | `@freshness(<interval>, "<unit>")` | Fails when the newest value in the column is older than the given interval, or the table is empty.<br/>**interval** — how far back from now the newest value is allowed to be, expressed in the unit given by **unit**.<br/>**unit** — SECOND, MINUTE, HOUR, DAY, WEEK, MONTH, or YEAR (defaults to DAY).<br/>The column is compared as `toDateTime64(<column>, 3)` against `now64(3) - INTERVAL <interval> <unit>`.<br/>**Note:** on a `Date` column the value is truncated to midnight.<br/>Example: `@freshness(7, "DAY")` |
 | `@relative_time("<operator>", "<other_column>")` | Compares this column against another date/time column on the same node.<br/>e.g. `@relative_time("<=", "END_DATE")` fails rows where this column's value is not `<=` END_DATE.<br/>Either side NULL → row is skipped (passes).<br/>Both columns should have the same datatype.<br/>Example: `@relative_time("<", "L_M_2")` |
+
+* A column test checks **every row of the target**, not only the rows just loaded. On an SCD Type 2 Dimension this includes the expired versions and the zero key record, so `@uniqueness` on a business key fails as soon as one key has a second version. Test only the current rows with a node-level test instead, e.g. `@tests("SELECT `k` FROM {{ this }} WHERE `SYSTEM_CURRENT_FLAG` = 'Y' GROUP BY `k` HAVING count() > 1", false)`.
+* A failing column test never stops the run. To stop the run on a failure, write the check as a node-level [`@tests`](#tests) with `continueOnFailure` = `false`.
 
 ---
 

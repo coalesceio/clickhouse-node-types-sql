@@ -97,9 +97,10 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {# The node's own CTEs (source.cteString) already open a WITH clause; the load's CTEs must continue it with a comma, since a second WITH is invalid SQL. #}
     {%- set sourceDataCteOpen = ', ' if (source.cteString | default('', true) | trim | length > 0) else 'WITH ' %}
 
-    {# Target path and one load timestamp (now64 is constant within a query) #}
+    {# Target path and one load timestamp. In an INSERT ... SELECT each now64(6) reads the clock separately (microseconds apart,
+       so an expired SCD2 version could end after its successor starts); a scalar subquery is evaluated once per query #}
     {%- set targetPath = ref_no_link(node.location.name, node.name) %}
-    {%- set loadTimestamp = 'now64(6)' %}
+    {%- set loadTimestamp = '(SELECT now64(6))' %}
 
     {# The zero record is kept out of change detection: its business key (e.g. 0) can equal a real key, which would
        otherwise match it and overwrite it with that row's data #}

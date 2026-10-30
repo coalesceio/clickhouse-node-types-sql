@@ -1,6 +1,5 @@
 @id("b1a00001-0000-4000-8000-000000000011")
 @nodeType("SQLDimension")
-@mergeStrategy("lastModified")
 @description("Customer dimension, SCD Type 2 on address and market segment")
 @orderBy("c_custkey", "SYSTEM_VERSION")
 SELECT
