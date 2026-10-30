@@ -1,0 +1,160 @@
+fileVersion: 1
+id: 6a1e3c5b-7d9f-4b2a-8c4e-0f6a2d8b4c17
+name: geo_src
+operation:
+  database: ""
+  deployEnabled: true
+  description: ""
+  locationName: SRC
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 6a1e3c5b-0000-4000-8000-000000000001
+          stepCounter: 6a1e3c5b-7d9f-4b2a-8c4e-0f6a2d8b4c17
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: id
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 6a1e3c5b-0000-4000-8000-000000000002
+          stepCounter: 6a1e3c5b-7d9f-4b2a-8c4e-0f6a2d8b4c17
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: nm
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 6a1e3c5b-0000-4000-8000-000000000003
+          stepCounter: 6a1e3c5b-7d9f-4b2a-8c4e-0f6a2d8b4c17
+        config: {}
+        dataType: Point
+        defaultValue: ""
+        description: ""
+        name: pt
+        nativeType: Point
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 6a1e3c5b-0000-4000-8000-000000000004
+          stepCounter: 6a1e3c5b-7d9f-4b2a-8c4e-0f6a2d8b4c17
+        config: {}
+        dataType: Ring
+        defaultValue: ""
+        description: ""
+        name: rg
+        nativeType: Ring
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 6a1e3c5b-0000-4000-8000-000000000005
+          stepCounter: 6a1e3c5b-7d9f-4b2a-8c4e-0f6a2d8b4c17
+        config: {}
+        dataType: LineString
+        defaultValue: ""
+        description: ""
+        name: ls
+        nativeType: LineString
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 6a1e3c5b-0000-4000-8000-000000000006
+          stepCounter: 6a1e3c5b-7d9f-4b2a-8c4e-0f6a2d8b4c17
+        config: {}
+        dataType: MultiLineString
+        defaultValue: ""
+        description: ""
+        name: mls
+        nativeType: MultiLineString
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 6a1e3c5b-0000-4000-8000-000000000007
+          stepCounter: 6a1e3c5b-7d9f-4b2a-8c4e-0f6a2d8b4c17
+        config: {}
+        dataType: Polygon
+        defaultValue: ""
+        description: ""
+        name: pg
+        nativeType: Polygon
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 6a1e3c5b-0000-4000-8000-000000000008
+          stepCounter: 6a1e3c5b-7d9f-4b2a-8c4e-0f6a2d8b4c17
+        config: {}
+        dataType: MultiPolygon
+        defaultValue: ""
+        description: ""
+        name: mpg
+        nativeType: MultiPolygon
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: geo_src
+  schema: ""
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node
