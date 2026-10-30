@@ -1616,6 +1616,8 @@ macroString: |-
       Date / Date32 / DateTime / DateTime64 -> timestampValue (default 1900-01-01 00:00:00),
                                            cast to the column's type
       UUID                              -> the nil UUID
+      Point / Geometry                  -> the point (0, 0)
+      Ring / LineString / MultiLineString / Polygon / MultiPolygon -> an empty shape
     The type comes from the node's column (source columns carry no dataType).
   ===========================================================================#}
   {%- macro resolve_zero_key(col) -%}
@@ -1650,6 +1652,11 @@ macroString: |-
               CAST(greatest(parseDateTime64BestEffort('{{ zkParams[2] if zkParams | length > 2 else '1900-01-01 00:00:00' }}', 6), toDateTime64(0, 6)) AS {{ ns.dt }})
           {%- elif family == 'uuid' -%}
               toUUID('00000000-0000-0000-0000-000000000000')
+          {# Geo types cannot be Nullable, so NULL fails the insert: a point (0, 0) — Snowflake's ST_POINT(0, 0) — or an empty shape #}
+          {%- elif family in ['point', 'geometry'] -%}
+              CAST((0, 0) AS Point)
+          {%- elif family in ['ring', 'linestring', 'multilinestring', 'polygon', 'multipolygon'] -%}
+              CAST([] AS {{ ns.dt }})
           {%- else -%}
               NULL
           {%- endif -%}
