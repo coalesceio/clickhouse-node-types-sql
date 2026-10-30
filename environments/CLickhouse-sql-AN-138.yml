@@ -7,5 +7,5 @@ mappingDefinitions:
   TARGET:
     database: ""
     schema: WORKSPACE_TEST
-name: New Environment
+name: CLickhouse-sql-AN
 type: Environment
