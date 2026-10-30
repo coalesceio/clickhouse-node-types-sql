@@ -1,5 +1,11 @@
 fileVersion: 1
 id: "138"
-mappingDefinitions: {}
+mappingDefinitions:
+  SRC:
+    database: ""
+    schema: tpch
+  TARGET:
+    database: ""
+    schema: WORKSPACE_TEST
 name: New Environment
 type: Environment
