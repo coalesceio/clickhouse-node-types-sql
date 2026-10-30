@@ -1,7 +1,6 @@
 @id("b7d4f1a2-8e6c-4b3a-a5d9-2c7e9f0a1b63")
 @nodeType("SQLFact")
 @orderBy("o_custkey", "l_suppkey")
-@mergeStrategy("allColumnMatch")
 @description("Factless fact tracking which suppliers a customer has purchased from")
 SELECT DISTINCT
     "o"."o_custkey"                       AS "o_custkey"         @id("f60001") @notNull @not_null,
