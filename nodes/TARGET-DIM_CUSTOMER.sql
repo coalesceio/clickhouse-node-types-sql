@@ -2,7 +2,6 @@
 @nodeType("SQLDimension")
 @orderBy("c_custkey", "SYSTEM_VERSION")
 @mergeStrategy("changeTracking")
-@zeroKey(0)
 SELECT
     generateUUIDv4()                     AS "DIM_CUSTOMER_KEY"   @id("b20001") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()") @not_null @uniqueness,
     "c_custkey"                          AS "c_custkey"          @id("b20002") @isBusinessKey @notNull @not_null,

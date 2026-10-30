@@ -10,4 +10,4 @@ SELECT
     COALESCE(`c_acctbal`, 0)                  AS `c_acctbal`    @notNull @min_max(-999.99, 9999.99),
     UPPER(TRIM(COALESCE(`c_mktsegment`, '')))  AS `c_mktsegment` @notNull @accepted_values("'AUTOMOBILE'", "'BUILDING'", "'FURNITURE'", "'HOUSEHOLD'", "'MACHINERY'"),
     COALESCE(`c_comment`, '')                 AS `c_comment`
-FROM {{ ref('SRC', 'STG_customer') }} `STG_customer`
+FROM {{ ref('SRC', 'customer') }} `customer`

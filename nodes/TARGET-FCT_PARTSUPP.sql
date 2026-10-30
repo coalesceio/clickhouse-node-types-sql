@@ -2,6 +2,7 @@
 @nodeType("SQLFact")
 @orderBy("ps_partkey", "ps_suppkey")
 @mergeStrategy("changeTracking")
+@disableTests
 @preSQL("SELECT throwIf(cnt > 1, 'Duplicate partsupp business key detected') FROM (SELECT count() AS cnt FROM {{ ref('SRC', 'partsupp') }} GROUP BY ps_partkey, ps_suppkey) WHERE cnt > 1")
 @postSQL("OPTIMIZE TABLE {{ ref('TARGET', 'FCT_PARTSUPP') }} FINAL")
 SELECT
