@@ -4,7 +4,7 @@
 @orderBy("p_partkey")
 @zeroKey("00000000-0000-0000-0000-000000000000", "'UNKNOWN'", "1900-01-01 00:00:00", true)
 SELECT
-     generateUUIDv4() AS `part_key` @id("dp0001") @isSurrogateKey @defaultValue("generateUUIDv4()"),
+     generateUUIDv4() AS `part_key` @id("dp0001") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
      `WRK_PART`.`p_partkey` AS `p_partkey` @id("dp0002") @isBusinessKey,
      `WRK_PART`.`p_name` AS `p_name` @id("dp0003"),
      `WRK_PART`.`p_mfgr` AS `p_mfgr` @id("dp0004"),

@@ -16,16 +16,16 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     - @allColumnMatch only inserts rows that don't exist yet, so nothing is deleted.
 #}
 
-{# == Validate: the materialization type must be table, transient table or view == #}
+{# == Validate: the materialization type must be table or view == #}
 {{ validate_materialization_type() }}
 
-{# == Materialization type from the node, normalised (case and spaces): table / transient table / view == #}
+{# == Materialization type from the node, normalised (case and spaces): table / view == #}
 {%- set materializationType = get_materialization_type(node.materializationType) %}
 
 {# == To run data quality tests before data insertion == #}
 {{ run_tests('Before') }}
 
-{%- if materializationType in ['table', 'transient table'] %}
+{%- if materializationType == 'table' %}
 
     {{ validate_fact_requirements() }}
 
@@ -57,9 +57,10 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {# The node's own CTEs (source.cteString) already open a WITH clause; the load's CTEs must continue it with a comma, since a second WITH is invalid SQL. #}
     {%- set sourceDataCteOpen = ', ' if (source.cteString | default('', true) | trim | length > 0) else 'WITH ' %}
 
-    {# Target path and one load timestamp (now64 is constant within a query) #}
+    {# Target path and one load timestamp. In an INSERT ... SELECT each now64(6) reads the clock separately (microseconds apart,
+       so an expired SCD2 version could end after its successor starts); a scalar subquery is evaluated once per query #}
     {%- set targetPath = ref_no_link(node.location.name, node.name) %}
-    {%- set loadTimestamp = 'now64(6)' %}
+    {%- set loadTimestamp = '(SELECT now64(6))' %}
 
     {# Business keys (and the target's SYSTEM_UPDATE_DATE) for the clean-up: only keys that now have more than one row in the target can have replaced copies.
        The clean-up reads only the target, never the source: a DELETE cannot use the node's own CTEs (ClickHouse resolves a CTE name inside a DELETE as a table). #}
@@ -79,7 +80,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
     {%- if lastModifiedComparison %}
         {# Test stage for checking NULL values in source - last modified column (any datatype: a NULL date/time or numeric value can never compare as newer, so the row would never be picked up as changed) #}
-        {{ test_stage('Check NULL values for ' ~ lastModifiedColName ~ ' column', false) }}
+        {{ test_stage('Check Last Modified Column - NULL Values (' ~ lastModifiedColName ~ ')', false) }}
         /* If NULL values are detected, this stage will fail and execution will be terminated */
         {%- set ns = namespace(first=true) %}
         {%- for col in source.columns if col.name == lastModifiedColName %}
@@ -118,7 +119,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {# No @isBusinessKey column and no @mergeStrategy: nothing to match existing rows on, so every source row is simply inserted.
            An explicit changeTracking/lastModified without a business key is stopped by validate_fact_requirements before this runs.
            All columns (system columns included) are written exactly as the SELECT/CTE computes them. #}
-        {{ stage('Load ' + materializationType + ' using Insert') }}
+        {{ stage('Load ' + materializationType + ' - Insert') }}
         INSERT INTO {{ targetPath }}
         (
             {%- for col in columns %}
@@ -137,13 +138,13 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- else %}
 
     {%- if isAllColumnMatch %}
-        {{ stage('Load ' + materializationType + ' Using Merge - All Column Match') }}
+        {{ stage('Load ' + materializationType + ' - All Column Match') }}
     {%- elif lastModifiedComparison %}
         {#== Last Modified SCD ==#}
-        {{ stage('Load ' + materializationType + ' Using Merge - Last Modified Comparison - SCD1') }}
+        {{ stage('Load ' + materializationType + ' - Last Modified Comparison - SCD1') }}
     {%- else %}
         {#== Change Tracking SCD ==#}
-        {{ stage('Load ' + materializationType + ' Using Merge - Change Tracking - SCD1') }}
+        {{ stage('Load ' + materializationType + ' - Change Tracking - SCD1') }}
     {%- endif %}
 
     INSERT INTO {{ targetPath }}
@@ -281,7 +282,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {# == Update: delete the copies the INSERT replaced — per business key only the row with the latest SYSTEM_UPDATE_DATE is kept.
           Only keys with more than one row can have replaced copies, so the DELETE and its subquery read just those keys == #}
     {%- if hasBusinessKey and not isAllColumnMatch and updateDateCols | length > 0 %}
-        {{ stage('Load ' + materializationType + ' Using Merge - Clean Up Data') }}
+        {{ stage('Clean Up Previous Data') }}
         DELETE FROM {{ targetPath }}
         WHERE {{ touchedKeys }}
           AND ({{ businessKey }}, `{{ updateDateCols[0] }}`) NOT IN (

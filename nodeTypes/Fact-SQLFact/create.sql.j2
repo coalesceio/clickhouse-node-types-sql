@@ -17,7 +17,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
 {%- if desiredState %}
 
-    {# Validate: the materialization type must be table or view (ClickHouse has no transient tables) #}
+    {# Validate: the materialization type must be table or view #}
     {{ validate_materialization_type() }}
 
     {%- if desiredMatType == 'view' %}
