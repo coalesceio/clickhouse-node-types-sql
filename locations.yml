@@ -2,6 +2,4 @@ defaultStorageMapping: SRC
 fileVersion: 1
 locations:
   - SRC
-  - SRC2
   - TARGET
-  - TARGET2
