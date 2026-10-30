@@ -86,7 +86,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
     {%- if lastModifiedComparison %}
         {# Test stage for checking NULL values in source - last modified column (any datatype: a NULL date/time or numeric value can never compare as newer, so the row would never be picked up as changed) #}
-        {{ test_stage('Check NULL values for ' ~ lastModifiedColName ~ ' column', false) }}
+        {{ test_stage('Check Last Modified Column - NULL Values (' ~ lastModifiedColName ~ ')', false) }}
         /* If NULL values are detected, this stage will fail and execution will be terminated */
         {%- set ns = namespace(first=true) %}
         {%- for col in source.columns if col.name == lastModifiedColName %}
@@ -121,7 +121,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
     {%- if config.zeroKey is defined and hasSurrogateKey %}
         {%- set zeroKeyCreateDateCols = columns | selectattr("isSystemCreateDate") | list %}
-        {{ stage('Load ' + materializationType + ' Using Merge - Zero Key Record') }}
+        {{ stage('Load ' + materializationType + ' - Zero Key Record') }}
             {# Re-inserted on every run: the newer SYSTEM_UPDATE_DATE replaces the previous zero record.
                SYSTEM_CREATE_DATE keeps the zero record's first-inserted value; everything else is refreshed. #}
             INSERT INTO {{ targetPath }}
@@ -182,16 +182,16 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- if lastModifiedComparison %}
         {#== Last Modified SCD ==#}
         {%- if type2Dimension %}
-            {{ stage('Load ' + materializationType + ' Using Merge - Last Modified Comparison - SCD2') }}
+            {{ stage('Load ' + materializationType + ' - Last Modified Comparison - SCD2') }}
         {%- else %}
-            {{ stage('Load ' + materializationType + ' Using Merge - Last Modified Comparison - SCD1') }}
+            {{ stage('Load ' + materializationType + ' - Last Modified Comparison - SCD1') }}
         {%- endif %}
     {%- else %}
         {#== Change Tracking SCD ==#}
         {%- if type2Dimension %}
-            {{ stage('Load ' + materializationType + ' Using Merge - Change Tracking - SCD2') }}
+            {{ stage('Load ' + materializationType + ' - Change Tracking - SCD2') }}
         {%- else %}
-            {{ stage('Load ' + materializationType + ' Using Merge - Change Tracking - SCD1') }}
+            {{ stage('Load ' + materializationType + ' - Change Tracking - SCD1') }}
         {%- endif %}
     {%- endif %}
 
@@ -539,7 +539,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 HAVING count() > 1
             )
         {%- endset %}
-        {{ stage('Load ' + materializationType + ' Using Merge - Clean Up Data') }}
+        {{ stage('Clean Up Previous Data') }}
         DELETE FROM {{ targetPath }}
         WHERE {{ touchedKeys }}
           AND ({{ replaceKey }}, `{{ updateDateCols[0] }}`) NOT IN (

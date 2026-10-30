@@ -80,7 +80,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
     {%- if lastModifiedComparison %}
         {# Test stage for checking NULL values in source - last modified column (any datatype: a NULL date/time or numeric value can never compare as newer, so the row would never be picked up as changed) #}
-        {{ test_stage('Check NULL values for ' ~ lastModifiedColName ~ ' column', false) }}
+        {{ test_stage('Check Last Modified Column - NULL Values (' ~ lastModifiedColName ~ ')', false) }}
         /* If NULL values are detected, this stage will fail and execution will be terminated */
         {%- set ns = namespace(first=true) %}
         {%- for col in source.columns if col.name == lastModifiedColName %}
@@ -119,7 +119,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {# No @isBusinessKey column and no @mergeStrategy: nothing to match existing rows on, so every source row is simply inserted.
            An explicit changeTracking/lastModified without a business key is stopped by validate_fact_requirements before this runs.
            All columns (system columns included) are written exactly as the SELECT/CTE computes them. #}
-        {{ stage('Load ' + materializationType + ' using Insert') }}
+        {{ stage('Load ' + materializationType + ' - Insert') }}
         INSERT INTO {{ targetPath }}
         (
             {%- for col in columns %}
@@ -138,13 +138,13 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- else %}
 
     {%- if isAllColumnMatch %}
-        {{ stage('Load ' + materializationType + ' Using Merge - All Column Match') }}
+        {{ stage('Load ' + materializationType + ' - All Column Match') }}
     {%- elif lastModifiedComparison %}
         {#== Last Modified SCD ==#}
-        {{ stage('Load ' + materializationType + ' Using Merge - Last Modified Comparison - SCD1') }}
+        {{ stage('Load ' + materializationType + ' - Last Modified Comparison - SCD1') }}
     {%- else %}
         {#== Change Tracking SCD ==#}
-        {{ stage('Load ' + materializationType + ' Using Merge - Change Tracking - SCD1') }}
+        {{ stage('Load ' + materializationType + ' - Change Tracking - SCD1') }}
     {%- endif %}
 
     INSERT INTO {{ targetPath }}
@@ -282,7 +282,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {# == Update: delete the copies the INSERT replaced — per business key only the row with the latest SYSTEM_UPDATE_DATE is kept.
           Only keys with more than one row can have replaced copies, so the DELETE and its subquery read just those keys == #}
     {%- if hasBusinessKey and not isAllColumnMatch and updateDateCols | length > 0 %}
-        {{ stage('Load ' + materializationType + ' Using Merge - Clean Up Data') }}
+        {{ stage('Clean Up Previous Data') }}
         DELETE FROM {{ targetPath }}
         WHERE {{ touchedKeys }}
           AND ({{ businessKey }}, `{{ updateDateCols[0] }}`) NOT IN (
