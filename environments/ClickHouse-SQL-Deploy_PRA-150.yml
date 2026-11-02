@@ -3,9 +3,9 @@ id: "150"
 mappingDefinitions:
   SRC:
     database: ""
-    schema: WORKSPACE_TANVI_SOURCE
+    schema: coalesce_test_pr
   TARGET:
     database: ""
-    schema: WORKSPACE_TANVI_QA
+    schema: WORKSPACE_PRANJAL_QA
 name: ClickHouse-SQL-Deploy_PRA
 type: Environment
