@@ -1,0 +1,11 @@
+fileVersion: 1
+id: "149"
+mappingDefinitions:
+  SRC:
+    database: ""
+    schema: WORKSPACE_TANVI_SOURCE
+  TARGET:
+    database: ""
+    schema: WORKSPACE_TANVI_QA
+name: ClickHouse-SQL-Deploy_PR
+type: Environment
