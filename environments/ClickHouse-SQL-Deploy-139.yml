@@ -3,9 +3,9 @@ id: "139"
 mappingDefinitions:
   SRC:
     database: ""
-    schema: WORKSPACE_TANVI_SOURCE
+    schema: tpch
   TARGET:
     database: ""
-    schema: WORKSPACE_TANVI_QA
+    schema: WORKSPACE_TEST
 name: ClickHouse-SQL-Deploy
 type: Environment
