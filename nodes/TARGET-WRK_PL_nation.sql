@@ -7,4 +7,4 @@ SELECT
     replaceAll(toString("n_name"), '\0', '')       AS "nation_name"    @id("2b3c4d") @description("Nation name without FixedString padding") @not_null @empty,
     "n_regionkey"                                  AS "n_regionkey"    @id("3c4d5e") @description("Region key") @accepted_values("0, 1, 2") @accepted_values("3", "4"),
     "n_comment"                                    AS "n_comment"      @id("4d5e6f") @description("Free-text comment")
-FROM {{ ref('SRC', 'nation') }} "nation"
+FROM {{ ref('SRC', 'nation_demo') }} "nation_demo"
