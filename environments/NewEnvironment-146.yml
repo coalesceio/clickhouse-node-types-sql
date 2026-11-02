@@ -1,11 +1,5 @@
 fileVersion: 1
 id: "146"
-mappingDefinitions:
-  SRC:
-    database: ""
-    schema: coalesce_test_pr
-  TARGET:
-    database: ""
-    schema: WORKSPACE_PRANJAL_QA
+mappingDefinitions: {}
 name: New Environment
 type: Environment
