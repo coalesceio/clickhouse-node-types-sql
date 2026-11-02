@@ -1,0 +1,5 @@
+fileVersion: 1
+id: "139"
+mappingDefinitions: {}
+name: ClickHouse-SQL-Deploy
+type: Environment
