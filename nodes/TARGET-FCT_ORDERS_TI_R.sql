@@ -5,18 +5,18 @@
 @mergeStrategy("changeTracking")
 @description("Orders fact variant demonstrating truncate-insert writes with a row hash (ORDER_HASH) over the non-key columns")
 SELECT
-    "wol"."o_orderkey"                   AS "o_orderkey"        @id("c30001") @isBusinessKey @notNull @not_null,
-    "dc"."DIM_CUSTOMER_KEY"              AS "DIM_CUSTOMER_KEY"  @id("c30002") @notNull @not_null @inHash("ORDER_HASH",1),
-    "wol"."o_orderstatus"                AS "o_orderstatus"     @id("c30003") @notNull @accepted_values("'O'", "'F'", "'P'") @inHash("ORDER_HASH",2),
-    "wol"."o_orderdate"                  AS "o_orderdate"       @id("c30004") @notNull @defaultValue("20261013") @inHash("ORDER_HASH",3),
-    "wol"."o_orderpriority"              AS "o_orderpriority"   @id("c30005") @inHash("ORDER_HASH",4),
-    "wol"."o_clerk"                      AS "o_clerk"           @id("c30006") @inHash("ORDER_HASH",5),
-    "wol"."o_shippriority"               AS "o_shippriority"    @id("c30007") @inHash("ORDER_HASH",6),
-    "wol"."net_revenue"                  AS "net_revenue"       @id("c30008") @notNull @min_value(0) @inHash("ORDER_HASH",7),
-    "wol"."total_quantity"               AS "total_quantity"    @id("c30009") @notNull @min_value(0) @inHash("ORDER_HASH", 8),
-    "wol"."line_count"                   AS "line_count"        @id("c3000a") @notNull @min_value(1) @inHash( "ORDER_HASH",9),
-    "wol"."last_ship_date"               AS "last_ship_date"    @id("c3000b") @inHash("ORDER_HASH", 10),
-    {{ get_hash('ORDER_HASH','MD5') }}         AS "ORDER_HASH"        @id("c3000e") ,
+    "wol"."o_orderkey"                   AS "o_orderkey"        @id("c30001") @isBusinessKey @notNull @not_null @description("Order key, the business key for this fact"),
+    "dc"."DIM_CUSTOMER_KEY"              AS "DIM_CUSTOMER_KEY"  @id("c30002") @notNull @not_null @inHash("ORDER_HASH",1) @description("Surrogate key of the customer's current dimension row"),
+    "wol"."o_orderstatus"                AS "o_orderstatus"     @id("c30003") @notNull @accepted_values("'O'", "'F'", "'P'") @inHash("ORDER_HASH",2) @description("Order status: O (open), F (filled), or P (partial)"),
+    "wol"."o_orderdate"                  AS "o_orderdate"       @id("c30004") @notNull @defaultValue("20261013") @inHash("ORDER_HASH",3) @description("Date the order was placed"),
+    "wol"."o_orderpriority"              AS "o_orderpriority"   @id("c30005") @inHash("ORDER_HASH",4) @description("Order priority code"),
+    "wol"."o_clerk"                      AS "o_clerk"           @id("c30006") @inHash("ORDER_HASH",5) @description("Clerk who processed the order"),
+    "wol"."o_shippriority"               AS "o_shippriority"    @id("c30007") @inHash("ORDER_HASH",6) @description("Shipping priority for the order"),
+    "wol"."net_revenue"                  AS "net_revenue"       @id("c30008") @notNull @min_value(0) @inHash("ORDER_HASH",7) @description("Net revenue rolled up from the order's line items"),
+    "wol"."total_quantity"               AS "total_quantity"    @id("c30009") @notNull @min_value(0) @inHash("ORDER_HASH", 8) @description("Total quantity rolled up from the order's line items"),
+    "wol"."line_count"                   AS "line_count"        @id("c3000a") @notNull @min_value(1) @inHash( "ORDER_HASH",9) @description("Number of line items on the order"),
+    "wol"."last_ship_date"               AS "last_ship_date"    @id("c3000b") @inHash("ORDER_HASH", 10) @description("Latest ship date among the order's line items"),
+    {{ get_hash('ORDER_HASH','MD5') }}         AS "ORDER_HASH"        @id("c3000e") @description("Row hash over the non-key order attributes, used for change detection"),
     CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_CREATE_DATE" @id("c3000c") @isSystemCreateDate,
     CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @id("c3000d") @isSystemUpdateDate
 FROM {{ ref('TARGET', 'WRK_ORDER_LINE') }} "wol"
