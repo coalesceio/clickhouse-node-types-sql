@@ -1,7 +1,7 @@
 @id("184bfcfa-66e8-42d2-ba46-bd8c26dc38f8")
 @nodeType("SQLDimension")
 @description("Materialization test - table; redeploy switches it to a view")
-@materializationType("table")
+@materializationType("view")
 SELECT
     generateUUIDv4()                                    AS "DIM_employee_KEY"    @id("45892a") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
     "id"                                                AS "id"                  @id("ce6ebe") @isBusinessKey,

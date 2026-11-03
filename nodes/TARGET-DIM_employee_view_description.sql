@@ -1,6 +1,6 @@
 @id("f051ad53-4980-436f-a36c-e573ade00144")
 @nodeType("SQLDimension")
-@description("View test - redeploy changes the description only")
+@description("View test - description changed on redeploy")
 @materializationType("view")
 SELECT
     generateUUIDv4()                                    AS "DIM_employee_KEY"    @id("bcc93d") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
