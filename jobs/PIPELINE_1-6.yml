@@ -1,0 +1,6 @@
+excludeSelector: ""
+fileVersion: 1
+id: "6"
+includeSelector: "{ location: \"SRC\" name: \"customer\" } OR { location: \"SRC\" name: \"lineitem\" } OR { location: \"SRC\" name: \"nation\" } OR { location: \"SRC\" name: \"orders\" } OR { location: \"SRC\" name: \"part\" } OR { location: \"SRC\" name: \"partsupp\" } OR { location: \"SRC\" name: \"region\" } OR { location: \"SRC\" name: \"supplier\" } OR { location: \"TARGET\" name: \"DIM_CUSTOMER\" } OR { location: \"TARGET\" name: \"DIM_nation\" } OR { location: \"TARGET\" name: \"FCT_CUSTOMER_SUPPLIER_COVERAGE\" } OR { location: \"TARGET\" name: \"FCT_LINEITEM\" } OR { location: \"TARGET\" name: \"FCT_ORDERS\" } OR { location: \"TARGET\" name: \"FCT_ORDERS_TI_R\" } OR { location: \"TARGET\" name: \"FCT_ORDERS_VW\" } OR { location: \"TARGET\" name: \"FCT_PARTSUPP\" } OR { location: \"TARGET\" name: \"FCT_SHIPMENT_EVENTS\" } OR { location: \"TARGET\" name: \"WRK_CUSTOMER\" } OR { location: \"TARGET\" name: \"WRK_LINEITEM\" } OR { location: \"SRC\" name: \"WRK_nation\" } OR { location: \"TARGET\" name: \"WRK_ORDER_LINE\" }"
+name: PIPELINE_1
+type: Job
