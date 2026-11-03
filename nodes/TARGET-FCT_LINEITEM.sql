@@ -2,6 +2,7 @@
 @nodeType("SQLFact")
 @orderBy("l_orderkey", "l_linenumber")
 @mergeStrategy("lastModified")
+@description("Line-item grain fact loaded incrementally off l_shipdate, one row per order line")
 SELECT
     "l_orderkey"                          AS "l_orderkey"        @id("e50001") @isBusinessKey @notNull @not_null,
     "l_linenumber"                        AS "l_linenumber"      @id("e50002") @isBusinessKey @notNull @not_null,

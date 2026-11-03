@@ -3,6 +3,7 @@
 @orderBy("o_orderkey")
 @materializationType("view")
 @mergeStrategy("changeTracking")
+@description("View variant of FCT_ORDERS exposing the same order-grain rollups without materializing a table")
 SELECT
     "wol"."o_orderkey"                   AS "o_orderkey"        @id("c30001") @isBusinessKey @notNull @not_null,
     "dc"."DIM_CUSTOMER_KEY"              AS "DIM_CUSTOMER_KEY"  @id("c30002") @notNull @not_null,

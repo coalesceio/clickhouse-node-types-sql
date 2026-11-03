@@ -3,7 +3,7 @@
 @orderBy("o_orderkey")
 @writeMode("truncateInsert")
 @mergeStrategy("changeTracking")
-@description("Fact sample")
+@description("Orders fact variant demonstrating truncate-insert writes with a row hash (ORDER_HASH) over the non-key columns")
 SELECT
     "wol"."o_orderkey"                   AS "o_orderkey"        @id("c30001") @isBusinessKey @notNull @not_null,
     "dc"."DIM_CUSTOMER_KEY"              AS "DIM_CUSTOMER_KEY"  @id("c30002") @notNull @not_null @inHash("ORDER_HASH",1),

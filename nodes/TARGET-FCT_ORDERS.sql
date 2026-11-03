@@ -2,6 +2,7 @@
 @nodeType("SQLFact")
 @orderBy("o_orderkey")
 @mergeStrategy("changeTracking")
+@description("Order-grain fact with line-item rollups (revenue, quantity, line count) and the owning customer's current dimension key")
 SELECT
     "wol"."o_orderkey"                   AS "o_orderkey"        @id("c30001") @isBusinessKey @notNull @not_null,
     "dc"."DIM_CUSTOMER_KEY"              AS "DIM_CUSTOMER_KEY"  @id("c30002") @notNull @not_null,
