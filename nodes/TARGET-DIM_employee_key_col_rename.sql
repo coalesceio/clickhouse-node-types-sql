@@ -1,10 +1,10 @@
 @id("53227326-3dd6-4c01-bd8a-30cace10510b")
 @nodeType("SQLDimension")
 @description("Rebuild test - id is in ORDER BY; redeploy renames it")
-@orderBy("id", "SYSTEM_VERSION")
+@orderBy("emp_id", "SYSTEM_VERSION")
 SELECT
     generateUUIDv4()                                    AS "DIM_employee_KEY"    @id("189cc6") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
-    "id"                                                AS "id"                  @id("ef0334") @isBusinessKey,
+    "id"                                                AS "emp_id"              @id("ef0334") @isBusinessKey,
     "name"                                              AS "name"                @id("8384d0"),
     "department"                                        AS "department"          @id("647b7e"),
     "salary"                                            AS "salary"              @id("e1ace8"),

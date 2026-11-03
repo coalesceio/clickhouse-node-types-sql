@@ -1,7 +1,7 @@
 @id("718db651-ea30-48d8-9cca-74320c5ebf7b")
 @nodeType("SQLDimension")
 @description("Rebuild test - PARTITION BY toYYYYMM(created_at); redeploy changes it")
-@partitionBy("toYYYYMM(`created_at`)")
+@partitionBy("department")
 @orderBy("id", "SYSTEM_VERSION")
 SELECT
     generateUUIDv4()                                    AS "DIM_employee_KEY"    @id("6480d2") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),

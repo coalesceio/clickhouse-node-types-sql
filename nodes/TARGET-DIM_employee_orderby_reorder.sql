@@ -1,7 +1,7 @@
 @id("89003059-2215-47fc-9e75-26c267f105a3")
 @nodeType("SQLDimension")
 @description("Rebuild test - ORDER BY (id, SYSTEM_VERSION) without primaryKey; redeploy reorders it")
-@orderBy("id", "SYSTEM_VERSION")
+@orderBy("SYSTEM_VERSION", "id")
 SELECT
     generateUUIDv4()                                    AS "DIM_employee_KEY"    @id("f5873a") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
     "id"                                                AS "id"                  @id("0e6e93") @isBusinessKey,

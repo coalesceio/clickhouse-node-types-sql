@@ -4,7 +4,7 @@
 @orderBy("id", "SYSTEM_VERSION")
 SELECT
     generateUUIDv4()                                    AS "DIM_employee_KEY"    @id("9e76c4") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
-    "id"                                                AS "id"                  @id("f47796") @isBusinessKey,
+    CAST("id" AS Int64)                                 AS "id"                  @id("f47796") @isBusinessKey,
     "name"                                              AS "name"                @id("1417ed"),
     "department"                                        AS "department"          @id("570ad1"),
     "salary"                                            AS "salary"              @id("d34e74"),

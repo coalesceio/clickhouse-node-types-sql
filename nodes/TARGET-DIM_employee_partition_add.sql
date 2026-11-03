@@ -1,6 +1,7 @@
 @id("5a7dad3a-9a1c-4aa0-8ea6-44d6e224d430")
 @nodeType("SQLDimension")
 @description("Rebuild test - no PARTITION BY; redeploy adds one")
+@partitionBy("toYYYYMM(`created_at`)")
 @orderBy("id", "SYSTEM_VERSION")
 SELECT
     generateUUIDv4()                                    AS "DIM_employee_KEY"    @id("cedacb") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),

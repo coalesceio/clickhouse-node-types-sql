@@ -2,7 +2,7 @@
 @nodeType("SQLDimension")
 @description("Rebuild test - PRIMARY KEY (id) differs from ORDER BY; redeploy changes the primary key")
 @orderBy("id", "department", "SYSTEM_VERSION")
-@primaryKey("id")
+@primaryKey("id", "department")
 SELECT
     generateUUIDv4()                                    AS "DIM_employee_KEY"    @id("3e15d5") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
     "id"                                                AS "id"                  @id("c420e0") @isBusinessKey,
