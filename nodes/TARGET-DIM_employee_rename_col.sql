@@ -3,7 +3,7 @@
 SELECT
     generateUUIDv4()                                    AS "DIM_employee_KEY"    @id("f575d4") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
     "id"                                                AS "id"                  @id("be7f62") @isBusinessKey,
-    "name"                                              AS "name"                @id("c708c3"),
+    "name"                                              AS "emp_name"            @id("c708c3"),
     "department"                                        AS "department"          @id("3936e0"),
     "salary"                                            AS "salary"              @id("daa9cb"),
     "created_at"                                        AS "created_at"          @id("183252"),

@@ -5,7 +5,7 @@ SELECT
     "id"                                                AS "id"                  @id("8fca28") @isBusinessKey,
     "name"                                              AS "name"                @id("79bf05"),
     "department"                                        AS "department"          @id("eac8d2"),
-    "salary"                                            AS "salary"              @id("59886b"),
+    CAST("salary" AS Float64)                           AS "salary"              @id("59886b"),
     "created_at"                                        AS "created_at"          @id("dd1835"),
     1                                                   AS "SYSTEM_VERSION"      @id("e7906c") @isSystemVersion,
     'Y'                                                 AS "SYSTEM_CURRENT_FLAG" @id("bd9580") @isSystemCurrentFlag,

@@ -4,7 +4,6 @@ SELECT
     generateUUIDv4()                                    AS "DIM_employee_KEY"    @id("a89a36") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
     "id"                                                AS "id"                  @id("325ac3") @isBusinessKey,
     "name"                                              AS "name"                @id("9e961c"),
-    "department"                                        AS "department"          @id("f3dbb1"),
     "salary"                                            AS "salary"              @id("b873c1"),
     "created_at"                                        AS "created_at"          @id("1ff528"),
     1                                                   AS "SYSTEM_VERSION"      @id("aef0f0") @isSystemVersion,

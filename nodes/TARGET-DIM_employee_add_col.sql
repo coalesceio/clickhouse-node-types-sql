@@ -7,6 +7,7 @@ SELECT
     "department"                                        AS "department"          @id("946450"),
     "salary"                                            AS "salary"              @id("26d0cf"),
     "created_at"                                        AS "created_at"          @id("267515"),
+    "salary" * 12                                       AS "annual_salary"       @id("8b2e4f"),
     1                                                   AS "SYSTEM_VERSION"      @id("7ce316") @isSystemVersion,
     'Y'                                                 AS "SYSTEM_CURRENT_FLAG" @id("41a5c1") @isSystemCurrentFlag,
     CAST(CURRENT_TIMESTAMP AS TIMESTAMP)                AS "SYSTEM_CREATE_DATE"  @id("4302f4") @isSystemCreateDate,
