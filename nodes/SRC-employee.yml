@@ -1,0 +1,106 @@
+fileVersion: 1
+id: 2733e765-7ad1-44e7-bfb7-d33d05fabb64
+name: employee
+operation:
+  database: ""
+  deployEnabled: true
+  description: ""
+  locationName: SRC
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 26902bc5-00e2-4d9a-966a-629a45aeceb8
+          stepCounter: 2733e765-7ad1-44e7-bfb7-d33d05fabb64
+        config: {}
+        dataType: UInt64
+        defaultValue: ""
+        description: ""
+        name: id
+        nativeType: UInt64
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 964cb590-3882-4bda-a225-f2da850e8790
+          stepCounter: 2733e765-7ad1-44e7-bfb7-d33d05fabb64
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: name
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 9dfab6c3-fa26-478a-a80c-91e93e43c621
+          stepCounter: 2733e765-7ad1-44e7-bfb7-d33d05fabb64
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: department
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: e300e6ff-0b69-4928-9764-629a3001d8d8
+          stepCounter: 2733e765-7ad1-44e7-bfb7-d33d05fabb64
+        config: {}
+        dataType: Decimal(10, 2)
+        defaultValue: ""
+        description: ""
+        name: salary
+        nativeType: Decimal(10, 2)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 3e6d1eb0-3879-45e8-8045-679b4d5d90ae
+          stepCounter: 2733e765-7ad1-44e7-bfb7-d33d05fabb64
+        config: {}
+        dataType: DateTime64(3, 'UTC')
+        defaultValue: ""
+        description: ""
+        name: created_at
+        nativeType: DateTime64(3, 'UTC')
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: employee
+  schema: ""
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node
