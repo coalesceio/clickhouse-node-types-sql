@@ -1,7 +1,6 @@
 @id("2da19972-8dcd-418b-a906-ff8490dfef00")
 @nodeType("SQLFact")
 @orderBy("o_orderkey")
-@materializationType("view")
 @mergeStrategy("changeTracking")
 @description("View variant of FCT_ORDERS exposing the same order-grain rollups without materializing a table")
 SELECT

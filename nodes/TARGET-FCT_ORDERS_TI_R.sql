@@ -1,5 +1,6 @@
 @id("f8472f97-2521-45bf-8add-dd6f1c1e5d5e")
 @nodeType("SQLFact")
+@materializationType("view")
 @orderBy("o_orderkey")
 @writeMode("truncateInsert")
 @mergeStrategy("changeTracking")
