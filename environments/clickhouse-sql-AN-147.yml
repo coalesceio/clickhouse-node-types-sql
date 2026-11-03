@@ -1,5 +1,11 @@
 fileVersion: 1
 id: "147"
-mappingDefinitions: {}
+mappingDefinitions:
+  SRC:
+    database: ""
+    schema: tpch
+  TARGET:
+    database: ""
+    schema: WORKSPACE_TEST
 name: clickhouse-sql-AN
 type: Environment
