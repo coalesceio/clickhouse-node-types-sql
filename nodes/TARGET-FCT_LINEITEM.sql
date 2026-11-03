@@ -12,7 +12,7 @@ SELECT
     "l_extendedprice"                     AS "l_extendedprice"   @id("e50006") @notNull @min_value(0),
     "l_discount"                          AS "l_discount"        @id("e50007") @notNull @min_max(0, 1),
     "l_tax"                               AS "l_tax"             @id("e50008") @notNull @min_max(0, 1),
-    "l_returnflag"                        AS "l_returnflag"      @id("e50009") @notNull @accepted_values("'A'", "'N'", "'R'"),
+    "l_returnflag"                        AS "l_returnflag1"      @id("e50009") @notNull @accepted_values("'A'", "'N'", "'R'"),
     "l_linestatus"                        AS "l_linestatus"      @id("e5000a") @notNull @accepted_values("'O'", "'F'"),
     "l_commitdate"                        AS "l_commitdate"      @id("e5000c") @notNull,
     "l_receiptdate"                       AS "l_receiptdate"     @id("e5000d") @notNull,
