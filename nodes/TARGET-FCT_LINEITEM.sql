@@ -18,6 +18,7 @@ SELECT
     "l_receiptdate"                       AS "l_receiptdate"     @id("e5000d") @notNull,
     "l_shipinstruct"                      AS "l_shipinstruct"    @id("e5000e"),
     "l_shipmode"                          AS "l_shipmode"        @id("e5000f"),
+    'hi'                                  AS "n_col"             @id("e5000g"),                
     CAST(CURRENT_TIMESTAMP AS TIMESTAMP)  AS "SYSTEM_CREATE_DATE" @id("e50010") @isSystemCreateDate,
     CAST(CURRENT_TIMESTAMP AS TIMESTAMP)  AS "SYSTEM_UPDATE_DATE" @id("e50011") @isSystemUpdateDate
 FROM {{ ref('TARGET', 'WRK_LINEITEM') }} "lineitem"

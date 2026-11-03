@@ -4,7 +4,7 @@
 @description("Factless fact tracking which suppliers a customer has purchased from")
 SELECT DISTINCT
     "o"."o_custkey"                       AS "o_custkey"         @id("f60001") @notNull @not_null,
-    "l"."l_suppkey"                        AS "l_suppkey"         @id("f60002") @notNull @not_null,
+    "l"."l_suppkey"                        AS "l_suppkey1"         @id("f60002") @notNull @not_null,
     CAST(CURRENT_TIMESTAMP AS TIMESTAMP)  AS "SYSTEM_CREATE_DATE" @id("f60003") @isSystemCreateDate,
     CAST(CURRENT_TIMESTAMP AS TIMESTAMP)  AS "SYSTEM_UPDATE_DATE" @id("f60004") @isSystemUpdateDate
 FROM {{ ref('SRC', 'orders') }} "o"

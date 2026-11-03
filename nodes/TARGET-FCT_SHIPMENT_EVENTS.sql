@@ -11,7 +11,6 @@ SELECT
     "l_quantity"                           AS "l_quantity"        @id("fa0005") @notNull @min_value(0),
     "l_extendedprice"                      AS "l_extendedprice"   @id("fa0006") @notNull @min_value(0),
     "l_shipdate"                           AS "l_shipdate"        @id("fa0007") @notNull,
-    "l_shipmode"                           AS "l_shipmode"        @id("fa0008"),
     CAST(CURRENT_TIMESTAMP AS TIMESTAMP)   AS "SYSTEM_CREATE_DATE" @id("fa0009") @isSystemCreateDate,
     CAST(CURRENT_TIMESTAMP AS TIMESTAMP)   AS "SYSTEM_UPDATE_DATE" @id("fa000a") @isSystemUpdateDate
 FROM {{ ref('TARGET', 'WRK_LINEITEM') }} "lineitem"

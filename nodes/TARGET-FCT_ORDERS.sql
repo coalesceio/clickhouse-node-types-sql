@@ -5,7 +5,7 @@
 SELECT
     "wol"."o_orderkey"                   AS "o_orderkey"        @id("c30001") @isBusinessKey @notNull @not_null,
     "dc"."DIM_CUSTOMER_KEY"              AS "DIM_CUSTOMER_KEY"  @id("c30002") @notNull @not_null,
-    "wol"."o_orderstatus"                AS "o_orderstatus"     @id("c30003") @notNull @accepted_values("'O'", "'F'", "'P'"),
+    CAST("wol"."o_orderstatus" AS STRING)                AS "o_orderstatus"     @id("c30003") @notNull @accepted_values("'O'", "'F'", "'P'"),
     "wol"."o_orderdate"                  AS "o_orderdate"       @id("c30004") @notNull,
     "wol"."o_orderpriority"              AS "o_orderpriority"   @id("c30005"),
     "wol"."o_clerk"                      AS "o_clerk"           @id("c30006"),
