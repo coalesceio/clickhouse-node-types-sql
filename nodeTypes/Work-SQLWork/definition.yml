@@ -174,7 +174,9 @@ metadata:
           description: |-
                 • Marks a column as an input to a generated hash key, grouped by 𝗵𝗮𝘀𝗵𝗡𝗮𝗺𝗲 and ordered within that group by 𝗵𝗮𝘀𝗵𝗢𝗿𝗱𝗲𝗿.
                 • Mark every column that should feed a given hash with the same 𝗵𝗮𝘀𝗵𝗡𝗮𝗺𝗲, then call the 𝐠𝐞𝐭_𝐡𝐚𝐬𝐡("<hashName>") macro elsewhere in the SELECT to produce the actual hash column from those marked columns.
-                • 𝗦𝗲𝗲 𝗱𝗼𝗰𝘂𝗺𝗲𝗻𝘁𝗮𝘁𝗶𝗼𝗻 𝗳𝗼𝗿 𝗱𝗲𝘁𝗮𝗶𝗹𝘀.
+                • Call it as {{ get_hash('<hashName>', '<algo>', '<delimiter>') }}. algo and delimiter are optional (defaults SHA1 and ||), e.g. {{ get_hash('GH_COL', 'MD5', '|') }}.
+                • MD5 / SHA1 / SHA224 / SHA256 / SHA384 / SHA512 return a lowercase hex string. Other ClickHouse hash functions (e.g. cityHash64, xxHash64) are called as written; their number is stored as text, so wrap the call in toUInt64(...) for a numeric column.
+                • NULL values are hashed as 'null'. 𝗦𝗲𝗲 𝗱𝗼𝗰𝘂𝗺𝗲𝗻𝘁𝗮𝘁𝗶𝗼𝗻 𝗳𝗼𝗿 𝗱𝗲𝘁𝗮𝗶𝗹𝘀.
           allowsMultiple: true
           parameters:
             - name: hashName
