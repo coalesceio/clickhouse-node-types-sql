@@ -89,6 +89,19 @@ metadata:
               isRequired: true
               example: index_granularity = 8192
 
+        - name: final
+          description: |-
+            • 𝗩𝗶𝗲𝘄𝘀 𝗼𝗻𝗹𝘆 — the view reads its sources with FINAL (SETTINGS final = 1 at the end of its SELECT), so an upstream ReplacingMergeTree shows one row per key, without the copies its load replaced.
+              Ex. @materializationType("view") @final
+            • A view is fixed when it is deployed. It uses, in order:
+              1. @final → SETTINGS final = 1
+              2. no @final, readWithFinal runtime parameter true → SETTINGS final = 1
+              3. no @final, readWithFinal false or not set → no SETTINGS
+            • When the view's SQL already ends with its own SETTINGS clause, final = 1 is appended to it (SETTINGS max_threads = 4, final = 1). If that clause already sets final, ClickHouse may reject it with its own error.
+            • Adding or removing @final on redeploy recreates the view. Changing readWithFinal later does not change a deployed view.
+            • Ignored on tables — their loads follow readWithFinal.
+          isRequired: false
+
         - name: writeMode
           description: |-
             • Controls how data is written to the target table. 

@@ -15,6 +15,10 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 {%- set desiredMatType = nsNodeVariables.desiredMatType %}
 {%- set currentMatType = nsNodeVariables.currentMatType %}
 
+{#- Table engine from @engine, else the package engine parameter, else MergeTree; a ReplacingMergeTree is always sorted by the business key,
+    SYSTEM_VERSION (and the surrogate key with @zeroKey) — see set_table_engine() #}
+{{- set_table_engine(true) }}
+
 {%- if desiredState %}
 
     {# Validate: the materialization type must be table or view #}
@@ -38,10 +42,14 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {{ object_drop_sql() }}
 
         {# CreateSQL for Table, used by the first create and by the rebuild so both write the same table.
-           ClickHouse Cloud adds ENGINE = SharedMergeTree(...) and ORDER BY tuple() when they are not written.
-           Column types from ch_column_type(): Nullable(<type>) unless the column is not null; the surrogate
-           key is never Nullable. ClickHouse has no identity columns, so the surrogate key is a plain column
+           ENGINE from @engine or the package engine parameter (a ReplacingMergeTree gets the @isSystemUpdateDate
+           column as its version; Cloud makes it SharedReplacingMergeTree). Without either no ENGINE is written and
+           Cloud adds SharedMergeTree(...). ORDER BY tuple() is added by Cloud when no ORDER BY is written.
+           Column types from ch_column_type(): Nullable(<type>) unless the column is not null (@notNull); the surrogate
+           key is never Nullable. A ReplacingMergeTree's version argument needs @notNull: ClickHouse rejects a Nullable one. ClickHouse has no identity columns, so the surrogate key is a plain column
            (a UUID key gets its value from @defaultValue("generateUUIDv4()")).
+           On a ReplacingMergeTree, ORDER BY is the replace key built by set_table_engine() (no @orderBy /
+           @primaryKey accepted). COMMENT is the node description only. Otherwise
            @orderBy / @primaryKey are written as given (PRIMARY KEY only when it differs from ORDER BY);
            ClickHouse rejects an invalid key itself. SETTINGS adds allow_nullable_key = 1 when there is a
            sort or partition key, unless @settings sets it. #}
@@ -60,6 +68,9 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 {%- if not loop.last %},{% endif %}
                 {%- endfor %}
             )
+            {%- if nsNodeVariables.desiredEngine %}
+            ENGINE = {{ nsNodeVariables.desiredEngine }}
+            {%- endif %}
             {%- if partitionBy | length == 1 %}
             PARTITION BY {{ partitionBy[0] }}
             {%- elif partitionBy | length > 1 %}
@@ -75,8 +86,22 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             {%- if nsSettings.items %}
             SETTINGS {{ nsSettings.items | join(', ') }}
             {%- endif %}
-            {%- if node.description | trim | length > 0 %}
-            COMMENT '{{ ch_string(node.description) }}'
+            {%- set tableComment = ch_table_comment(node.description) %}
+            {%- if tableComment %}
+            COMMENT '{{ ch_string(tableComment) }}'
+            {%- endif %}
+        {%- endset %}
+
+        {# Reminder for whoever deploys a ReplacingMergeTree (passing stage, after Create / Recreate):
+           replaced copies stay until a background merge, so readers need FINAL. The table COMMENT carries it too. #}
+        {%- set finalNoteSql %}
+            {%- if nsNodeVariables.desiredEngineReplacing %}
+
+            {{ test_stage('Note: Query with FINAL', true) }}
+            -- {{ node.name }} is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.
+            -- Query it with FINAL for one row per key: SELECT ... FROM {{ nsNodeVariables.desObjectNameFullPath }} FINAL (or SETTINGS final = 1).
+            {{- final_note_package_lines() }}
+            SELECT 1 WHERE 0
             {%- endif %}
         {%- endset %}
 
@@ -84,22 +109,27 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
             {{ stage('Create ' + desiredMatType) }}
             {{ createTableSql }}
+            {{ finalNoteSql }}
 
         {%- elif currentState is defined and currentState != desiredState and currentMatType == desiredMatType %}
 
-            {# Partition / primary key changes, ORDER BY changes beyond trailing removals and new columns,
+            {# Engine, partition / primary key changes, ORDER BY changes beyond trailing removals and new columns,
                and renamed or retyped key columns cannot be ALTERed in ClickHouse: the table is recreated
                (warning stage + CREATE OR REPLACE, existing data lost) instead of cloned and altered #}
             {{ set_rebuild_reason() }}
             {%- if nsNodeVariables.rebuildReason %}
 
                 {{ test_stage('Warning: Table Recreated (' ~ nsNodeVariables.rebuildReason ~ ')', true) }}
-                -- {{ node.name }} cannot be altered in place ({{ nsNodeVariables.rebuildReason }}): ClickHouse cannot ALTER a table's PARTITION BY or PRIMARY KEY, changes ORDER BY only by removing trailing terms or adding new columns, and cannot rename or retype a column used in a key.
+                -- {{ node.name }} cannot be altered in place ({{ nsNodeVariables.rebuildReason }}): ClickHouse cannot ALTER a table's ENGINE, PARTITION BY or PRIMARY KEY, changes ORDER BY only by removing trailing terms or adding new columns, and cannot rename or retype a column used in a key.
+                {%- if nsNodeVariables.orderByChanged %}
+                -- ORDER BY ({{ nsNodeVariables.currentOrderBy | join(', ') or 'tuple()' }}) -> ({{ nsNodeVariables.desiredOrderBy | join(', ') or 'tuple()' }})
+                {%- endif %}
                 -- The table is recreated with CREATE OR REPLACE. Its existing data is lost; it stays empty until the next run reloads it.
                 {{ fail_sql(false) }}
 
                 {{ stage('Recreate Table') }}
                 {{ createTableSql }}
+                {{ finalNoteSql }}
 
                 {# Renamed / moved: drop the table at the old path #}
                 {%- if nsNodeVariables.curObjectNameFullPath != nsNodeVariables.desObjectNameFullPath %}

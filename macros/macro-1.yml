@@ -2,6 +2,38 @@ fileVersion: 1
 id: "1"
 macroString: |-
   {#===========================================================================
+    packageParameter: package-level defaults, between a node's own annotation and the built-in
+    default (see ch_table_engine()):
+      engine    the Dimension / Fact ENGINE when the node has no @engine, so ReplacingMergeTree can be
+                turned on once instead of on every node. A node's @engine always wins.
+                Options:
+                  "ReplacingMergeTree"  every Dimension / Fact without @engine is a ReplacingMergeTree
+                                        (except a plain-insert / allColumnMatch Fact, which stays MergeTree)
+                  "MergeTree"           every Dimension / Fact without @engine is a MergeTree
+                  ""                    not set: the built-in default, MergeTree (default)
+
+    readWithFinal (runtime parameter only — not a package parameter): whether the SQL the node types
+    run reads ReplacingMergeTree tables with FINAL (SETTINGS final = 1): every load (its sources and
+    the node's own target), the zero key record, the Last Modified NULL check, the column tests, and
+    views without @final. Set per environment (Environment > Parameters) or per job run:
+      {"readWithFinal": true}
+                Options:
+                  true  (or 1)          SETTINGS final = 1 is added to every load's SELECT (and to a view
+                                        without @final, when it is created)
+                  false (or 0)          not added
+                  not set               not added (same as false)
+  ===========================================================================#}
+  {%- set packageParameter = namespace(engine = "ReplacingMergeTree") -%}
+
+  {#- readWithFinal in effect: the runtime parameter, else false.
+      nsReadWithFinal.origin says which ('runtime parameter', 'not set'). #}
+  {%- set nsReadWithFinal = namespace(value=false, origin='not set') -%}
+  {%- if parameters is defined and parameters is mapping and parameters.readWithFinal is defined and parameters.readWithFinal is not none -%}
+      {%- set nsReadWithFinal.value = (parameters.readWithFinal | string | trim | lower) in ['true', '1'] -%}
+      {%- set nsReadWithFinal.origin = 'runtime parameter' -%}
+  {%- endif -%}
+
+  {#===========================================================================
     SECTION 1: Shared setup (keep first: the aliases and nsNodeVariables are set up before any template code runs)
   ===========================================================================#}
 
@@ -166,7 +198,14 @@ macroString: |-
       desired/currentPrimaryKey             PRIMARY KEY terms from @primaryKey
       desired/currentPartitionBy            PARTITION BY terms from @partitionBy
       desired/currentSettings               "name = value" table settings from @settings
-      rebuildReason                         why a table redeploy rebuilds instead of altering, '' when it alters
+      desired/currentEngine                 Dimension / Fact ENGINE clause, '' when none is written
+                                            (set by set_table_engine(); always '' on a Work node)
+      desired/currentEngineReplacing        the engine is a ReplacingMergeTree: the load only inserts and
+                                            reads the target with FINAL; its ORDER BY is the replace key
+      desiredVersionColumn                  the engine's version column (@isSystemUpdateDate), ''
+      desiredReplaceKey                     a ReplacingMergeTree's ORDER BY (ch_table_engine())
+      desiredManualSortKey                  '@orderBy' / '@primaryKey' set on a ReplacingMergeTree (not accepted)
+      rebuildReason                        why a table redeploy rebuilds instead of altering, '' when it alters
                                             (set by set_rebuild_reason())
       orderByChanged / orderByAltered       redeploy: the sort key changed / a MODIFY ORDER BY was emitted
       metaDataChanged                      set by the redeploy macros
@@ -187,6 +226,13 @@ macroString: |-
                                       currentPartitionBy = [],
                                       desiredSettings = [],
                                       currentSettings = [],
+                                      desiredEngine = "",
+                                      currentEngine = "",
+                                      desiredEngineReplacing = false,
+                                      currentEngineReplacing = false,
+                                      desiredVersionColumn = "",
+                                      desiredReplaceKey = [],
+                                      desiredManualSortKey = [],
                                       rebuildReason = "",
                                       orderByChanged = false,
                                       orderByAltered = false,
@@ -453,10 +499,181 @@ macroString: |-
     validate_dimension_requirements(hardFail): Dimension checks (column ids, business key,
     mergeStrategy, system columns). hardFail = true from create.
   ===========================================================================#}
+  {#===========================================================================
+    validate_table_engine(isDimension, hardFail): Dimension / Fact @engine checks, after
+    set_table_engine(). One failing stage lists every problem:
+      - only MergeTree-family engines: the CREATE writes ORDER BY / SETTINGS, and redeploys use
+        CLONE AS
+      - a ReplacingMergeTree builds its own ORDER BY from the replace key, so it needs a business
+        key and a version argument (@isSystemUpdateDate), and does not accept @orderBy / @primaryKey:
+        a manual key could collapse different rows or keep replaced copies. SYSTEM_VERSION is optional
+        on an SCD Type 1 Dimension (an SCD Type 2 one requires it through the system column check)
+  ===========================================================================#}
+  {%- macro validate_table_engine(isDimension, hardFail=false) -%}
+      {%- set nsProblems = namespace(items=[]) -%}
+      {%- set engineFamily = nsNodeVariables.desiredEngine.split('(')[0] | trim | lower -%}
+      {%- if engineFamily and not engineFamily.endswith('mergetree') -%}
+          {%- set nsProblems.items = nsProblems.items + ['@engine("' ~ nsNodeVariables.desiredEngine ~ '") is not a MergeTree-family engine. The table is created with ORDER BY / SETTINGS and redeployed with CLONE AS, which only MergeTree-family engines support. Use MergeTree (the default) or ReplacingMergeTree.'] -%}
+      {%- endif -%}
+      {%- if nsNodeVariables.desiredEngineReplacing -%}
+          {%- set keyText = 'the business key' ~ (', SYSTEM_VERSION (when the node has it) and, with @zeroKey, the surrogate key' if isDimension else '') -%}
+          {%- if nsNodeVariables.desiredManualSortKey -%}
+              {%- set nsProblems.items = nsProblems.items + [nsNodeVariables.desiredManualSortKey | join(' / ') ~ ' is not accepted on a ReplacingMergeTree. Its ORDER BY decides which rows are copies of each other, so it is built from ' ~ keyText ~ ': ORDER BY (' ~ (nsNodeVariables.desiredReplaceKey | join(', ')) ~ '). A manual key can collapse different rows into one or keep the copies the load replaces. Remove ' ~ (nsNodeVariables.desiredManualSortKey | join(' / ')) ~ ', or use @engine("MergeTree") to set your own sort key.'] -%}
+          {%- endif -%}
+          {%- if not (columns | selectattr('isBusinessKey') | list) -%}
+              {%- set nsProblems.items = nsProblems.items + ['A ReplacingMergeTree keeps one row per business key, but no column is marked @isBusinessKey, so every row would be collapsed into one. Mark the business key with @isBusinessKey, or use @engine("MergeTree").'] -%}
+          {%- endif -%}
+          {%- if not nsNodeVariables.desiredVersionColumn -%}
+              {%- set nsProblems.items = nsProblems.items + [{'text': 'A ReplacingMergeTree needs a version argument to keep the latest copy of a row, but no column is marked @isSystemUpdateDate (or the engine names no column of the node). Add the column:', 'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate @notNull'}] -%}
+          {%- endif -%}
+      {%- endif -%}
+      {%- if nsProblems.items %}
+          {{ test_stage('Invalid configuration: engine', false) }}
+          {%- for problem in nsProblems.items %}
+          {%- if problem is mapping %}
+          -- {{ loop.index }}. {{ problem.text }}
+          --    Example: {{ problem.example }}
+          {%- else %}
+          -- {{ loop.index }}. {{ problem }}
+          {%- endif %}
+          {%- endfor %}
+          {{ fail_sql(hardFail, 'Invalid configuration: engine') }}
+      {%- endif -%}
+      {{- validate_update_date_not_null() -}}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    validate_update_date_not_null(): on a ReplacingMergeTree, a non-failing "Warning: @isSystemUpdateDate
+    without @notNull" when the @isSystemUpdateDate column (the engine's version argument) is not marked @notNull. Like every column it is then
+    Nullable(...) (see ch_column_type()), which ClickHouse rejects for a version argument. The flow
+    continues and ClickHouse's own error stops the CREATE / ALTER.
+  ===========================================================================#}
+  {%- macro validate_update_date_not_null() -%}
+      {%- set updateDateCol = nsNodeVariables.desiredVersionColumn -%}
+      {%- set nsUpdateDate = namespace(nullable=false) -%}
+      {%- for col in columns | default([], true) if col.name == updateDateCol and col.nullable != false -%}
+          {%- set nsUpdateDate.nullable = true -%}
+      {%- endfor -%}
+      {%- if nsNodeVariables.desiredEngineReplacing and updateDateCol and nsUpdateDate.nullable %}
+          {{ test_stage('Warning: @isSystemUpdateDate without @notNull', true) }}
+          -- `{{ updateDateCol }}` (@isSystemUpdateDate) is the ReplacingMergeTree's version argument: ReplacingMergeTree(`{{ updateDateCol }}`).
+          -- Without @notNull it is Nullable(...), like every column, and ClickHouse rejects a Nullable version argument: the CREATE (or the ALTER on a redeploy) fails with ClickHouse's error.
+          -- Fix: add @notNull to the column's annotations.
+          --    Example: CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `{{ updateDateCol }}` @isSystemUpdateDate @notNull
+          SELECT 1
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    target_final_setting(): 'SETTINGS final = 1' for a statement that reads the node's own target —
+    only when the target is a ReplacingMergeTree and readWithFinal is true. With the
+    parameter false (or not set) nothing is added: FINAL is then expected from the ClickHouse
+    user / session settings (final = 1), so a missing setting shows up in the data.
+  ===========================================================================#}
+  {%- macro target_final_setting() -%}
+      {%- if nsNodeVariables.desiredEngineReplacing and nsReadWithFinal.value %}
+      SETTINGS final = 1
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    final_warning_lines(query): comment lines put at the top of a @tests / @preSQL / @postSQL stage
+    when the target is a ReplacingMergeTree, readWithFinal is true, and the statement SELECTs
+    from this table (written as {{ this }} or by the table name) without FINAL or final = 1. That SQL
+    runs as written — the parameter does not reach it — so until a background merge it also reads
+    the copies the load replaced. Only SELECTs are flagged: DELETE / ALTER / TRUNCATE act on every
+    copy. Text inside '...' literals is ignored.
+  ===========================================================================#}
+  {%- macro final_warning_lines(query) -%}
+      {%- if nsNodeVariables.desiredEngineReplacing and nsReadWithFinal.value -%}
+          {%- set code = ((query | string).split("'"))[::2] | join(' ') | lower -%}
+          {%- set flat = code | replace(' ', '') | replace('\n', '') -%}
+          {%- set readsTarget = '{{this}}' in flat or (node.name | lower) in code -%}
+          {%- if readsTarget and 'select' in code and 'final' not in code %}
+      -- Warning: {{ node.name }} is a ReplacingMergeTree and readWithFinal = true, but this statement reads it without FINAL.
+      -- Until ClickHouse merges the table in the background, the values shown may not be consistent (they can include the copies the load replaced).
+      -- Fix: add FINAL after the table (FROM <table> FINAL), or SETTINGS final = 1 at the end of the statement.
+          {%- endif -%}
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    source_final_setting(srcs): 'SETTINGS final = 1' to end a SELECT that reads the node's sources
+    (srcs = sources), so an upstream ReplacingMergeTree is read with FINAL — one row per key, without
+    the copies its load replaced. Added whenever readWithFinal is true (the runtime parameter —
+    see nsReadWithFinal at the top): the source engines are not in the node's metadata, and
+    ClickHouse applies the setting only to the tables that support FINAL — a MergeTree (upstream,
+    source or the node's own target) is read as usual.
+    When the node's own SQL already ends with a SETTINGS clause, ', final = 1' is appended to that
+    clause instead (a second SETTINGS clause is invalid). If the node's own SETTINGS already sets
+    final, ClickHouse decides — it may reject the repeated setting with its own error.
+    "Ends with" = the last source's join has SETTINGS after its last ')', so a SETTINGS inside a
+    subquery is not mistaken for the node's own.
+    useFinal overrides readWithFinal when given (see view_final_setting()).
+  ===========================================================================#}
+  {%- macro source_final_setting(srcs, useFinal=none) -%}
+      {%- set applyFinal = nsReadWithFinal.value if useFinal is none else useFinal -%}
+      {%- if applyFinal -%}
+          {%- set srcList = srcs | default([], true) | list -%}
+          {%- set lastJoin = (srcList[-1].join | default('', true)) if srcList else '' -%}
+          {%- set tailText = ' ' ~ (lastJoin.split(')')[-1] | lower | replace('\n', ' ') | replace('\t', ' ') | replace('\r', ' ')) ~ ' ' -%}
+          {%- if ' settings ' in tailText %}
+      , final = 1
+          {%- else %}
+      SETTINGS final = 1
+          {%- endif -%}
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    view_final_setting(state): 'SETTINGS final = 1' for a view's SELECT. A view is fixed when it is
+    deployed, so it decides here, in this order:
+      1. @final, @final(true) or @final("true")  -> SETTINGS final = 1
+      2. @final with any other value             -> nothing, whatever readWithFinal is
+      3. no @final, readWithFinal = true  -> SETTINGS final = 1
+      4. no @final, false or not set             -> nothing
+    @final is part of the definition compared on redeploy, so adding, removing or changing it
+    recreates the view. A later change to readWithFinal alone does not (both states render
+    with it).
+  ===========================================================================#}
+  {%- macro view_final_setting(state) -%}
+      {%- set cfg = state.config if (state.config is defined and state.config) else {} -%}
+      {%- if cfg.final is defined -%}
+          {%- set finalArgs = cfg.final.parameters if (cfg.final is mapping and cfg.final.parameters is defined and cfg.final.parameters) else [] -%}
+          {%- set finalValue = (finalArgs[0] | string | trim | trim('"') | trim("'") | lower) if finalArgs else 'true' -%}
+          {%- set useFinal = finalValue == 'true' -%}
+      {%- else -%}
+          {%- set useFinal = nsReadWithFinal.value -%}
+      {%- endif -%}
+      {{- source_final_setting(state.sources, useFinal) -}}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    final_note_package_lines(): the package lines of the "Note: Query with FINAL" deploy stage —
+    where the ReplacingMergeTree engine came from (@engine or the package engine parameter) and
+    how downstream nodes read the table under the readWithFinal runtime parameter.
+  ===========================================================================#}
+  {%- macro final_note_package_lines() -%}
+      {%- set packageEngine = (packageParameter.engine | default('', true) | string | trim) if packageParameter is defined else '' -%}
+      {%- if config.engine is defined and config.engine %}
+      -- Engine: set on this node with @engine (package engine parameter: {{ packageEngine if packageEngine else 'not set - MergeTree' }}).
+      {%- else %}
+      -- Engine: from the package engine parameter ({{ packageEngine }}) - this node has no @engine.
+      {%- endif %}
+      {%- if nsReadWithFinal.value %}
+      -- readWithFinal = true ({{ nsReadWithFinal.origin }}): the loads and views of downstream Work / Dimension / Fact nodes read it with FINAL (SETTINGS final = 1).
+      {%- else %}
+      -- readWithFinal = false ({{ nsReadWithFinal.origin }}): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.
+      {%- endif %}
+      -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.
+  {%- endmacro -%}
+
   {%- macro validate_dimension_requirements(hardFail=false) -%}
 
       {# Every Dimension column must carry its own @id annotation. #}
       {{ validate_column_ids(hardFail) }}
+
+      {{ validate_table_engine(true, hardFail) }}
 
       {%- set hasBusinessKey = columns | selectattr("isBusinessKey") | list | length > 0 | default(false) -%}
       {%- if not hasBusinessKey %}
@@ -597,14 +814,14 @@ macroString: |-
               {%- set missingSystemColumns.items = missingSystemColumns.items + [{
                   'required': true,
                   'annotation': '@isSystemUpdateDate',
-                  'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate',
+                  'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate' ~ (' @notNull' if nsNodeVariables.desiredEngineReplacing else ''),
                   'reason': 'Required because this is an SCD Type 2 dimension: SYSTEM_UPDATE_DATE is carried through from the current target row into CHANGE_DETECTION/MERGE_ROWS so it can be stamped with CURRENT_TIMESTAMP whenever a new or changed version is inserted, marking when that version became active.'
               }] -%}
           {%- else -%}
               {%- set missingSystemColumns.items = missingSystemColumns.items + [{
                   'required': true,
                   'annotation': '@isSystemUpdateDate',
-                  'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate',
+                  'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate' ~ (' @notNull' if nsNodeVariables.desiredEngineReplacing else ''),
                   'reason': 'Required for SCD Type 1: without it there\'s no way to tell when a row\'s attributes were last changed — SYSTEM_CREATE_DATE is set once and never touched again.'
               }] -%}
           {%- endif -%}
@@ -715,6 +932,8 @@ macroString: |-
       {# Every Fact column must carry its own @id annotation. #}
       {{ validate_column_ids(hardFail) }}
 
+      {{ validate_table_engine(false, hardFail) }}
+
       {# No @isBusinessKey column is valid for a Fact — it's loaded as a plain insert, so the mergeStrategy/tracking/system-column checks below don't apply. #}
       {%- set hasBusinessKey = columns | selectattr("isBusinessKey") | list | length > 0 | default(false) -%}
 
@@ -813,7 +1032,7 @@ macroString: |-
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': true,
               'annotation': '@isSystemUpdateDate',
-              'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate',
+              'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate' ~ (' @notNull' if nsNodeVariables.desiredEngineReplacing else ''),
               'reason': 'Required for SCD Type 1: without it there\'s no way to tell when a row\'s attributes were last changed — SYSTEM_CREATE_DATE is set once and never touched again.'
           }] -%}
       {%- endif -%}
@@ -881,6 +1100,7 @@ macroString: |-
           {%- if not loop.last -%}, {%- endif %}
       {%- endfor %}
       {{ state.sources[0].join }}
+      {{- view_final_setting(state) }}
   {%- endmacro -%}
 
   {#===========================================================================
@@ -991,6 +1211,125 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
+    ch_table_engine(cols, cfg, isDimension, ns): the ENGINE of a Dimension or Fact table for one
+    state (desired: columns / config; current: currentState's). Sets on ns:
+      engine         the ENGINE clause without "ENGINE =", '' when none is written (ClickHouse Cloud
+                     then creates SharedMergeTree)
+      replacing      the engine is a ReplacingMergeTree (Cloud: SharedReplacingMergeTree)
+      versionColumn  the version column: the @isSystemUpdateDate column added as the version argument,
+                     or the column named by the first argument of an engine written with its own; ''
+                     otherwise
+      replaceKey     a ReplacingMergeTree's ORDER BY, always built here: the business key, plus
+                     SYSTEM_VERSION on a Dimension that has it (one row per version; optional on SCD
+                     Type 1, where it is always 1), plus the surrogate key with
+                     @zeroKey (keeps the zero record apart from a real row with the same business key
+                     value). Every copy of a row the load replaces has the same values in these columns.
+    The engine is taken from, in order:
+      1. the node's @engine
+      2. packageParameter.engine, set once for every Dimension and Fact — except a ReplacingMergeTree
+         for a table whose load does not replace rows (no business key, or allColumnMatch), which
+         falls through to 3: a ReplacingMergeTree would collapse its identical rows
+      3. the built-in default: no ENGINE is written, so the table is a MergeTree (ClickHouse Cloud:
+         SharedMergeTree), as when ClickHouse is given no ENGINE
+    A bare ReplacingMergeTree gets the @isSystemUpdateDate column as its version argument; an engine
+    written with its own arguments is used as written.
+  ===========================================================================#}
+  {%- macro ch_table_engine(cols, cfg, isDimension, ns) -%}
+      {%- set nsEngine = namespace(items=[]) -%}
+      {%- set nsStrategy = namespace(items=[]) -%}
+      {{- collect_key_terms(cfg.engine, nsEngine) -}}
+      {{- collect_key_terms(cfg.mergeStrategy, nsStrategy) -}}
+      {%- set strategy = (nsStrategy.items[0] if nsStrategy.items else 'changeTracking') | lower -%}
+
+      {%- set bizKeys = cols | selectattr('isBusinessKey') | map(attribute='name') | list -%}
+      {%- set versionCols = cols | selectattr('isSystemVersion') | map(attribute='name') | list if isDimension else [] -%}
+      {%- set surrogateCols = cols | selectattr('isSurrogateKey') | map(attribute='name') | list
+                              if (isDimension and cfg.zeroKey is defined) else [] -%}
+      {%- set nsKey = namespace(items=[]) -%}
+      {%- for name in bizKeys + versionCols + surrogateCols -%}
+          {%- set nsKey.items = nsKey.items + ['`' ~ name ~ '`'] -%}
+      {%- endfor -%}
+      {%- set ns.replaceKey = nsKey.items -%}
+
+      {%- set replacesRows = bizKeys | length > 0 and strategy != 'allcolumnmatch' -%}
+      {%- set packageEngine = (packageParameter.engine | default('', true) | string | trim) if packageParameter is defined else '' -%}
+      {%- if nsEngine.items -%}
+          {%- set engine = nsEngine.items[0] -%}
+      {%- elif packageEngine and (replacesRows or 'replacingmergetree' not in (packageEngine | lower)) -%}
+          {%- set engine = packageEngine -%}
+      {%- else -%}
+          {%- set engine = '' -%}
+      {%- endif -%}
+      {%- set ns.replacing = 'replacingmergetree' in (engine.split('(')[0] | trim | lower) -%}
+      {%- set updateDateCols = cols | selectattr('isSystemUpdateDate') | map(attribute='name') | list -%}
+      {%- set ns.versionColumn = '' -%}
+      {%- set ns.engine = engine -%}
+      {%- if ns.replacing and '(' not in engine and updateDateCols -%}
+          {%- set ns.versionColumn = updateDateCols[0] -%}
+          {%- set ns.engine = engine ~ '(`' ~ ns.versionColumn ~ '`)' -%}
+      {%- elif ns.replacing and '(' in engine -%}
+          {#- Written with its own arguments: the first one names the version column #}
+          {%- set firstArg = engine.split('(', 1)[1].split(',')[0].split(')')[0] | replace('`', '') | replace('"', '') | trim -%}
+          {%- if firstArg in (cols | map(attribute='name') | list) -%}
+              {%- set ns.versionColumn = firstArg -%}
+          {%- endif -%}
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    set_table_engine(isDimension): fills the engine fields of nsNodeVariables (see
+    ch_table_engine()) for a Dimension (true) or Fact (false) table; a view has no engine.
+    A ReplacingMergeTree keeps one row per ORDER BY key, so its ORDER BY is always the replace
+    key: a manual @orderBy / @primaryKey is recorded in desiredManualSortKey (validate_table_engine()
+    stops the deploy and the run) and not used. Call first in the Dimension / Fact create and run
+    templates; Work nodes never call it.
+  ===========================================================================#}
+  {%- macro set_table_engine(isDimension) -%}
+      {%- if columns is defined and columns and nsNodeVariables.desiredMatType == 'table' -%}
+          {%- set nsDes = namespace(engine='', replacing=false, versionColumn='', replaceKey=[]) -%}
+          {{- ch_table_engine(columns, config, isDimension, nsDes) -}}
+          {%- set nsNodeVariables.desiredEngine = nsDes.engine -%}
+          {%- set nsNodeVariables.desiredEngineReplacing = nsDes.replacing -%}
+          {%- set nsNodeVariables.desiredVersionColumn = nsDes.versionColumn -%}
+          {%- set nsNodeVariables.desiredReplaceKey = nsDes.replaceKey -%}
+          {%- if nsDes.replacing -%}
+              {%- set nsManualOrder = namespace(items=[]) -%}
+              {%- set nsManualKey = namespace(items=[]) -%}
+              {{- collect_key_terms(config.orderBy, nsManualOrder) -}}
+              {{- collect_key_terms(config.primaryKey, nsManualKey) -}}
+              {%- set nsNodeVariables.desiredManualSortKey = (['@orderBy'] if nsManualOrder.items else [])
+                                                            + (['@primaryKey'] if nsManualKey.items else []) -%}
+              {%- set nsNodeVariables.desiredOrderBy = nsDes.replaceKey -%}
+              {%- set nsNodeVariables.desiredPrimaryKey = [] -%}
+          {%- endif -%}
+      {%- endif -%}
+      {%- if currentState is defined and currentState and nsNodeVariables.currentMatType == 'table' -%}
+          {%- set nsCur = namespace(engine='', replacing=false, versionColumn='', replaceKey=[]) -%}
+          {{- ch_table_engine(currentState.columns, currentState.config, isDimension, nsCur) -}}
+          {%- set nsNodeVariables.currentEngine = nsCur.engine -%}
+          {%- set nsNodeVariables.currentEngineReplacing = nsCur.replacing -%}
+          {%- if nsCur.replacing -%}
+              {%- set nsNodeVariables.currentOrderBy = nsCur.replaceKey -%}
+              {%- set nsNodeVariables.currentPrimaryKey = [] -%}
+          {%- endif -%}
+      {%- endif -%}
+      {%- if currentState is defined and currentState and desiredState is defined and desiredState -%}
+          {%- set nsNodeVariables.orderByChanged =
+                (nsNodeVariables.currentOrderBy | join(',') | replace(' ', '') | replace('`', '') | lower)
+                != (nsNodeVariables.desiredOrderBy | join(',') | replace(' ', '') | replace('`', '') | lower) -%}
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    ch_table_comment(description): the table COMMENT — the node description only, exactly as it is
+    in Coalesce (nothing added for the engine), so the deployed comment always matches the node and
+    a redeploy has no comment change to make.
+  ===========================================================================#}
+  {%- macro ch_table_comment(description) -%}
+      {{- description | default('', true) | trim -}}
+  {%- endmacro -%}
+
+  {#===========================================================================
     SECTION 6: Redeploy (advanced deploy strategy), in the order the stages run
   ===========================================================================#}
 
@@ -1030,6 +1369,9 @@ macroString: |-
       - Coalesce infers SQL node columns as nullable and may wrap the type in Nullable(...);
         a wrapped type counts as nullable unless the column is NOT NULL (@notNull).
       - A surrogate key (@isSurrogateKey) is never Nullable: every row gets a key.
+      - A ReplacingMergeTree's version argument (@isSystemUpdateDate) follows the same rule as any
+        column: Nullable unless @notNull. ClickHouse rejects a Nullable version argument, so
+        validate_update_date_not_null() warns first and ClickHouse's error stops the CREATE / ALTER.
       - Types ClickHouse cannot put inside Nullable stay as they are: Array, Map, Tuple,
         Nested, JSON / Object, Dynamic, Variant, (Simple)AggregateFunction and the geo types
         (Point, Ring, LineString, MultiLineString, Polygon, MultiPolygon, Geometry).
@@ -1263,11 +1605,12 @@ macroString: |-
 
   {#===========================================================================
     alter_description_sql(): "Edit Table Description" — MODIFY COMMENT on the clone when the
-    node description changed (missing = empty). Tables only: a view is recreated instead.
+    table comment changed (ch_table_comment(): the node description, missing = empty).
+    Tables only: a view is recreated instead.
   ===========================================================================#}
   {%- macro alter_description_sql() -%}
-      {%- set desiredDescription = node.description if node.description | trim | length > 0 else '' -%}
-      {%- set currentDescription = currentState.node.description if currentState.node.description | trim | length > 0 else '' -%}
+      {%- set desiredDescription = ch_table_comment(node.description) -%}
+      {%- set currentDescription = ch_table_comment(currentState.node.description) -%}
       {%- if currentDescription != desiredDescription %}
           {{ stage('Edit Table Description') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
@@ -1293,9 +1636,12 @@ macroString: |-
   {#===========================================================================
     set_rebuild_reason(): sets nsNodeVariables.rebuildReason when a table redeploy cannot be done
     with ALTER, '' otherwise. Verified against ClickHouse Cloud 26.6:
+      - ENGINE (Dimension / Fact @engine): no ALTER exists              -> recreate
       - PARTITION BY: no ALTER exists                                   -> recreate
       - PRIMARY KEY: no ALTER exists. Without @primaryKey the primary
         key is the whole ORDER BY, so any ORDER BY change changes it    -> recreate
+        (a ReplacingMergeTree's ORDER BY is built from @isBusinessKey,
+        SYSTEM_VERSION and @zeroKey, so changing those recreates it)
       - ORDER BY (primary key unchanged): MODIFY ORDER BY only accepts
         removing trailing terms and adding terms that use only columns
         added in the same ALTER without a DEFAULT; anything else        -> recreate
@@ -1312,6 +1658,12 @@ macroString: |-
       {%- set ns = namespace(reasons=[]) -%}
       {%- set norm = namespace(cur=[], des=[]) -%}
 
+      {#- ENGINE: no ENGINE written is a MergeTree, so '' and MergeTree are the same engine #}
+      {%- if (nsNodeVariables.currentEngine | default('MergeTree', true) | replace(' ', '') | replace('`', '') | lower)
+             != (nsNodeVariables.desiredEngine | default('MergeTree', true) | replace(' ', '') | replace('`', '') | lower) -%}
+          {%- set ns.reasons = ns.reasons + ['ENGINE changed'] -%}
+      {%- endif -%}
+
       {#- PARTITION BY #}
       {%- if (nsNodeVariables.currentPartitionBy | join(',') | replace(' ', '') | replace('`', '') | lower)
              != (nsNodeVariables.desiredPartitionBy | join(',') | replace(' ', '') | replace('`', '') | lower) -%}
@@ -1324,7 +1676,10 @@ macroString: |-
       {%- set keyChanged = (curKey | join(',') | replace(' ', '') | replace('`', '') | lower)
                            != (desKey | join(',') | replace(' ', '') | replace('`', '') | lower) -%}
       {%- if keyChanged -%}
-          {%- if not nsNodeVariables.currentPrimaryKey and not nsNodeVariables.desiredPrimaryKey -%}
+          {%- if nsNodeVariables.desiredEngineReplacing and nsNodeVariables.currentEngineReplacing -%}
+              {#- Built by set_table_engine(), never by @orderBy: name what the user changed #}
+              {%- set ns.reasons = ns.reasons + ['ReplacingMergeTree key changed: @isBusinessKey, SYSTEM_VERSION or @zeroKey'] -%}
+          {%- elif not nsNodeVariables.currentPrimaryKey and not nsNodeVariables.desiredPrimaryKey -%}
               {%- set ns.reasons = ns.reasons + ['ORDER BY changed without @primaryKey'] -%}
           {%- else -%}
               {%- set ns.reasons = ns.reasons + ['PRIMARY KEY changed'] -%}
@@ -1436,25 +1791,28 @@ macroString: |-
           {%- if runOrder == "After" -%}
               {%- for col in columns -%}
                   {%- set colName = '`' + col.name + '`' -%}
+                  {#- A ReplacingMergeTree can still hold replaced copies until a background merge: the tests
+                      end with SETTINGS final = 1 when readWithFinal is true (target_final_setting()) #}
                   {%- set target = ref(node.location.name, node.name) -%}
+                  {%- set targetSettings = target_final_setting() -%}
                   {%- if col.not_null is defined -%}
                       {{ test_stage(col.name + ': not_null', columnContinueOnFailure) }}
                       SELECT {{ colName }}
                       FROM {{ target }}
-                      WHERE {{ colName }} IS NULL
+                      WHERE {{ colName }} IS NULL{{ targetSettings }}
                   {%- endif -%}
                   {%- if col.uniqueness is defined -%}
                       {{ test_stage(col.name + ': uniqueness', columnContinueOnFailure) }}
                       SELECT {{ colName }}
                       FROM {{ target }}
                       GROUP BY {{ colName }}
-                      HAVING COUNT(*) > 1
+                      HAVING COUNT(*) > 1{{ targetSettings }}
                   {%- endif -%}
                   {%- if col.empty is defined -%}
                       {{ test_stage(col.name + ': empty', columnContinueOnFailure) }}
                       SELECT {{ colName }}
                       FROM {{ target }}
-                      WHERE {{ colName }} IS NOT NULL AND TRIM({{ colName }}) = ''
+                      WHERE {{ colName }} IS NOT NULL AND TRIM({{ colName }}) = ''{{ targetSettings }}
                   {%- endif -%}
                   {%- set nsAccepted = namespace(values=[]) -%}
                     {%- for v in col.accepted_values | default([]) -%}
@@ -1469,7 +1827,7 @@ macroString: |-
                         SELECT {{ colName }}
                         FROM {{ target }}
                         WHERE {{ colName }} IS NOT NULL
-                        AND {{ colName }} NOT IN ({{ nsAccepted.values | join(', ') }})
+                        AND {{ colName }} NOT IN ({{ nsAccepted.values | join(', ') }}){{ targetSettings }}
                     {%- endif -%}
                     {%- set nsRejected = namespace(values=[]) -%}
                     {%- for v in col.rejected_values | default([]) -%}
@@ -1483,26 +1841,26 @@ macroString: |-
                         {{ test_stage(col.name + ': rejected_values', columnContinueOnFailure) }}
                         SELECT {{ colName }}
                         FROM {{ target }}
-                        WHERE {{ colName }} IN ({{ nsRejected.values | join(', ') }})
+                        WHERE {{ colName }} IN ({{ nsRejected.values | join(', ') }}){{ targetSettings }}
                     {%- endif -%}
                   {%- if col.min_max is defined and col.min_max.parameters is defined -%}
                       {{ test_stage(col.name + ': min_max', columnContinueOnFailure) }}
                       SELECT {{ colName }}
                       FROM {{ target }}
                       WHERE {{ colName }} IS NOT NULL
-                      AND ({{ colName }} < {{ col.min_max.parameters[0] }} OR {{ colName }} > {{ col.min_max.parameters[1] }})
+                      AND ({{ colName }} < {{ col.min_max.parameters[0] }} OR {{ colName }} > {{ col.min_max.parameters[1] }}){{ targetSettings }}
                   {%- endif -%}
                   {%- if col.min_value is defined and col.min_value.parameters is defined -%}
                       {{ test_stage(col.name + ': min_value', columnContinueOnFailure) }}
                       SELECT {{ colName }}
                       FROM {{ target }}
-                      WHERE {{ colName }} IS NOT NULL AND {{ colName }} < {{ col.min_value.parameters[0] }}
+                      WHERE {{ colName }} IS NOT NULL AND {{ colName }} < {{ col.min_value.parameters[0] }}{{ targetSettings }}
                   {%- endif -%}
                   {%- if col.max_value is defined and col.max_value.parameters is defined -%}
                       {{ test_stage(col.name + ': max_value', columnContinueOnFailure) }}
                       SELECT {{ colName }}
                       FROM {{ target }}
-                      WHERE {{ colName }} IS NOT NULL AND {{ colName }} > {{ col.max_value.parameters[0] }}
+                      WHERE {{ colName }} IS NOT NULL AND {{ colName }} > {{ col.max_value.parameters[0] }}{{ targetSettings }}
                   {%- endif -%}
                   {%- if col.freshness is defined and col.freshness.parameters is defined -%}
                       {{ test_stage(col.name + ': freshness', columnContinueOnFailure) }}
@@ -1510,7 +1868,7 @@ macroString: |-
                       FROM {{ target }}
                       HAVING count() = 0
                           OR max(toDateTime64({{ colName }}, 3)) IS NULL
-                          OR max(toDateTime64({{ colName }}, 3)) < now64(3) - INTERVAL {{ col.freshness.parameters[0] }} {{ col.freshness.parameters[1] | default('DAY', true) }}
+                          OR max(toDateTime64({{ colName }}, 3)) < now64(3) - INTERVAL {{ col.freshness.parameters[0] }} {{ col.freshness.parameters[1] | default('DAY', true) }}{{ targetSettings }}
                   {%- endif -%}
                   {%- if col.relative_time is defined and col.relative_time.parameters is defined -%}
                       {%- set other = '`' + col.relative_time.parameters[1] + '`' -%}
@@ -1518,7 +1876,7 @@ macroString: |-
                       SELECT {{ colName }}, {{ other }}
                       FROM {{ target }}
                       WHERE {{ colName }} IS NOT NULL AND {{ other }} IS NOT NULL
-                      AND NOT ({{ colName }} {{ col.relative_time.parameters[0] }} {{ other }})
+                      AND NOT ({{ colName }} {{ col.relative_time.parameters[0] }} {{ other }}){{ targetSettings }}
                   {%- endif -%}
               {%- endfor -%}
           {%- endif -%}
@@ -1532,6 +1890,7 @@ macroString: |-
                           ('Pre Load Test ' if runOrder == 'Before' else 'Post Load Test ') ~ ns.cnt,
                           test.parameters[1] | default(true)
                       ) }}
+                      {{- final_warning_lines(test.parameters[0]) }}
                       {{ test.parameters[0] }}
                   {%- endif -%}
               {%- endif -%}
@@ -1551,6 +1910,7 @@ macroString: |-
           {%- if sql is mapping and sql.parameters is defined %}
               {%- set ns.cnt = ns.cnt + 1 %}
               {{ stage(runOrder ~ '-SQL ' ~ ns.cnt) }}
+              {{- final_warning_lines(sql.parameters[0]) }}
               {{ sql.parameters[0] }}
           {%- endif %}
       {%- endfor %}

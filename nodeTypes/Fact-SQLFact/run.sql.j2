@@ -8,13 +8,19 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 {# == Node Type Description    : This node loads data into fact table using options distinct and multi-source cte if specified == #}
 
 {#
-    ClickHouse has no MERGE, so each load is INSERT + DELETE (same as the Dimension):
-    - INSERT the row set the MERGE would have applied. An "update" re-inserts the same business key with a newer
-      SYSTEM_UPDATE_DATE.
-    - DELETE the replaced copies: per business key only the row with the latest SYSTEM_UPDATE_DATE is kept,
-      so a plain SELECT is correct right after the run (the table is plain MergeTree).
-    - @allColumnMatch only inserts rows that don't exist yet, so nothing is deleted.
+    ClickHouse has no MERGE, so each load only INSERTs the row set the MERGE would have applied (same as the
+    Dimension). An "update" re-inserts the same business key with a newer SYSTEM_UPDATE_DATE.
+    - ReplacingMergeTree (@engine or the package engine parameter): per ORDER BY key (the business key)
+      the row with the latest SYSTEM_UPDATE_DATE replaces the others at a background merge. Nothing is deleted;
+      until the merge a plain SELECT can see the replaced copies, so the load and the column tests read with
+      FINAL through SETTINGS final = 1 when readWithFinal is true.
+    - MergeTree (the default) or any other engine: a DELETE removes the replaced copies after the insert.
+    - A plain insert or @allColumnMatch replaces nothing; the package engine parameter does not make it a
+      ReplacingMergeTree.
 #}
+
+{# == Table engine from @engine — see set_table_engine() == #}
+{{- set_table_engine(false) }}
 
 {# == Validate: the materialization type must be table or view == #}
 {{ validate_materialization_type() }}
@@ -62,6 +68,11 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- set targetPath = ref_no_link(node.location.name, node.name) %}
     {%- set loadTimestamp = '(SELECT now64(6))' %}
 
+    {# The load's reads of the target, without the FINAL keyword: on a ReplacingMergeTree the statement's
+       SETTINGS final = 1 (readWithFinal = true) covers them too; with the parameter false, FINAL is
+       expected from the ClickHouse user / session settings #}
+    {%- set targetRead = targetPath %}
+
     {# Business keys (and the target's SYSTEM_UPDATE_DATE) for the clean-up: only keys that now have more than one row in the target can have replaced copies.
        The clean-up reads only the target, never the source: a DELETE cannot use the node's own CTEs (ClickHouse resolves a CTE name inside a DELETE as a table). #}
     {%- set businessKeyCols = columns | selectattr("isBusinessKey") | list %}
@@ -93,6 +104,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {{ source.join }}
                 ) `T`
                 WHERE `T`.`CHECK_COL` IS NULL
+                {{- source_final_setting(sources) }}
             {%- endif %}
         {%- endfor %}
     {%- endif %}
@@ -134,6 +146,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             {%- if not loop.last %}, {%- endif %}
         {%- endfor %}
         {{ joinclause }}
+        {{- source_final_setting(sources) }}
 
     {%- else %}
 
@@ -179,7 +192,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 {%- for col in matchCols %},
                     `{{ col.name }}` AS `TGT_{{ col.name }}`
                 {%- endfor %}
-                FROM {{ targetPath }}
+                FROM {{ targetRead }}
             )
 
             SELECT
@@ -219,7 +232,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {%- endif %}
                     {%- if not loop.last %}, {%- endif %}
                 {%- endfor %}
-                FROM {{ targetPath }}
+                FROM {{ targetRead }}
             ),
 
             `CHANGE_DETECTION` AS (
@@ -276,12 +289,15 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             FROM `CHANGE_DETECTION`
             WHERE `CHANGE_TYPE` IN ('NEW', 'CHANGED')
             {%- endif %}
+            {#- An upstream ReplacingMergeTree is read with FINAL (readWithFinal parameter) #}
+            {{- source_final_setting(sources) }}
     {# NEW / not-existing rows are found with TGT_ROW_EXISTS (0 or NULL when unmatched), not by a target column being
        NULL, so the load needs no join_use_nulls: the node's own SELECT and JOINs run with the user's settings, as in Preview #}
 
-    {# == Update: delete the copies the INSERT replaced — per business key only the row with the latest SYSTEM_UPDATE_DATE is kept.
+    {# == Update (not on a ReplacingMergeTree, which replaces the copies itself): delete the copies the INSERT replaced —
+          per business key only the row with the latest SYSTEM_UPDATE_DATE is kept.
           Only keys with more than one row can have replaced copies, so the DELETE and its subquery read just those keys == #}
-    {%- if hasBusinessKey and not isAllColumnMatch and updateDateCols | length > 0 %}
+    {%- if hasBusinessKey and not isAllColumnMatch and updateDateCols | length > 0 and not nsNodeVariables.desiredEngineReplacing %}
         {{ stage('Clean Up Previous Data') }}
         DELETE FROM {{ targetPath }}
         WHERE {{ touchedKeys }}

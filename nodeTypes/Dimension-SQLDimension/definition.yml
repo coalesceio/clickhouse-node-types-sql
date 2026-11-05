@@ -9,7 +9,15 @@ metadata:
     short: DIM
     plural: Dimensions
     tagColor: '#1E339A'
-    description: 'A column level @id annotation is required for each column - it should be unique to the column and be six hexadecimal digits'
+    description: |-
+      • Every column needs a unique @id("<6 hex digits>"). Required: @isBusinessKey, @isSystemCreateDate, @isSystemUpdateDate (+ @isSystemVersion, @isSystemCurrentFlag, @isSystemEndDate for SCD2).
+      • Column @id overrides the general coa SQL-format rule ("never write @id on a column", coa describe sql-format): this node type matches columns across redeploys by @id, so every column must carry its own — the "Missing Column IDs" check stops the node otherwise.
+        Ex. `n_Nationkey` AS `n_Nationkey` @id("a1b2c3") @isBusinessKey
+      • Engine: the node's @engine, else the package parameter "engine", else MergeTree.
+      • ReplacingMergeTree: ORDER BY is built from the business key (+ SYSTEM_VERSION when present) — do not add @orderBy / @primaryKey. Query it with FINAL. @isSystemVersion is optional for SCD Type 1 and required for SCD Type 2.
+      • ReplacingMergeTree (package engine parameter or @engine("ReplacingMergeTree")): add @notNull to the @isSystemUpdateDate column. Without it the column is Nullable, a "Warning: @isSystemUpdateDate without @notNull" stage is shown, and ClickHouse rejects the table (a Nullable version argument).
+      • Agentic creation: when the user asks for a ReplacingMergeTree, or the package engine parameter is set to ReplacingMergeTree, write the @isSystemUpdateDate column with @notNull (see isSystemUpdateDate).
+        Ex. CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
 
     deployStrategy: advanced
     enableCTESupport: true
@@ -51,7 +59,8 @@ metadata:
             • The table's ORDER BY (sort) key. Each argument is one term — a column or an expression, written as it should appear in the SQL.
               Ex. orderBy("`n_Nationkey`")
               Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)")
-            • Without orderBy (and primaryKey) the table uses ORDER BY tuple(). Ignored on views.
+            • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 only (engine("MergeTree")). ⛔ Not accepted on a ReplacingMergeTree — its ORDER BY is built from the business key + SYSTEM_VERSION when present (+ the surrogate key with zeroKey), and the deploy and the run stop if orderBy is set.
+            • Without orderBy (and primaryKey) a MergeTree table uses ORDER BY tuple(). Ignored on views.
             • ⚠️ On redeploy, removing trailing terms or adding new columns (without a default) is altered in place when primaryKey is set; any other orderBy change (or renaming / retyping a column used in it) recreates the table — existing data is lost.
           isRequired: false
           parameters:
@@ -65,6 +74,7 @@ metadata:
             • The table's PRIMARY KEY. Each argument is one term, as in orderBy.
             • ClickHouse requires the primary key to be the leading terms of ORDER BY, in the same order — the create fails otherwise.
               Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)") primaryKey("`n_Nationkey`", "`n_Name`")
+            • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 only, as orderBy. ⛔ Not accepted on a ReplacingMergeTree.
             • Without orderBy, the primary key is also the sort key: primaryKey("`n_Nationkey`") → ORDER BY (`n_Nationkey`).
             • When it is the same as orderBy, it is not written separately. Ignored on views.
             • ⚠️ Changing primaryKey (or renaming / retyping a column used in it) on redeploy recreates the table — existing data is lost.
@@ -89,6 +99,44 @@ metadata:
               type: string
               isRequired: true
               example: index_granularity = 8192
+
+        - name: engine
+          description: |-
+            • The table's ENGINE. Must be a MergeTree-family engine.
+            • If not specified, the package's engine parameter is used; if that is empty too, defaults to 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 (no ENGINE is written, as in ClickHouse). Set the package parameter to ReplacingMergeTree to make it the default for every Dimension and Fact.
+            • 𝗥𝗲𝗽𝗹𝗮𝗰𝗶𝗻𝗴𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 — the load only inserts. A changed row is re-inserted with a newer SYSTEM_UPDATE_DATE, and ClickHouse keeps the latest row per ORDER BY key at a background merge (nothing is deleted).
+              • The @isSystemUpdateDate column is the version argument: ReplacingMergeTree → ReplacingMergeTree(`SYSTEM_UPDATE_DATE`). Required, and must be marked @notNull.
+              • Like every column it is Nullable without @notNull, and ClickHouse rejects a Nullable version argument: a "Warning: @isSystemUpdateDate without @notNull" stage is shown, the flow continues, and the create (or the redeploy's ALTER) fails with ClickHouse's error.
+                Ex. CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
+              • ORDER BY is always built from the business key + SYSTEM_VERSION when the node has it (+ the surrogate key with zeroKey) — orderBy / primaryKey are not accepted (a manual key could collapse different rows or keep replaced copies). SYSTEM_VERSION is optional for SCD Type 1 and required for SCD Type 2.
+              • Until a merge, a plain SELECT can return the replaced copies as well — query with FINAL (SELECT ... FROM <table> FINAL, or SETTINGS final = 1). With the readWithFinal runtime parameter true, the load and the column tests end with SETTINGS final = 1; with it false they read the table as stored, so set final = 1 on the ClickHouse user. A "Note: Query with FINAL" deploy stage reminds whoever deploys.
+            • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 — the load inserts and then DELETEs the replaced copies (Clean Up Previous Data). orderBy / primaryKey can be set.
+            • An engine written with its own arguments is used as written, e.g. engine("ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)").
+            • Ignored on views.
+            • ⚠️ Changing engine on redeploy recreates the table — existing data is lost.
+          isRequired: false
+          parameters:
+            - name: engine
+              type: string
+              isRequired: true
+              default: ReplacingMergeTree
+              example: MergeTree
+              options:
+                - ReplacingMergeTree
+                - MergeTree
+
+        - name: final
+          description: |-
+            • 𝗩𝗶𝗲𝘄𝘀 𝗼𝗻𝗹𝘆 — the view reads its sources with FINAL (SETTINGS final = 1 at the end of its SELECT), so an upstream ReplacingMergeTree shows one row per key, without the copies its load replaced.
+              Ex. @materializationType("view") @final
+            • A view is fixed when it is deployed. It uses, in order:
+              1. @final → SETTINGS final = 1
+              2. no @final, readWithFinal runtime parameter true → SETTINGS final = 1
+              3. no @final, readWithFinal false or not set → no SETTINGS
+            • When the view's SQL already ends with its own SETTINGS clause, final = 1 is appended to it (SETTINGS max_threads = 4, final = 1). If that clause already sets final, ClickHouse may reject it with its own error.
+            • Adding or removing @final on redeploy recreates the view. Changing readWithFinal later does not change a deployed view.
+            • Ignored on tables — their loads follow readWithFinal.
+          isRequired: false
 
         - name: writeMode
           description: |-
@@ -332,6 +380,7 @@ metadata:
             • Marks this column as the SCD version number, incremented each time a business key gets a new version.
             • Required for SCD Type 2 — shows which version of a row this is. Each time a business key's row changes, the expired row is kept and a new row is inserted with this value incremented by 1.
             • Optional for SCD Type 1 — new-vs-existing is detected off the business key alone, so this column can be dropped entirely; if kept, it is always written as 1 and never incremented.
+            • ReplacingMergeTree: when present it is part of ORDER BY (business key + SYSTEM_VERSION). On SCD Type 1 it changes nothing (always 1); keeping it only keeps ORDER BY the same as an SCD Type 2 node's. Changing a Dimension's SCD type after it holds data is not supported, so it can be left out on SCD Type 1.
             • Value written under changeTracking/lastModified: 1 on a new key; previous version + 1 on a new SCD2 version.
             • The expression in the SELECT is only used to derive the column's datatype — its value is ignored under changeTracking/lastModified.
 
@@ -381,8 +430,15 @@ metadata:
 
             Expected expression:
             CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate
+            On a ReplacingMergeTree (package engine parameter or @engine("ReplacingMergeTree")) add @notNull — it is the engine's version argument, ReplacingMergeTree(`SYSTEM_UPDATE_DATE`):
+            CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
 
-            Agentic creation only — manual creation adds this column automatically.
+            Agentic creation only — manual creation adds this column automatically, with @notNull when the engine is a ReplacingMergeTree.
+            When writing it, add @notNull if either:
+              • the user asks for a ReplacingMergeTree, or
+              • the package engine parameter is set to ReplacingMergeTree.
+            Otherwise leave it out.
+            Ex. CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
           isRequired: false
 
         - name: isSystemEndDate
@@ -557,6 +613,16 @@ metadata:
           {%- endmacro -%}
           {%- set ns = namespace(items=[], lines=[]) -%}
           {%- set idAnnotation = '@id("<ID>") ' -%}
+          {#- @isSystemUpdateDate is a ReplacingMergeTree's version argument and must be @notNull.
+              Engine: the node's @engine, else the package engine parameter (as ch_table_engine()). #}
+          {%- set nsInitEngine = namespace(value='') -%}
+          {%- if config is defined and config and config.engine is defined and config.engine -%}
+              {%- set engineArgs = config.engine.parameters if (config.engine is mapping and config.engine.parameters is defined) else [config.engine] -%}
+              {%- set nsInitEngine.value = (engineArgs[0] if engineArgs else '') | string | trim -%}
+          {%- elif packageParameter is defined and packageParameter.engine is defined and packageParameter.engine -%}
+              {%- set nsInitEngine.value = packageParameter.engine | string | trim -%}
+          {%- endif -%}
+          {%- set updateDateNotNull = ' @notNull' if 'replacingmergetree' in (nsInitEngine.value | lower) else '' -%}
           {%- set ns.items = ns.items + [{'expr': 'generateUUIDv4()', 'alias': '"' ~ node.name ~ '_KEY"', 'annotation': idAnnotation ~ '@isSurrogateKey @notNull @defaultValue("generateUUIDv4()")'}] -%}
           {%- for dep in sources[0].dependencies -%}
             {%- for col in dep.columns -%}
@@ -566,7 +632,7 @@ metadata:
           {%- set ns.items = ns.items + [{'expr': '1', 'alias': '"SYSTEM_VERSION"', 'annotation': idAnnotation ~ '@isSystemVersion'}] -%}
           {%- set ns.items = ns.items + [{'expr': "'Y'", 'alias': '"SYSTEM_CURRENT_FLAG"', 'annotation': idAnnotation ~ '@isSystemCurrentFlag'}] -%}
           {%- set ns.items = ns.items + [{'expr': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP)', 'alias': '"SYSTEM_CREATE_DATE"', 'annotation': idAnnotation ~ '@isSystemCreateDate'}] -%}
-          {%- set ns.items = ns.items + [{'expr': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP)', 'alias': '"SYSTEM_UPDATE_DATE"', 'annotation': idAnnotation ~ '@isSystemUpdateDate'}] -%}
+          {%- set ns.items = ns.items + [{'expr': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP)', 'alias': '"SYSTEM_UPDATE_DATE"', 'annotation': idAnnotation ~ '@isSystemUpdateDate' ~ updateDateNotNull}] -%}
           {%- set ns.items = ns.items + [{'expr': "CAST('2299-12-31 23:59:59.999999' AS DateTime64(6))", 'alias': '"SYSTEM_END_DATE"', 'annotation': idAnnotation ~ '@isSystemEndDate'}] -%}
           {%- set maxExprLen = ns.items | map(attribute='expr') | map('length') | max -%}
           {%- set maxAliasLen = ns.items | map(attribute='alias') | map('length') | max -%}

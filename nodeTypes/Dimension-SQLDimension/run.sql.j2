@@ -8,12 +8,18 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 {# == Node Type Description    : This node loads data into dimension table using options distinct and multi-source cte if specified == #}
 
 {#
-    ClickHouse has no MERGE, so each load is INSERT + DELETE:
-    - INSERT the row set the MERGE would have applied. An "update" re-inserts the same key with a newer
-      SYSTEM_UPDATE_DATE (SCD2 expiry re-inserts the old version with SYSTEM_CURRENT_FLAG = 'N').
-    - DELETE the replaced copies: per business key (+ SYSTEM_VERSION for SCD2) only the row with the latest
-      SYSTEM_UPDATE_DATE is kept, so a plain SELECT is correct right after the run (the table is plain MergeTree).
+    ClickHouse has no MERGE, so each load only INSERTs the row set the MERGE would have applied. An "update"
+    re-inserts the same key with a newer SYSTEM_UPDATE_DATE (SCD2 expiry re-inserts the old version with
+    SYSTEM_CURRENT_FLAG = 'N').
+    - ReplacingMergeTree (@engine or the package engine parameter): per ORDER BY key (business key + SYSTEM_VERSION + surrogate key)
+      the row with the latest SYSTEM_UPDATE_DATE replaces the others at a background merge. Nothing is deleted;
+      until the merge a plain SELECT can see the replaced copies, so the load and the column tests read with
+      FINAL through SETTINGS final = 1 when readWithFinal is true.
+    - MergeTree (the default) or any other engine: a DELETE removes the replaced copies after the insert.
 #}
+
+{# == Table engine from @engine — see set_table_engine() == #}
+{{- set_table_engine(true) }}
 
 {# == Validate: the materialization type must be table or view == #}
 {{ validate_materialization_type() }}
@@ -73,6 +79,11 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- set targetPath = ref_no_link(node.location.name, node.name) %}
     {%- set loadTimestamp = '(SELECT now64(6))' %}
 
+    {# The load's reads of the target, without the FINAL keyword: on a ReplacingMergeTree the statement's
+       SETTINGS final = 1 (readWithFinal = true) covers them too; with the parameter false, FINAL is
+       expected from the ClickHouse user / session settings #}
+    {%- set targetRead = targetPath %}
+
     {# The zero record is kept out of change detection: its business key (e.g. 0) can equal a real key, which would
        otherwise match it and overwrite it with that row's data #}
     {%- set excludeZeroRecord = config.zeroKey is defined and hasSurrogateKey %}
@@ -99,6 +110,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {{ source.join }}
                 ) `T`
                 WHERE `T`.`CHECK_COL` IS NULL
+                {{- source_final_setting(sources) }}
             {%- endif %}
         {%- endfor %}
     {%- endif %}
@@ -170,13 +182,14 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {%- for col in zeroKeyCreateDateCols %},
                     min(`{{ col.name }}`) AS `{{ col.name }}`
                     {%- endfor %}
-                FROM {{ targetPath }}
+                FROM {{ targetRead }}
                 WHERE
                 {%- for col in columns if col.isSurrogateKey %}
                     {%- if not loop.first %} AND {%- endif %}
                     `{{ col.name }}` = {{ zero_key_surrogate_value(col) }}
                 {%- endfor %}
             ) AS `EXISTING_ZERO`
+            {{- target_final_setting() }}
     {%- endif %}
 
     {%- if lastModifiedComparison %}
@@ -239,7 +252,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {%- endif %}
                     {%- if not loop.last %}, {%- endif %}
                 {%- endfor %}
-                FROM {{ targetPath }}
+                FROM {{ targetRead }}
                 WHERE `{{ sysCurrentFlagCol }}` = 'Y'
                 {%- if excludeZeroRecord %}
                   AND {{ notZeroRecord }}
@@ -440,7 +453,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {%- endif %}
                     {%- if not loop.last %}, {%- endif %}
                 {%- endfor %}
-                FROM {{ targetPath }}
+                FROM {{ targetRead }}
                 {%- if excludeZeroRecord %}
                 WHERE {{ notZeroRecord }}
                 {%- endif %}
@@ -514,10 +527,13 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             FROM `CHANGE_DETECTION`
             WHERE `CHANGE_TYPE` IN ('NEW', 'CHANGED')
         {%- endif %}
+        {#- An upstream ReplacingMergeTree is read with FINAL (readWithFinal parameter) #}
+        {{- source_final_setting(sources) }}
     {# NEW rows are found with TGT_ROW_EXISTS (0 or NULL when unmatched), not by a target column being NULL, so the
        load needs no join_use_nulls: the node's own SELECT and JOINs run with the user's settings, as in Preview #}
 
-    {# == Update: delete the copies the INSERT replaced (and the previous zero key record) — per business key
+    {# == Update (not on a ReplacingMergeTree, which replaces the copies itself): delete the copies the INSERT
+          replaced (and the previous zero key record) — per business key
           (+ SYSTEM_VERSION for SCD2, + the surrogate key, which keeps the zero record apart from a real row with
           the same business key value) only the row with the latest SYSTEM_UPDATE_DATE is kept.
           Only keys with more than one row (this includes the re-inserted zero record) can have replaced copies, so the
@@ -529,7 +545,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                              + (columns | selectattr("isSystemVersion") | map(attribute="name") | list if type2Dimension else [])
                              + surrogateKeyCols %}
     {%- set updateDateCols = columns | selectattr("isSystemUpdateDate") | map(attribute="name") | list %}
-    {%- if businessKeyCols | length > 0 and updateDateCols | length > 0 %}
+    {%- if businessKeyCols | length > 0 and updateDateCols | length > 0 and not nsNodeVariables.desiredEngineReplacing %}
         {%- set replaceKey = '`' ~ (replaceKeyCols | join('`, `')) ~ '`' %}
         {%- set touchedKeys %}
             ({{ replaceKey }}) IN (
