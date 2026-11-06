@@ -314,6 +314,9 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {#== Post-SQL ==#}
     {{ run_pre_post_sql('Post') }}
 
+    {#== @optimize: OPTIMIZE TABLE ... FINAL, the last load stage ==#}
+    {{ optimize_table(targetPath) }}
+
 {%- elif materializationType == 'view' %}
 	{{ stage('Load Skipped for View') }}
 	-- The node {{node.name}} is materialized as View. Therefore, a Load operation is not supported.

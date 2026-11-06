@@ -1,5 +1,6 @@
 @id("ddbef192-9323-41a8-8db6-b5b8f127f893")
 @nodeType("SQLFact")
+@mergeStrategy("lastModified")
 SELECT
     "n_Nationkey"                        AS "n_Nationkey"        @id("dc2cf1") @isBusinessKey,
     "n_Name"                             AS "n_Name"             @id("6040fd"),

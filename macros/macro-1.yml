@@ -362,12 +362,21 @@ macroString: |-
   {#===========================================================================
     validate_materialization_type(allowedTypes): failing "Unsupported Materialization Type"
     check when the normalized type is not table or view. Call first in create and run.
+    Also a non-failing "Warning: @final on a table": @final only changes a view's definition;
+    a table's load follows the readWithFinal runtime parameter.
   ===========================================================================#}
   {%- macro validate_materialization_type(allowedTypes=['table', 'view']) -%}
       {%- if nsNodeVariables.desiredMatType not in allowedTypes %}
           {{ test_stage('Unsupported Materialization Type: ' + node.name, false) }}
           -- '{{ node.materializationType | default('', true) }}' is not supported on {{ node.name }}; use one of: {{ allowedTypes | join(', ') }}
           {{ fail_sql(true, 'Unsupported Materialization Type: ' + node.name) }}
+      {%- endif %}
+      {%- if nsNodeVariables.desiredMatType == 'table' and config is defined and config.final is defined %}
+          {{ test_stage('Warning: @final on a table', true) }}
+          -- @final applies to views only (the view's SELECT ends with SETTINGS final = 1). On the table {{ node.name }} it does nothing.
+          -- The table's load reads ReplacingMergeTree sources and its own target with FINAL when the readWithFinal runtime parameter is true.
+          -- Fix: remove @final, or set @materializationType("view").
+          SELECT 1
       {%- endif %}
   {%- endmacro -%}
 
@@ -606,7 +615,8 @@ macroString: |-
     source or the node's own target) is read as usual.
     When the node's own SQL already ends with a SETTINGS clause, ', final = 1' is appended to that
     clause instead (a second SETTINGS clause is invalid). If the node's own SETTINGS already sets
-    final, ClickHouse decides — it may reject the repeated setting with its own error.
+    final, its value wins: ClickHouse accepts SETTINGS final = 0, final = 1 and reads without FINAL
+    (tested), so SETTINGS final = 0 opts a node out.
     "Ends with" = the last source's join has SETTINGS after its last ')', so a SETTINGS inside a
     subquery is not mistaken for the node's own.
     useFinal overrides readWithFinal when given (see view_final_setting()).
@@ -1914,6 +1924,19 @@ macroString: |-
               {{ sql.parameters[0] }}
           {%- endif %}
       {%- endfor %}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    optimize_table(targetPath): Dimension / Fact tables with @optimize -> an "Optimize Table" stage,
+    OPTIMIZE TABLE ... FINAL, run after Post-SQL so the After tests see the merged table.
+    FINAL merges every partition down to one part; on a ReplacingMergeTree that keeps only the
+    latest row per ORDER BY key within each partition (merges never cross partitions).
+  ===========================================================================#}
+  {%- macro optimize_table(targetPath) -%}
+      {%- if config.optimize is defined %}
+          {{ stage('Optimize Table') }}
+          OPTIMIZE TABLE {{ targetPath }} FINAL
+      {%- endif %}
   {%- endmacro -%}
 
   {#===========================================================================

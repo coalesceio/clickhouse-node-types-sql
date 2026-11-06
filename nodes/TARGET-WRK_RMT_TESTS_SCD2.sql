@@ -1,5 +1,7 @@
 @id("ea421f75-18bf-49ab-a9f0-9ffe0b1d5f46")
 @nodeType("SQLWork")
+@materializationType("view")
+@final
 SELECT
      `DIM_RMT_TESTS_SCD2_KEY` AS `DIM_RMT_TESTS_SCD2_KEY`,
      `n_Nationkey` AS `n_Nationkey`,

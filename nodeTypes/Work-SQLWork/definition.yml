@@ -97,9 +97,9 @@ metadata:
               1. @final → SETTINGS final = 1
               2. no @final, readWithFinal runtime parameter true → SETTINGS final = 1
               3. no @final, readWithFinal false or not set → no SETTINGS
-            • When the view's SQL already ends with its own SETTINGS clause, final = 1 is appended to it (SETTINGS max_threads = 4, final = 1). If that clause already sets final, ClickHouse may reject it with its own error.
+            • When the view's SQL already ends with its own SETTINGS clause, final = 1 is appended to it (SETTINGS max_threads = 4, final = 1). If that clause already sets final, its own value wins (SETTINGS final = 0, final = 1 reads without FINAL).
             • Adding or removing @final on redeploy recreates the view. Changing readWithFinal later does not change a deployed view.
-            • Ignored on tables — their loads follow readWithFinal.
+            • On a table it does nothing: a non-failing "Warning: @final on a table" stage is shown, and the load follows readWithFinal.
           isRequired: false
 
         - name: writeMode

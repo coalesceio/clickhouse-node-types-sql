@@ -1,6 +1,7 @@
 @id("d9df3e96-a206-4e51-ad08-7c3d180bd6a1")
 @nodeType("SQLDimension")
 @mergeStrategy("lastModified")
+@optimize
 SELECT
     generateUUIDv4()                                    AS "DIM_Nation_LM_SCD2_KEY" @id("795242") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
     "n_Nationkey"                                       AS "n_Nationkey"            @id("63f766") @isBusinessKey,

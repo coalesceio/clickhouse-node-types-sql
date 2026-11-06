@@ -27,6 +27,7 @@ A side-by-side view of which annotations each node type supports, so it's easy t
 | `@settings` | ✅ | ✅ | ✅ |
 | `@engine` | ➖ | ✅ | ✅ |
 | `@final` | view only | view only | view only |
+| `@optimize` | ➖ | table only | table only |
 | `@writeMode` | ✅ | ✅ | ✅ |
 | `@mergeStrategy` | ➖ | ✅<br/>* changeTracking<br/>* lastModified | ✅<br/>* changeTracking<br/>* lastModified<br/>* allColumnMatch |
 | `@zeroKey` (node-level) | ➖ | ✅ | ➖ |
@@ -267,6 +268,7 @@ The Dimension Node type has three configuration groups:
 | [`@partitionBy(term, ...)`](#partitionby) | The table's `PARTITION BY` key. |
 | [`@settings(setting, ...)`](#settings) | The table's MergeTree `SETTINGS`. |
 | [`@final`](#final) | Views only: the view reads its sources with `FINAL` (`SETTINGS final = 1`). |
+| [`@optimize`](#optimize) | Tables only: runs `OPTIMIZE TABLE … FINAL` as the last load stage. |
 | [`@engine(engine)`](#engine) | The table's `ENGINE`.<br/>*Not specified in the SQL editor → the package's `engine` parameter, else **MergeTree** (no `ENGINE` written).* |
 | [`@writeMode("truncateInsert \| append")`](#writemode) | How each run writes to the target: truncateInsert or append<br/>*Not specified in the SQL editor → defaults to **append**.* |
 | [`@mergeStrategy("changeTracking \| lastModified")`](#mergestrategy-dimension) | Chooses how this dimension decides a row has changed, and therefore which column annotations it requires. |
@@ -578,6 +580,7 @@ Every run of a Dimension Node of materialization type table runs its configured 
 | **Load table - Change Tracking - SCD1 \| SCD2** | Executed for `@mergeStrategy("changeTracking")` (the default) — compares `@isChangeTracking` columns (or, absent any, every plain attribute column) against the current target row, then inserts new keys and the changed rows. Under SCD2, a change only in a plain attribute column re-inserts the current version with the new values. |
 | **Clean Up Previous Data** | Deletes the copies the insert replaced — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). Runs only when the table is not a ReplacingMergeTree (e.g. the default MergeTree) and the node has `@isBusinessKey` and `@isSystemUpdateDate` columns. |
 | **Post-SQL `<n>`** | Each `@postSQL` statement, in the order they appear. |
+| **Optimize Table** | Executed only when [`@optimize`](#optimize) is set — `OPTIMIZE TABLE … FINAL` merges the table's parts after the load. |
 | **`<column>: <test>` \| Post Load Test `<n>`** | Column-level data quality tests and node-level `@tests(..., "After")` tests, run after the load. |
 
 > **Note:** ClickHouse has no `MERGE` statement; the load stages only insert the new and changed rows, and **Clean Up Previous Data** (MergeTree) or the ReplacingMergeTree removes the older copies — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact).
@@ -654,6 +657,7 @@ The Fact Node type has three configuration groups:
 | [`@partitionBy(term, ...)`](#partitionby) | The table's `PARTITION BY` key. |
 | [`@settings(setting, ...)`](#settings) | The table's MergeTree `SETTINGS`. |
 | [`@final`](#final) | Views only: the view reads its sources with `FINAL` (`SETTINGS final = 1`). |
+| [`@optimize`](#optimize) | Tables only: runs `OPTIMIZE TABLE … FINAL` as the last load stage. |
 | [`@engine(engine)`](#engine) | The table's `ENGINE`.<br/>*Not specified in the SQL editor → the package's `engine` parameter, else **MergeTree** (no `ENGINE` written).* |
 | [`@writeMode("truncateInsert \| append")`](#writemode) | How each run writes to the target: truncateInsert or append<br/>*Not specified in the SQL editor → defaults to **append**.* |
 | [`@mergeStrategy("changeTracking \| lastModified \| allColumnMatch")`](#mergestrategy-fact) | Chooses how rows are matched against the target, and therefore which column annotations are required. |
@@ -803,6 +807,7 @@ Every run of a Fact Node of materialization type table runs its configured data 
 | **Load table - All Column Match** | Executed for `@mergeStrategy("allColumnMatch")` — matches on every non-system column and inserts only rows that don't already exist; nothing is updated or deleted. |
 | **Clean Up Previous Data** | Deletes the copies the insert replaced — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). Runs for `changeTracking` / `lastModified` only when the table is not a ReplacingMergeTree (e.g. the default MergeTree) and the node has an `@isSystemUpdateDate` column. |
 | **Post-SQL `<n>`** | Each `@postSQL` statement, in the order they appear. |
+| **Optimize Table** | Executed only when [`@optimize`](#optimize) is set — `OPTIMIZE TABLE … FINAL` merges the table's parts after the load. |
 | **`<column>: <test>` \| Post Load Test `<n>`** | Column-level data quality tests and node-level `@tests(..., "After")` tests, run after the load. |
 
 #### Fact Redeployment
@@ -898,7 +903,7 @@ Example (Environment → Parameters):
 | not set | Same as `false` |
 
 * Loads read the value on every run. A view without [`@final`](#final) takes it once, when it is created.
-* When the node's SQL already ends with its own `SETTINGS` clause, `final = 1` is appended to it — e.g. `SETTINGS max_threads = 4, final = 1`. If that clause already sets `final`, ClickHouse may reject the repeated setting with its own error.
+* When the node's SQL already ends with its own `SETTINGS` clause, `final = 1` is appended to it — e.g. `SETTINGS max_threads = 4, final = 1`. If that clause already sets `final`, the node's own value wins: `SETTINGS final = 0, final = 1` reads without `FINAL` (tested), so `SETTINGS final = 0` opts a node out.
 * The **Note: Query with FINAL** deploy stage says which value is in effect (runtime parameter, or not set).
 * See [Reading an Upstream ReplacingMergeTree](#reading-an-upstream-replacingmergetree-readwithfinal) for how the package `engine` and `readWithFinal` combine.
 
@@ -1080,7 +1085,7 @@ A plain-insert or `allColumnMatch` Fact stays MergeTree whatever the package `en
 * **Why always:** the engine of what a node reads is not in its metadata — an upstream node's `@engine` is not passed, and a source table can be anything. ClickHouse applies `final = 1` only to the tables that support `FINAL`, so a ReplacingMergeTree upstream (from the package `engine`, its own `@engine`, or an external source table) is read with one row per key, and a MergeTree — whose load already deleted its replaced copies — is read as usual. It covers the node's own target too: a MergeTree target ignores it, a ReplacingMergeTree target is read with `FINAL`.
 * **Where:** the load `INSERT ... SELECT` of every Work, Dimension and Fact and the **Check Last Modified Column - NULL Values** test, on every run. A view gets it in its definition when it is created — with [`@final`](#final), or when `readWithFinal` is `true` at that deploy.
 * **Cost:** `FINAL` merges the replaced copies at read time, so loads reading a large ReplacingMergeTree take longer. If background merges keep up, or the ClickHouse user already has `final = 1`, use `false`.
-* **Always added** when `readWithFinal` is `true`. When the node's SQL already ends with its own `SETTINGS` clause, `final = 1` is appended to it (`SETTINGS max_threads = 4, final = 1`); if that clause already sets `final`, ClickHouse may reject it with its own error.
+* **Always added** when `readWithFinal` is `true`. When the node's SQL already ends with its own `SETTINGS` clause, `final = 1` is appended to it (`SETTINGS max_threads = 4, final = 1`); If that clause already sets `final`, the node's own value wins: `SETTINGS final = 0, final = 1` reads without `FINAL` (tested), so `SETTINGS final = 0` opts a node out.
 * With `readWithFinal` = `false`, a single node can still read an upstream with `FINAL` in its SQL: ``FROM {{ ref('TARGET', 'DIM_CUSTOMER') }} FINAL``.
 
 **Independent of `readWithFinal`:**
@@ -1106,7 +1111,7 @@ A Fact with no `@isBusinessKey` column and no `@mergeStrategy` is loaded as a pl
 
   Without it the deploy and the run show a passing **Warning: @isSystemUpdateDate without @notNull** stage, the flow continues, and ClickHouse's error stops the create — see [`@isSystemUpdateDate` Without `@notNull` on a ReplacingMergeTree](#known-limitations). Manually created nodes do not add `@notNull`; add it when the node is a ReplacingMergeTree.
 * A ReplacingMergeTree requires a business key. `SYSTEM_VERSION` is required on an SCD Type 2 Dimension and optional on SCD Type 1 — see [`SYSTEM_VERSION` on a ReplacingMergeTree](#system_version-on-a-replacingmergetree-dimension). Without a business key, or with `@orderBy` / `@primaryKey` set, **Invalid configuration: engine** stops the deploy and the run: a manual sort key could collapse different rows into one, or keep the copies the load replaces. Use MergeTree (the default, or `@engine("MergeTree")` when the package parameter is ReplacingMergeTree) to set your own sort key.
-* A ReplacingMergeTree only replaces rows within one partition. Use a `@partitionBy` whose value cannot change for a business key, or the old copy of a row that moves partition stays.
+* A ReplacingMergeTree only replaces rows within one partition. When a row moves partition (its `@partitionBy` value changes), the old copy stays in the old partition for good: background merges never cross partitions. Reads with `FINAL` still show one row per key, because ClickHouse's `FINAL` de-duplicates across partitions by default (`do_not_merge_across_partitions_select_final = 0`); a read without `FINAL` shows both copies. Prefer a `@partitionBy` whose value cannot change for a business key. (Tested: a key whose partition changed kept 2 stored copies and 1 row with `FINAL`.)
 * On a MergeTree, a reader can briefly see both copies of a changed row between the insert and the clean-up. If the clean-up stage fails, the extra copies stay until the next successful run's clean-up removes them.
 * The load reads its own SELECT with the user's settings, as in Preview — it does not set `join_use_nulls`.
 
@@ -1324,14 +1329,31 @@ A view is fixed when it is deployed, so it decides then, first match wins:
 
 * Adding or removing `@final` on redeploy recreates the view (**Create View**).
 * Changing `readWithFinal` later does not change a deployed view — see [Changing `readWithFinal` on Views](#known-limitations). Use `@final` to fix a view's behaviour whatever the parameter.
-* When the view's SQL already ends with its own `SETTINGS` clause, `final = 1` is appended to it (`SETTINGS max_threads = 4, final = 1`); if that clause already sets `final`, ClickHouse may reject it with its own error.
-* **Note:** Ignored on Tables — their loads follow `readWithFinal` on every run.
+* When the view's SQL already ends with its own `SETTINGS` clause, `final = 1` is appended to it (`SETTINGS max_threads = 4, final = 1`); If that clause already sets `final`, the node's own value wins: `SETTINGS final = 0, final = 1` reads without `FINAL` (tested), so `SETTINGS final = 0` opts a node out.
+* **On a table** `@final` does nothing: a non-failing **Warning: @final on a table** stage is shown at deploy and on every run, and the load follows `readWithFinal`.
 
 **Example:**
 
 ```sql
 @materializationType("view")
 @final
+```
+
+##### `@optimize`
+
+`@optimize` — Dimension and Fact, **tables only**.
+
+Adds an **Optimize Table** stage after Post-SQL, the last load stage, that runs `OPTIMIZE TABLE <table> FINAL`. ClickHouse merges the table's parts at the end of every load instead of waiting for a background merge, so the **After** tests see the merged table.
+
+* **ReplacingMergeTree:** after the merge the table keeps only the latest row per `ORDER BY` key, so a plain `SELECT` returns what a `SELECT … FINAL` returns. The exception is a row whose `@partitionBy` value changed: merges never cross partitions, so its old copy stays in the old partition (`FINAL` still hides it). Tested: a key that moved partition left 5 stored rows for 4 keys; a partition on a column that never changes for a key left exactly 4.
+* **MergeTree:** the replaced copies are already removed by **Clean Up Previous Data**; `@optimize` only merges the parts.
+* Rewrites the whole table on every run — use it on small or medium tables, or where readers must not need `FINAL`.
+* Ignored on views. Adding or removing it on redeploy only updates the node metadata.
+
+**Example:**
+
+```sql
+@optimize
 ```
 
 ##### `@writeMode`
