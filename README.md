@@ -268,7 +268,7 @@ The Dimension Node type has three configuration groups:
 | [`@partitionBy(term, ...)`](#partitionby) | The table's `PARTITION BY` key. |
 | [`@settings(setting, ...)`](#settings) | The table's MergeTree `SETTINGS`. |
 | [`@final`](#final) | Views only: the view reads its sources with `FINAL` (`SETTINGS final = 1`). |
-| [`@optimize`](#optimize) | Tables only: runs `OPTIMIZE TABLE … FINAL` as the last load stage. |
+| [`@optimize`](#optimize) | Tables only: runs `OPTIMIZE TABLE … FINAL` after the load, before Post-SQL. |
 | [`@engine(engine)`](#engine) | The table's `ENGINE`.<br/>*Not specified in the SQL editor → the package's `engine` parameter, else **MergeTree** (no `ENGINE` written).* |
 | [`@writeMode("truncateInsert \| append")`](#writemode) | How each run writes to the target: truncateInsert or append<br/>*Not specified in the SQL editor → defaults to **append**.* |
 | [`@mergeStrategy("changeTracking \| lastModified")`](#mergestrategy-dimension) | Chooses how this dimension decides a row has changed, and therefore which column annotations it requires. |
@@ -579,8 +579,8 @@ Every run of a Dimension Node of materialization type table runs its configured 
 | **Load table - Last Modified Comparison - SCD1 \| SCD2** | Executed for `@mergeStrategy("lastModified")` — compares the `@lastModifiedTracking` column against the current target row, then inserts new keys and the changed rows (SCD1: the new values; SCD2: the new version plus the expired old version). |
 | **Load table - Change Tracking - SCD1 \| SCD2** | Executed for `@mergeStrategy("changeTracking")` (the default) — compares `@isChangeTracking` columns (or, absent any, every plain attribute column) against the current target row, then inserts new keys and the changed rows. Under SCD2, a change only in a plain attribute column re-inserts the current version with the new values. |
 | **Clean Up Previous Data** | Deletes the copies the insert replaced — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). Runs only when the table is not a ReplacingMergeTree (e.g. the default MergeTree) and the node has `@isBusinessKey` and `@isSystemUpdateDate` columns. |
+| **Optimize Table** | Executed only when [`@optimize`](#optimize) is set — `OPTIMIZE TABLE … FINAL` merges the table's parts after the load, before Post-SQL. |
 | **Post-SQL `<n>`** | Each `@postSQL` statement, in the order they appear. |
-| **Optimize Table** | Executed only when [`@optimize`](#optimize) is set — `OPTIMIZE TABLE … FINAL` merges the table's parts after the load. |
 | **`<column>: <test>` \| Post Load Test `<n>`** | Column-level data quality tests and node-level `@tests(..., "After")` tests, run after the load. |
 
 > **Note:** ClickHouse has no `MERGE` statement; the load stages only insert the new and changed rows, and **Clean Up Previous Data** (MergeTree) or the ReplacingMergeTree removes the older copies — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact).
@@ -657,7 +657,7 @@ The Fact Node type has three configuration groups:
 | [`@partitionBy(term, ...)`](#partitionby) | The table's `PARTITION BY` key. |
 | [`@settings(setting, ...)`](#settings) | The table's MergeTree `SETTINGS`. |
 | [`@final`](#final) | Views only: the view reads its sources with `FINAL` (`SETTINGS final = 1`). |
-| [`@optimize`](#optimize) | Tables only: runs `OPTIMIZE TABLE … FINAL` as the last load stage. |
+| [`@optimize`](#optimize) | Tables only: runs `OPTIMIZE TABLE … FINAL` after the load, before Post-SQL. |
 | [`@engine(engine)`](#engine) | The table's `ENGINE`.<br/>*Not specified in the SQL editor → the package's `engine` parameter, else **MergeTree** (no `ENGINE` written).* |
 | [`@writeMode("truncateInsert \| append")`](#writemode) | How each run writes to the target: truncateInsert or append<br/>*Not specified in the SQL editor → defaults to **append**.* |
 | [`@mergeStrategy("changeTracking \| lastModified \| allColumnMatch")`](#mergestrategy-fact) | Chooses how rows are matched against the target, and therefore which column annotations are required. |
@@ -806,8 +806,8 @@ Every run of a Fact Node of materialization type table runs its configured data 
 | **Load table - Last Modified Comparison - SCD1** | Executed for `@mergeStrategy("lastModified")` — compares the `@lastModifiedTracking` column against the target, then inserts new keys and newer rows. |
 | **Load table - All Column Match** | Executed for `@mergeStrategy("allColumnMatch")` — matches on every non-system column and inserts only rows that don't already exist; nothing is updated or deleted. |
 | **Clean Up Previous Data** | Deletes the copies the insert replaced — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). Runs for `changeTracking` / `lastModified` only when the table is not a ReplacingMergeTree (e.g. the default MergeTree) and the node has an `@isSystemUpdateDate` column. |
+| **Optimize Table** | Executed only when [`@optimize`](#optimize) is set — `OPTIMIZE TABLE … FINAL` merges the table's parts after the load, before Post-SQL. |
 | **Post-SQL `<n>`** | Each `@postSQL` statement, in the order they appear. |
-| **Optimize Table** | Executed only when [`@optimize`](#optimize) is set — `OPTIMIZE TABLE … FINAL` merges the table's parts after the load. |
 | **`<column>: <test>` \| Post Load Test `<n>`** | Column-level data quality tests and node-level `@tests(..., "After")` tests, run after the load. |
 
 #### Fact Redeployment
@@ -1343,12 +1343,13 @@ A view is fixed when it is deployed, so it decides then, first match wins:
 
 `@optimize` — Dimension and Fact, **tables only**.
 
-Adds an **Optimize Table** stage after Post-SQL, the last load stage, that runs `OPTIMIZE TABLE <table> FINAL`. ClickHouse merges the table's parts at the end of every load instead of waiting for a background merge, so the **After** tests see the merged table.
+Adds an **Optimize Table** stage after the load and before **Post-SQL**, that runs `OPTIMIZE TABLE <table> FINAL`. ClickHouse merges the table's parts on every load instead of waiting for a background merge, so `@postSQL` and the **After** tests see the merged table.
 
 * **ReplacingMergeTree:** after the merge the table keeps only the latest row per `ORDER BY` key, so a plain `SELECT` returns what a `SELECT … FINAL` returns. The exception is a row whose `@partitionBy` value changed: merges never cross partitions, so its old copy stays in the old partition (`FINAL` still hides it). Tested: a key that moved partition left 5 stored rows for 4 keys; a partition on a column that never changes for a key left exactly 4.
 * **MergeTree:** the replaced copies are already removed by **Clean Up Previous Data**; `@optimize` only merges the parts.
 * Rewrites the whole table on every run — use it on small or medium tables, or where readers must not need `FINAL`.
-* Ignored on views. Adding or removing it on redeploy only updates the node metadata.
+* **On a view** `@optimize` does nothing: a non-failing **Warning: @optimize on a view** stage is shown at deploy and on every run.
+* Adding or removing it on redeploy only updates the node metadata.
 
 **Example:**
 

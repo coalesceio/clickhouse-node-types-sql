@@ -566,11 +566,11 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         )
     {%- endif %}
 
+    {#== @optimize: OPTIMIZE TABLE ... FINAL, after the load and before Post-SQL ==#}
+    {{ optimize_table(targetPath) }}
+
     {#== Post-SQL ==#}
     {{ run_pre_post_sql('Post') }}
-
-    {#== @optimize: OPTIMIZE TABLE ... FINAL, the last load stage ==#}
-    {{ optimize_table(targetPath) }}
 
 {%- elif materializationType == 'view' %}
 	{{ stage('Load Skipped for View') }}

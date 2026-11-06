@@ -140,11 +140,11 @@ metadata:
 
         - name: optimize
           description: |-
-            • Tables only — adds an "Optimize Table" stage after Post-SQL that runs OPTIMIZE TABLE <table> FINAL, so ClickHouse merges the table's parts at the end of every load instead of waiting for a background merge.
+            • Tables only — adds an "Optimize Table" stage after the load, before Post-SQL, that runs OPTIMIZE TABLE <table> FINAL, so ClickHouse merges the table's parts on every load instead of waiting for a background merge. Post-SQL and the After tests see the merged table.
               Ex. @optimize
             • On a ReplacingMergeTree the table then keeps only the latest row per ORDER BY key, so a plain SELECT matches a SELECT with FINAL — except a row whose @partitionBy value changed: merges never cross partitions, so its old copy stays (FINAL still hides it).
             • Rewrites the whole table on every run — use it on small or medium tables, or when reads must not need FINAL.
-            • Ignored on views.
+            • On a view it does nothing: a non-failing "Warning: @optimize on a view" stage is shown.
           isRequired: false
 
         - name: writeMode

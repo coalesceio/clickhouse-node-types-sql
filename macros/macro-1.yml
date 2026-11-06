@@ -364,6 +364,7 @@ macroString: |-
     check when the normalized type is not table or view. Call first in create and run.
     Also a non-failing "Warning: @final on a table": @final only changes a view's definition;
     a table's load follows the readWithFinal runtime parameter.
+    And a non-failing "Warning: @optimize on a view": a view has no parts to merge.
   ===========================================================================#}
   {%- macro validate_materialization_type(allowedTypes=['table', 'view']) -%}
       {%- if nsNodeVariables.desiredMatType not in allowedTypes %}
@@ -376,6 +377,12 @@ macroString: |-
           -- @final applies to views only (the view's SELECT ends with SETTINGS final = 1). On the table {{ node.name }} it does nothing.
           -- The table's load reads ReplacingMergeTree sources and its own target with FINAL when the readWithFinal runtime parameter is true.
           -- Fix: remove @final, or set @materializationType("view").
+          SELECT 1
+      {%- endif %}
+      {%- if nsNodeVariables.desiredMatType == 'view' and config is defined and config.optimize is defined %}
+          {{ test_stage('Warning: @optimize on a view', true) }}
+          -- @optimize applies to tables only (OPTIMIZE TABLE ... FINAL after the load). The view {{ node.name }} stores no data, so nothing is optimized.
+          -- Fix: remove @optimize, or set @materializationType("table").
           SELECT 1
       {%- endif %}
   {%- endmacro -%}
@@ -1928,7 +1935,8 @@ macroString: |-
 
   {#===========================================================================
     optimize_table(targetPath): Dimension / Fact tables with @optimize -> an "Optimize Table" stage,
-    OPTIMIZE TABLE ... FINAL, run after Post-SQL so the After tests see the merged table.
+    OPTIMIZE TABLE ... FINAL, run after the load and before Post-SQL, so Post-SQL and the After
+    tests see the merged table.
     FINAL merges every partition down to one part; on a ReplacingMergeTree that keeps only the
     latest row per ORDER BY key within each partition (merges never cross partitions).
   ===========================================================================#}

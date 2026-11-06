@@ -2,6 +2,7 @@
 @nodeType("SQLDimension")
 @partitionBy("`n_Nationkey` % 2")
 @optimize
+@postSQL("SELECT count() FROM {{ this }} FINAL")
 @tests("SELECT 1 FROM {{ this }} SETTINGS final = 0", true, "After")
 @tests("SELECT 1 FROM {{ this }} FINAL", true, "After")
 @tests("SELECT `n_Nationkey` FROM {{ this }} GROUP BY `n_Nationkey` HAVING count() > 1 SETTINGS final = 0", true, "After")
