@@ -13,7 +13,7 @@ metadata:
       • Every column needs a unique @id("<6 hex digits>"). With a business key (@isBusinessKey), @isSystemCreateDate and @isSystemUpdateDate are required.
       • Column @id overrides the general coa SQL-format rule ("never write @id on a column", coa describe sql-format): this node type matches columns across redeploys by @id, so every column must carry its own — the "Missing Column IDs" check stops the node otherwise.
         Ex. `n_Nationkey` AS `n_Nationkey` @id("a1b2c3") @isBusinessKey
-      • Engine: the node's @engine, else the package parameter "engine", else MergeTree. A plain-insert / allColumnMatch Fact is never a ReplacingMergeTree.
+      • Engine: the node's @engine, else the package parameter "engine", else MergeTree. A plain-insert Fact is never a ReplacingMergeTree; an allColumnMatch Fact on a ReplacingMergeTree is ordered by its match columns.
       • ReplacingMergeTree: ORDER BY is built from the business key — do not add @orderBy / @primaryKey. Query it with FINAL.
       • ReplacingMergeTree (package engine parameter or @engine("ReplacingMergeTree")): add @notNull to the @isSystemUpdateDate column. Without it the column is Nullable, a "Warning: @isSystemUpdateDate without @notNull" stage is shown, and ClickHouse rejects the table (a Nullable version argument).
       • Agentic creation: when the user asks for a ReplacingMergeTree, or the package engine parameter is set to ReplacingMergeTree, write the @isSystemUpdateDate column with @notNull (see isSystemUpdateDate).
@@ -59,7 +59,7 @@ metadata:
             • The table's ORDER BY (sort) key. Each argument is one term — a column or an expression, written as it should appear in the SQL.
               Ex. orderBy("`n_Nationkey`")
               Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)")
-            • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 only (engine("MergeTree") or a plain-insert / allColumnMatch Fact). ⛔ Not accepted on a ReplacingMergeTree — its ORDER BY is built from the business key, and the deploy and the run stop if orderBy is set.
+            • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 only (engine("MergeTree") or a plain-insert Fact). ⛔ Not accepted on a ReplacingMergeTree — its ORDER BY is built from the business key (allColumnMatch: its match columns), and the deploy and the run stop if orderBy is set.
             • Without orderBy (and primaryKey) a MergeTree table uses ORDER BY tuple(). Ignored on views.
             • ⚠️ On redeploy, removing trailing terms or adding new columns (without a default) is altered in place when primaryKey is set; any other orderBy change (or renaming / retyping a column used in it) recreates the table — existing data is lost.
           isRequired: false
@@ -102,8 +102,8 @@ metadata:
 
         - name: engine
           description: |-
-            • The table's ENGINE. Must be a MergeTree-family engine.
-            • If not specified, the package's engine parameter is used; if that is empty too, defaults to 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 (no ENGINE is written, as in ClickHouse). Set the package parameter to ReplacingMergeTree to make it the default for every Dimension and Fact — except a plain-insert or allColumnMatch Fact, which stays MergeTree, since a ReplacingMergeTree would collapse its identical rows.
+            • The table's ENGINE: MergeTree or ReplacingMergeTree only, written without arguments. The name is not case-sensitive (replacingmergetree works), and MergeTree() is the same as MergeTree. Any other engine (SummingMergeTree, Log, ...) or arguments stop the deploy and the run (Invalid configuration: engine).
+            • If not specified, the package's engine parameter is used; if that is empty too, defaults to 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 (no ENGINE is written, as in ClickHouse). Set the package parameter to ReplacingMergeTree to make it the default for every Dimension and Fact — except a plain-insert Fact, which stays MergeTree, since a ReplacingMergeTree would collapse its identical rows. An allColumnMatch Fact takes it, ordered by its match columns.
             • 𝗥𝗲𝗽𝗹𝗮𝗰𝗶𝗻𝗴𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 — the load only inserts. A changed row is re-inserted with a newer SYSTEM_UPDATE_DATE, and ClickHouse keeps the latest row per ORDER BY key at a background merge (nothing is deleted).
               • The @isSystemUpdateDate column is the version argument: ReplacingMergeTree → ReplacingMergeTree(`SYSTEM_UPDATE_DATE`). Required, and must be marked @notNull.
               • Like every column it is Nullable without @notNull, and ClickHouse rejects a Nullable version argument: a "Warning: @isSystemUpdateDate without @notNull" stage is shown, the flow continues, and the create (or the redeploy's ALTER) fails with ClickHouse's error.
@@ -111,7 +111,7 @@ metadata:
               • ORDER BY is always built from the business key (required) — orderBy / primaryKey are not accepted (a manual key could collapse different rows or keep replaced copies).
               • Until a merge, a plain SELECT can return the replaced copies as well — query with FINAL (SELECT ... FROM <table> FINAL, or SETTINGS final = 1). With the readWithFinal runtime parameter true, the load and the column tests end with SETTINGS final = 1; with it false they read the table as stored, so set final = 1 on the ClickHouse user. A "Note: Query with FINAL" deploy stage reminds whoever deploys.
             • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 — the load inserts and then DELETEs the replaced copies (Clean Up Previous Data). orderBy / primaryKey can be set.
-            • An engine written with its own arguments is used as written, e.g. engine("ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)").
+            • Write ReplacingMergeTree without arguments: the load sets the version argument and ORDER BY itself.
             • Ignored on views.
             • ⚠️ Changing engine on redeploy recreates the table — existing data is lost.
           isRequired: false
@@ -171,7 +171,9 @@ metadata:
             • Picks the change-detection method; different methods require different column annotations.
             • If not specified: a node with an isBusinessKey column defaults to changeTracking - 𝗦𝗖𝗗 𝗧𝘆𝗽𝗲 𝟭; a node with no isBusinessKey column is loaded as a plain insert.
             • The value is not case-sensitive; any other value fails the run.
-            • changeTracking and lastModified need the SELECT/CTE to return exactly one row per business key, with no NULL business key — a pre-load test can handle this. allColumnMatch uses no business key.
+            • The SELECT/CTE should return one row per business key. A key returned more than once is loaded once (lastModified: the newest row; changeTracking: which one is not defined); a NULL business key is one key value, matched like any other. A pre-load test can stop the run instead.
+            • allColumnMatch uses no business key.
+            • MergeTree and ReplacingMergeTree give the same result: a MergeTree holds what a ReplacingMergeTree returns with FINAL (with readWithFinal true).
             • Always takes priority when set: changeTracking and lastModified merge on the business key, so the run fails if no column is marked isBusinessKey. allColumnMatch needs no isBusinessKey.
             • Ignored on views
 
@@ -185,9 +187,13 @@ metadata:
 
             ◆ 𝗮𝗹𝗹𝗖𝗼𝗹𝘂𝗺𝗻𝗠𝗮𝘁𝗰𝗵
               • Meant for factless fact tables used for event tracking and coverage/relationship tracking.
-              • Treats every non-system column as the business key — a source row is inserted only if no target row matches it on all of those columns; an existing matching row is left untouched (never updated).
+              • Only inserts: a source row is inserted only if no target row matches it on the match columns; an existing row is never updated or deleted.
+              • Match columns: the non-system columns that come from the source (Coalesce column lineage). A column that is only a transform — a constant, now(), generateUUIDv4(), a load id — is left out, so it never makes a stored row look new. With no lineage to go on (the node has its own CTEs, or reads a table function) every non-system column is matched.
               • isBusinessKey is not needed and is ignored if present (a warning is shown).
-              • System columns are optional and excluded from the match; any that are present are written exactly as the SELECT/CTE computes them.
+              • System columns are optional and never matched; any that are present are written exactly as the SELECT/CTE computes them.
+              • NULL matches NULL: a row with a NULL in a column is not inserted again.
+              • ReplacingMergeTree (@engine or the package engine parameter): ORDER BY is the match columns, so identical rows also collapse at a merge. The version argument is the @isSystemUpdateDate column when there is one; without it the engine is a bare ReplacingMergeTree, which keeps the last copy inserted. No business key or update date is required; @orderBy / @primaryKey and an engine with its own arguments are rejected.
+              • Each load keeps one source row per match-column combination (the latest @isSystemUpdateDate when there is one) and skips the ones already stored.
               • Requires no lastModifiedTracking column
 
             Agentic creation — before writing a new Fact node's SELECT, ask the user (don't silently default):

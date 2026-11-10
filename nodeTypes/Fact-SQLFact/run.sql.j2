@@ -15,8 +15,10 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
       until the merge a plain SELECT can see the replaced copies, so the load and the column tests read with
       FINAL through SETTINGS final = 1 when readWithFinal is true.
     - MergeTree (the default) or any other engine: a DELETE removes the replaced copies after the insert.
-    - A plain insert or @allColumnMatch replaces nothing; the package engine parameter does not make it a
-      ReplacingMergeTree.
+    - A plain insert replaces nothing; the package engine parameter does not make it a ReplacingMergeTree.
+    - @allColumnMatch (a factless fact) only inserts rows that don't exist yet, matching on the non-system
+      columns that come from the source (acm_match_columns()). On a ReplacingMergeTree (@engine or the package
+      engine parameter) those columns are its ORDER BY, so true duplicates also collapse at a merge.
 #}
 
 {# == Table engine from @engine — see set_table_engine() == #}
@@ -174,9 +176,21 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             {%- set firstBizKeyCol = (columns | selectattr("isBusinessKey") | first).name if hasBusinessKey else none %}
 
             {%- if isAllColumnMatch %}
-            {# @allColumnMatch: every non-system column is treated as a business key, @isBusinessKey is ignored.
-               A fully matching row already exists — nothing to update; only brand-new rows are inserted. #}
-            {%- set matchCols = columns | rejectattr("isSystemCreateDate") | rejectattr("isSystemUpdateDate") | list %}
+            {# @allColumnMatch: the match columns are the business key, @isBusinessKey is ignored.
+               A fully matching row already exists — nothing to update; only brand-new rows are inserted.
+               The match is NULL-safe (isNotDistinctFrom): a row with a NULL in a column matches its stored copy.
+               MergeTree and ReplacingMergeTree end the same: SOURCE_UNIQUE keeps one source row per match-column
+               combination (LIMIT 1 BY; the latest @isSystemUpdateDate first when there is one), so the target holds
+               one row per combination, as a ReplacingMergeTree read with FINAL does. #}
+            {#- Match columns: the non-system columns that come from the source (acm_match_columns()) —
+                the same columns as a ReplacingMergeTree's ORDER BY #}
+            {%- set nsMatch = namespace(items=[], fromLineage=false) %}
+            {{- acm_match_columns(columns, sources, nsMatch) }}
+            {%- set nsMatchCols = namespace(cols=[]) %}
+            {%- for col in columns if col.name in nsMatch.items %}
+                {%- set nsMatchCols.cols = nsMatchCols.cols + [col] %}
+            {%- endfor %}
+            {%- set matchCols = nsMatchCols.cols %}
             {{ sourceDataCteOpen }}`SOURCE_DATA` AS (
                 SELECT {{ source.selectModifier | default('', true) }}
                 {%- for col in source.columns %}
@@ -186,7 +200,21 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 {{ joinclause }}
             ),
 
+            {%- set acmUpdateDateCols = columns | selectattr('isSystemUpdateDate') | map(attribute='name') | list %}
+            `SOURCE_UNIQUE` AS (
+                /* One source row per match-column combination, the row a ReplacingMergeTree would keep */
+                SELECT *
+                FROM `SOURCE_DATA`
+                {%- if acmUpdateDateCols %}
+                ORDER BY `{{ acmUpdateDateCols[0] }}` DESC
+                {%- endif %}
+                {%- if matchCols %}
+                LIMIT 1 BY {% for col in matchCols %}`{{ col.name }}`{%- if not loop.last %}, {% endif %}{% endfor %}
+                {%- endif %}
+            ),
+
             `TARGET_CURRENT` AS (
+                /* Match columns{{ ' (from source lineage)' if nsMatch.fromLineage else ' (every non-system column: no source lineage)' }}: {{ matchCols | map(attribute='name') | join(', ') }} */
                 SELECT
                     1 AS `TGT_ROW_EXISTS`
                 {%- for col in matchCols %},
@@ -197,20 +225,20 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
             SELECT
             {%- for col in columns %}
-                `SOURCE_DATA`.`{{ col.name }}` AS `{{ col.name }}`
+                `SOURCE_UNIQUE`.`{{ col.name }}` AS `{{ col.name }}`
                 {%- if not loop.last %}, {%- endif %}
             {%- endfor %}
-            FROM `SOURCE_DATA`
+            FROM `SOURCE_UNIQUE`
             LEFT JOIN `TARGET_CURRENT` ON
             {%- for col in matchCols %}
                 {%- if not loop.first %} AND {%- endif %}
-                {{ safe_equals('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`TGT_' ~ col.name ~ '`', col.dataType) }}
+                isNotDistinctFrom(`SOURCE_UNIQUE`.`{{ col.name }}`, `TARGET_CURRENT`.`TGT_{{ col.name }}`)
             {%- endfor %}
             WHERE ifNull(`TARGET_CURRENT`.`TGT_ROW_EXISTS`, 0) = 0
 
             {%- else %}
 
-            {{ sourceDataCteOpen }}`SOURCE_DATA` AS (
+            {{ sourceDataCteOpen }}`SOURCE_ROWS` AS (
                 /* Incoming source rows, transformed and aliased to the target column names */
                 SELECT {{ source.selectModifier | default('', true) }}
                 {%- for col in source.columns if not (col.isSystemCreateDate or col.isSystemUpdateDate) %}
@@ -219,6 +247,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 {%- endfor %}
                 {{ joinclause }}
             ),
+
+{{ source_one_per_key(columns | selectattr('isBusinessKey') | map(attribute='name') | list, lastModifiedColName if lastModifiedComparison else '') }}
 
             `TARGET_CURRENT` AS (
                 /* SCD1 = one row per key, so the target is read as-is. */
@@ -307,6 +337,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             WHERE {{ touchedKeys }}
             GROUP BY {{ businessKey }}
         )
+        SETTINGS transform_null_in = 1
     {%- endif %}
 
     {%- endif %}

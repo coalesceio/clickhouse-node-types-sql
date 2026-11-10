@@ -84,14 +84,24 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
        expected from the ClickHouse user / session settings #}
     {%- set targetRead = targetPath %}
 
-    {# The zero record is kept out of change detection: its business key (e.g. 0) can equal a real key, which would
-       otherwise match it and overwrite it with that row's data #}
-    {%- set excludeZeroRecord = config.zeroKey is defined and hasSurrogateKey %}
+    {# Zero key records are kept out of change detection: their business key (e.g. 0) can equal a real key, which would
+       otherwise match them and overwrite them with that row's data. Every zero record has the zero-record
+       SYSTEM_CREATE_DATE (ch_zero_record_date(): epoch 0), so a zero record left from an earlier @zeroKey value — or
+       after @zeroKey was removed — stays out too; the current one is also matched by its surrogate value. #}
+    {%- set zeroCreateDateCol = columns | selectattr("isSystemCreateDate") | first %}
+    {%- set excludeZeroRecord = hasSurrogateKey and (config.zeroKey is defined or zeroCreateDateCol is defined) %}
     {%- if excludeZeroRecord %}
         {%- set notZeroRecord %}
-            {%- for col in columns if col.isSurrogateKey %}
-                {%- if not loop.first %} AND {% endif %}`{{ col.name }}` != {{ zero_key_surrogate_value(col) }}
-            {%- endfor %}
+            {%- set nsNotZero = namespace(parts=[]) %}
+            {%- if zeroCreateDateCol is defined %}
+                {%- set nsNotZero.parts = nsNotZero.parts + ['ifNull(`' ~ zeroCreateDateCol.name ~ '` != ' ~ ch_zero_record_date(zeroCreateDateCol) ~ ', 1)'] %}
+            {%- endif %}
+            {%- if config.zeroKey is defined %}
+                {%- for col in columns if col.isSurrogateKey %}
+                    {%- set nsNotZero.parts = nsNotZero.parts + ['`' ~ col.name ~ '` != ' ~ zero_key_surrogate_value(col)] %}
+                {%- endfor %}
+            {%- endif %}
+            {{- nsNotZero.parts | join(' AND ') }}
         {%- endset %}
     {%- endif %}
 
@@ -132,10 +142,23 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     {%- endif %}
 
     {%- if config.zeroKey is defined and hasSurrogateKey %}
-        {%- set zeroKeyCreateDateCols = columns | selectattr("isSystemCreateDate") | list %}
+        {#- Columns compared with the stored zero record: all but the surrogate key (the lookup key) and the
+            update date (the load time). The create date is the zero-record marker, so a zero record written
+            before the marker existed is refreshed once. Types ClickHouse cannot compare are skipped. #}
+        {%- set nsZeroCmp = namespace(cols=[]) %}
+        {%- for col in columns if not (col.isSurrogateKey or col.isSystemUpdateDate) %}
+            {%- set zeroFamily = (col.dataType | default('', true) | lower | replace('nullable(', '') | replace('lowcardinality(', '')).split('(')[0] | trim %}
+            {%- if zeroFamily not in ['map', 'json', 'object', 'dynamic', 'variant', 'aggregatefunction', 'simpleaggregatefunction'] %}
+                {%- set nsZeroCmp.cols = nsZeroCmp.cols + [col] %}
+            {%- endif %}
+        {%- endfor %}
         {{ stage('Load ' + materializationType + ' - Zero Key Record') }}
-            {# Re-inserted on every run: the newer SYSTEM_UPDATE_DATE replaces the previous zero record.
-               SYSTEM_CREATE_DATE keeps the zero record's first-inserted value; everything else is refreshed. #}
+            {# Inserted only when there is no zero record with the current surrogate value yet, or its values differ
+               from the @zeroKey values: an unchanged run writes nothing. A new surrogate value inserts a new zero record
+               and leaves the earlier one as it is (both stay zero records). SYSTEM_CREATE_DATE is the zero-record
+               marker (ch_zero_record_date()); a refreshed record's newer SYSTEM_UPDATE_DATE replaces the old copy.
+               Each @zeroKey value is cast to the column's table type before the comparison, so 'UNKNOWN'
+               equals the stored FixedString value. #}
             INSERT INTO {{ targetPath }}
             (
                 {%- for col in columns %}
@@ -145,11 +168,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             )
             SELECT
             {%- for col in columns %}
-                {%- if col.isSystemCreateDate %}
-                if(`EXISTING_ZERO`.`ZERO_KEY_EXISTS` > 0, `EXISTING_ZERO`.`{{ col.name }}`, `SOURCE_ZERO`.`{{ col.name }}`)
-                {%- else %}
                 `SOURCE_ZERO`.`{{ col.name }}`
-                {%- endif %}
                 AS `{{ col.name }}`
                 {%- if not loop.last %}, {%- endif %}
             {%- endfor %}
@@ -163,7 +182,9 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                         'Y'
                     {%- elif col.isSystemEndDate %}
                         {{ ch_high_date(col) }}
-                    {%- elif col.isSystemUpdateDate or col.isSystemCreateDate %}
+                    {%- elif col.isSystemCreateDate %}
+                        {{ ch_zero_record_date(col) }}
+                    {%- elif col.isSystemUpdateDate %}
                         {{ loadTimestamp }}
                     {%- elif col.isSystemVersion %}
                         1
@@ -179,8 +200,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 {# Always one row: count() is 0 when there is no zero record yet #}
                 SELECT
                     count() AS `ZERO_KEY_EXISTS`
-                    {%- for col in zeroKeyCreateDateCols %},
-                    min(`{{ col.name }}`) AS `{{ col.name }}`
+                    {%- for col in nsZeroCmp.cols %},
+                    any(`{{ col.name }}`) AS `EZ_{{ col.name }}`
                     {%- endfor %}
                 FROM {{ targetRead }}
                 WHERE
@@ -189,6 +210,10 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     `{{ col.name }}` = {{ zero_key_surrogate_value(col) }}
                 {%- endfor %}
             ) AS `EXISTING_ZERO`
+            WHERE `EXISTING_ZERO`.`ZERO_KEY_EXISTS` = 0
+            {%- for col in nsZeroCmp.cols %}
+               OR isDistinctFrom(`EXISTING_ZERO`.`EZ_{{ col.name }}`, CAST(`SOURCE_ZERO`.`{{ col.name }}` AS {{ ch_column_type(col) }}))
+            {%- endfor %}
             {{- target_final_setting() }}
     {%- endif %}
 
@@ -224,7 +249,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             {%- set sysUpdateDateCol = get_value_by_column_attribute("isSystemUpdateDate") %}
             {%- set sysEndDateCol = get_value_by_column_attribute("isSystemEndDate") %}
 
-            {{ sourceDataCteOpen }}`SOURCE_DATA` AS (
+            {{ sourceDataCteOpen }}`SOURCE_ROWS` AS (
                 /* Incoming source rows, transformed and aliased to the target column names */
                 SELECT {{ source.selectModifier | default('', true) }}
                 {%- for col in source.columns if not (col.isSurrogateKey or col.isSystemVersion or col.isSystemCurrentFlag or col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemEndDate) %}
@@ -236,6 +261,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 {%- endfor %}
                 {{ joinclause }}
             ),
+
+{{ source_one_per_key(columns | selectattr('isBusinessKey') | map(attribute='name') | list, lastModifiedColName if lastModifiedComparison else '') }}
 
             `TARGET_CURRENT` AS (
                 /* Only the current (SYSTEM_CURRENT_FLAG = 'Y') version of each business key —
@@ -427,7 +454,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                guard here too so a missing key fails that test with a clear message instead of crashing template rendering outright. #}
             {%- set firstBizKeyCol = (columns | selectattr("isBusinessKey") | first).name if hasBusinessKey else none %}
 
-            {{ sourceDataCteOpen }}`SOURCE_DATA` AS (
+            {{ sourceDataCteOpen }}`SOURCE_ROWS` AS (
                 /* Incoming source rows, transformed and aliased to the target column names */
                 SELECT {{ source.selectModifier | default('', true) }}
                 {%- for col in source.columns if not (col.isSurrogateKey or col.isSystemVersion or col.isSystemCurrentFlag or col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemEndDate) %}
@@ -439,6 +466,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 {%- endfor %}
                 {{ joinclause }}
             ),
+
+{{ source_one_per_key(columns | selectattr('isBusinessKey') | map(attribute='name') | list, lastModifiedColName if lastModifiedComparison else '') }}
 
             `TARGET_CURRENT` AS (
                 /* SCD1 = one row per key, so no current-flag filter is needed here. SYSTEM_VERSION,
@@ -564,6 +593,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             WHERE {{ touchedKeys }}
             GROUP BY {{ replaceKey }}
         )
+        SETTINGS transform_null_in = 1
     {%- endif %}
 
     {#== @optimize: OPTIMIZE TABLE ... FINAL, after the load and before Post-SQL ==#}

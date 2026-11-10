@@ -59,7 +59,7 @@ metadata:
             • The table's ORDER BY (sort) key. Each argument is one term — a column or an expression, written as it should appear in the SQL.
               Ex. orderBy("`n_Nationkey`")
               Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)")
-            • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 only (engine("MergeTree")). ⛔ Not accepted on a ReplacingMergeTree — its ORDER BY is built from the business key + SYSTEM_VERSION when present (+ the surrogate key with zeroKey), and the deploy and the run stop if orderBy is set.
+            • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 only (engine("MergeTree")). ⛔ Not accepted on a ReplacingMergeTree — its ORDER BY is built from the business key + SYSTEM_VERSION when present (+ the surrogate key when the node has one), and the deploy and the run stop if orderBy is set.
             • Without orderBy (and primaryKey) a MergeTree table uses ORDER BY tuple(). Ignored on views.
             • ⚠️ On redeploy, removing trailing terms or adding new columns (without a default) is altered in place when primaryKey is set; any other orderBy change (or renaming / retyping a column used in it) recreates the table — existing data is lost.
           isRequired: false
@@ -102,16 +102,16 @@ metadata:
 
         - name: engine
           description: |-
-            • The table's ENGINE. Must be a MergeTree-family engine.
+            • The table's ENGINE: MergeTree or ReplacingMergeTree only, written without arguments. The name is not case-sensitive (replacingmergetree works), and MergeTree() is the same as MergeTree. Any other engine (SummingMergeTree, Log, ...) or arguments stop the deploy and the run (Invalid configuration: engine).
             • If not specified, the package's engine parameter is used; if that is empty too, defaults to 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 (no ENGINE is written, as in ClickHouse). Set the package parameter to ReplacingMergeTree to make it the default for every Dimension and Fact.
             • 𝗥𝗲𝗽𝗹𝗮𝗰𝗶𝗻𝗴𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 — the load only inserts. A changed row is re-inserted with a newer SYSTEM_UPDATE_DATE, and ClickHouse keeps the latest row per ORDER BY key at a background merge (nothing is deleted).
               • The @isSystemUpdateDate column is the version argument: ReplacingMergeTree → ReplacingMergeTree(`SYSTEM_UPDATE_DATE`). Required, and must be marked @notNull.
               • Like every column it is Nullable without @notNull, and ClickHouse rejects a Nullable version argument: a "Warning: @isSystemUpdateDate without @notNull" stage is shown, the flow continues, and the create (or the redeploy's ALTER) fails with ClickHouse's error.
                 Ex. CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
-              • ORDER BY is always built from the business key + SYSTEM_VERSION when the node has it (+ the surrogate key with zeroKey) — orderBy / primaryKey are not accepted (a manual key could collapse different rows or keep replaced copies). SYSTEM_VERSION is optional for SCD Type 1 and required for SCD Type 2.
+              • ORDER BY is always built from the business key + SYSTEM_VERSION when the node has it (+ the surrogate key when the node has one) — orderBy / primaryKey are not accepted (a manual key could collapse different rows or keep replaced copies). SYSTEM_VERSION is optional for SCD Type 1 and required for SCD Type 2.
               • Until a merge, a plain SELECT can return the replaced copies as well — query with FINAL (SELECT ... FROM <table> FINAL, or SETTINGS final = 1). With the readWithFinal runtime parameter true, the load and the column tests end with SETTINGS final = 1; with it false they read the table as stored, so set final = 1 on the ClickHouse user. A "Note: Query with FINAL" deploy stage reminds whoever deploys.
             • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 — the load inserts and then DELETEs the replaced copies (Clean Up Previous Data). orderBy / primaryKey can be set.
-            • An engine written with its own arguments is used as written, e.g. engine("ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)").
+            • Write ReplacingMergeTree without arguments: the load sets the version argument and ORDER BY itself.
             • Ignored on views.
             • ⚠️ Changing engine on redeploy recreates the table — existing data is lost.
           isRequired: false
@@ -171,7 +171,8 @@ metadata:
             • Picks the change-detection method; different methods require different column annotations.
             • If not specified, defaults to changeTracking - 𝗦𝗖𝗗 𝗧𝘆𝗽𝗲 𝟭
             • The value is not case-sensitive; any other value fails the run.
-            • Every strategy needs the SELECT/CTE to return exactly one row per business key, with no NULL business key — a pre-load test can handle this.
+            • The SELECT/CTE should return one row per business key. A key returned more than once is loaded once (lastModified: the newest row; changeTracking: which one is not defined); a NULL business key is one key value, matched like any other. A pre-load test can stop the run instead.
+            • MergeTree and ReplacingMergeTree give the same result: a MergeTree holds what a ReplacingMergeTree returns with FINAL (with readWithFinal true).
             • Ignored on views
 
             ◆ 𝗰𝗵𝗮𝗻𝗴𝗲𝗧𝗿𝗮𝗰𝗸𝗶𝗻𝗴
@@ -203,7 +204,9 @@ metadata:
         - name: zeroKey
           description: |-
             • Inserts a default "zero key" record into the target — a placeholder row used to catch unresolved foreign key lookups.
-            • Numeric columns (integer, decimal, float) always get 0 — 𝘀𝘂𝗿𝗿𝗼𝗴𝗮𝘁𝗲𝗞𝗲𝘆𝗩𝗮𝗹𝘂𝗲 applies to the surrogate key column only. Override any column with a column-level zeroKey.
+            • Numeric columns (integer, decimal, float) always get 0 — 𝘀𝘂𝗿𝗿𝗼𝗴𝗮𝘁𝗲𝗞𝗲𝘆𝗩𝗮𝗹𝘂𝗲 applies to the surrogate key column only. Override any column with a column-level zeroKey. A string value is written with its own quotes, e.g. "'UNKNOWN'".
+            • Written by its own run stage, independent of the main load: inserted when no zero record has the current surrogate value, refreshed when its values change, otherwise nothing. Adding, changing or removing zeroKey needs no redeploy.
+            • Every zero record gets SYSTEM_CREATE_DATE = 1970-01-01 00:00:00 UTC, which keeps it out of the main load's change detection for good. Changing the surrogate value inserts a new zero record and keeps the earlier one; removing zeroKey keeps the stored ones. Delete any you no longer want yourself.
             • Ignored on views.
           isRequired: false
           parameters:

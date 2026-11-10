@@ -326,7 +326,7 @@ Chooses how this dimension decides a row has changed, and therefore which column
 
 * *Not specified in the SQL editor → defaults to **changeTracking** - SCD Type 1.*
 * The value is not case-sensitive; any other value is flagged by the **Invalid configuration: mergeStrategy** check and stops the deploy and the run.
-* Every strategy matches on the business key, so the SELECT/CTE must return exactly one row per business key, with no NULL business key — see [Unique Business Keys](#unique-business-keys-fact-and-dimension).
+* Every strategy matches on the business key. A key the SELECT/CTE returns more than once is loaded once (`lastModified`: the newest row), and a NULL business key is one key value — see [Unique Business Keys](#unique-business-keys-fact-and-dimension).
 * The load writes fixed system column values — see [System column values](#system-column-values).
 * Change detection is NULL-safe (`isDistinctFrom`): a value changing to or from NULL counts as a change; NULL on both sides does not.
 * **Note:** Ignored on Views.
@@ -367,7 +367,9 @@ Zero record value by column type (`Nullable(...)` and `LowCardinality(...)` are 
 
 * Override any column with a column-level `@zeroKey(value)`.
 * Changing **surrogateKeyValue** later inserts a new zero record with the new key; the old one stays in the table (the clean-up only replaces rows with the same key) and is from then on treated as an ordinary row. Delete it once: `DELETE FROM <table> WHERE <surrogate key> = <old value>`.
-* The zero record is written by its own stage, **Load table - Zero Key Record**, on every run: it is re-inserted with the current values and the previous one is removed by the clean-up, keeping its first `SYSTEM_CREATE_DATE`.
+* The zero record is written by its own stage, **Load table - Zero Key Record**, on every run, independent of the main data load. It looks up the zero record by the current surrogate value: when there is none (first run, after a `truncateInsert`, or a new surrogate value) it inserts one; when its stored values differ from the `@zeroKey` values it inserts a refreshed copy (the previous copy is removed by the clean-up on MergeTree, or replaced on a ReplacingMergeTree); otherwise it writes nothing.
+* **Every zero record gets `SYSTEM_CREATE_DATE` = 1970-01-01 00:00:00 UTC** (epoch 0, in the column's type). Real rows are stamped with the load time, so this marks a row as a zero record for good: the main load leaves every such row out of change detection.
+* **Changing the surrogate value** (e.g. `…000` → `…001`) inserts a new zero record and leaves the earlier one as it is — both stay zero records, and neither is ever matched to a real row with the same business key. **Removing `@zeroKey`** leaves the stored zero records in place, still left out of the load. Delete any you no longer want yourself.
 * The zero record is left out of change detection, so a real source row whose business key equals the zero record's (e.g. `0`) is loaded as its own row and never overwrites it.
 * `String` has no length limit in ClickHouse. A value longer than a `FixedString(n)` column raises a non-failing **Warning: Zero Key Value Too Long** stage that lists each such column: in a `Nullable(FixedString(n))` column ClickHouse stores the zero record's value as **NULL without an error**; in a non-Nullable one the **Zero Key Record** stage fails. Set a shorter value on the column with `@zeroKey("'<value>'")`, or widen the column.
 * Requires a column marked `@isSurrogateKey` — without one, the **Missing Required System Columns** check stops the deploy and the run.
@@ -575,7 +577,7 @@ Every run of a Dimension Node of materialization type table runs its configured 
 | **Check Last Modified Column - NULL Values (`<column>`)** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only when `@writeMode("truncateInsert")` is set — clears the target before the load. |
-| **Load table - Zero Key Record** | Executed only when node-level `@zeroKey` is set and a surrogate key column exists — inserts the placeholder "zero key" row. |
+| **Load table - Zero Key Record** | Executed only when node-level `@zeroKey` is set and a surrogate key column exists — inserts the placeholder "zero key" row when it is missing or its values differ from `@zeroKey`; otherwise it inserts nothing. |
 | **Load table - Last Modified Comparison - SCD1 \| SCD2** | Executed for `@mergeStrategy("lastModified")` — compares the `@lastModifiedTracking` column against the current target row, then inserts new keys and the changed rows (SCD1: the new values; SCD2: the new version plus the expired old version). |
 | **Load table - Change Tracking - SCD1 \| SCD2** | Executed for `@mergeStrategy("changeTracking")` (the default) — compares `@isChangeTracking` columns (or, absent any, every plain attribute column) against the current target row, then inserts new keys and the changed rows. Under SCD2, a change only in a plain attribute column re-inserts the current version with the new values. |
 | **Clean Up Previous Data** | Deletes the copies the insert replaced — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). Runs only when the table is not a ReplacingMergeTree (e.g. the default MergeTree) and the node has `@isBusinessKey` and `@isSystemUpdateDate` columns. |
@@ -698,7 +700,7 @@ Chooses how rows are matched against the target, and therefore which column anno
 |---|---|
 | `changeTracking` | SCD Type 1. Compares every plain attribute column against the target; a changed row is re-inserted with the new values and the old copy removed, a new key is inserted. Doesn't use `@lastModifiedTracking` — if present, a warning is raised and it's ignored. |
 | `lastModified` | SCD Type 1. Compares a single `@lastModifiedTracking` column against the target's stored value; only rows with a newer value are loaded, then as `changeTracking`. Requires exactly one column marked `@lastModifiedTracking` — a validation check flags it if none (or more than one) is present. |
-| `allColumnMatch` | Treats every non-system column as the business key: a source row is inserted only if no target row matches it on all of those columns, and an existing matching row is never updated or deleted. `@isBusinessKey` isn't needed — if present, a warning is raised, it's ignored and all columns are used for the comparison. `@lastModifiedTracking` isn't used either — a warning is raised and it's ignored. System columns are optional, are left out of the comparison, and are written exactly as the SELECT/CTE computes them. |
+| `allColumnMatch` | A factless fact: a source row is inserted only if no target row matches it on the **match columns** — the non-system columns that come from the source — and an existing row is never updated or deleted. `@isBusinessKey` isn't needed — if present, a warning is raised and it's ignored. `@lastModifiedTracking` isn't used either — a warning is raised and it's ignored. System columns are optional, are left out of the comparison, and are written exactly as the SELECT/CTE computes them. |
 
 * *Not specified in the SQL editor → defaults to **changeTracking** - SCD Type 1 when a column is marked `@isBusinessKey`, otherwise the node is loaded as a [plain insert](#fact-load-behaviour).*
 * The value is not case-sensitive; any other value is flagged by the **Invalid configuration: mergeStrategy** check and stops the deploy and the run.
@@ -719,7 +721,7 @@ Marks a column as part of the business key used to match existing rows during th
 
 * Optional when `@mergeStrategy` isn't set — if no column is marked, there is no matching and every source row is simply inserted.
 * Required for an explicit `changeTracking` or `lastModified` — without it the load stops with a validation error.
-* Ignored under `@mergeStrategy("allColumnMatch")`, which uses every non-system column as the key (a warning is raised).
+* Ignored under `@mergeStrategy("allColumnMatch")`, which matches on the non-system columns that come from the source (a warning is raised).
 * **Note:** Ignored on Views.
 
 **Example:**
@@ -740,7 +742,7 @@ How a Fact table is loaded depends on `@mergeStrategy` and on whether any column
 | none | `changeTracking` / `lastModified` | ❌ **Invalid configuration: No Business Key** — the load stops |
 | marked | not set, or `changeTracking` | SCD1 on the business key (default with a business key) |
 | marked | `lastModified` | SCD1 on the business key, newer rows only |
-| any (ignored, warning if marked) | `allColumnMatch` | Insert rows that don't match on every non-system column |
+| any (ignored, warning if marked) | `allColumnMatch` | Insert rows that don't match on the non-system columns that come from the source |
 
 Requirement level of each column annotation, by load:
 
@@ -758,7 +760,7 @@ Requirement level of each column annotation, by load:
 * `allColumnMatch` is meant for **factless fact tables** (no measures — the row itself is the fact), used for event tracking and coverage/relationship tracking. See [Fact All Column Match](#fact-all-column-match).
 * Under `changeTracking` / `lastModified` the load writes fixed values into the system columns: `@isSystemCreateDate` gets the load time on first insert and is then kept; `@isSystemUpdateDate` gets the load time whenever the row is inserted or changed. The expression the SELECT gives them is only used to derive the column's datatype.
 * Under `allColumnMatch` and plain insert, system columns are written exactly as the SELECT/CTE computes them.
-* Business key matching (including every column under `allColumnMatch`) uses plain equality, so a NULL never matches — see [NULL Business Keys](#known-limitations).
+* Keys are matched NULL-safely (`isNotDistinctFrom`) under every strategy: a NULL business key is one key value, matched and updated like any other — see [NULL Business Keys](#known-limitations).
 
 ---
 
@@ -804,7 +806,7 @@ Every run of a Fact Node of materialization type table runs its configured data 
 | **Load table - Insert** | Executed when no `@mergeStrategy` is set and no column is marked `@isBusinessKey` — inserts every source row with `INSERT INTO … SELECT`. |
 | **Load table - Change Tracking - SCD1** | Executed for `@mergeStrategy("changeTracking")`, and by default when no `@mergeStrategy` is set and a column is marked `@isBusinessKey` — compares every plain attribute column against the target, then inserts new keys and changed rows. |
 | **Load table - Last Modified Comparison - SCD1** | Executed for `@mergeStrategy("lastModified")` — compares the `@lastModifiedTracking` column against the target, then inserts new keys and newer rows. |
-| **Load table - All Column Match** | Executed for `@mergeStrategy("allColumnMatch")` — matches on every non-system column and inserts only rows that don't already exist; nothing is updated or deleted. |
+| **Load table - All Column Match** | Executed for `@mergeStrategy("allColumnMatch")` — matches on the non-system columns that come from the source and inserts only rows that don't already exist; nothing is updated or deleted. |
 | **Clean Up Previous Data** | Deletes the copies the insert replaced — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). Runs for `changeTracking` / `lastModified` only when the table is not a ReplacingMergeTree (e.g. the default MergeTree) and the node has an `@isSystemUpdateDate` column. |
 | **Optimize Table** | Executed only when [`@optimize`](#optimize) is set — `OPTIMIZE TABLE … FINAL` merges the table's parts after the load, before Post-SQL. |
 | **Post-SQL `<n>`** | Each `@postSQL` statement, in the order they appear. |
@@ -877,7 +879,7 @@ Package-level defaults, set once for every node instead of on each one. A node's
 
 | Value | Dimension / Fact tables without `@engine` |
 |---|---|
-| `"ReplacingMergeTree"` | ReplacingMergeTree — except a plain-insert or `allColumnMatch` Fact, which stays MergeTree |
+| `"ReplacingMergeTree"` | ReplacingMergeTree — except a plain-insert Fact, which stays MergeTree. An `allColumnMatch` Fact is ordered by its match columns |
 | `"MergeTree"` | MergeTree |
 | `""` (not set, the default) | MergeTree, the built-in default |
 
@@ -972,7 +974,7 @@ On redeploy:
 | Change | Result |
 |---|---|
 | `@engine` changed (Dimension / Fact) | Table recreated — reason `ENGINE changed` |
-| ReplacingMergeTree (Dimension / Fact): a column marked or unmarked `@isBusinessKey`, a business key column renamed or retyped, `@isSystemVersion` moved, or `@zeroKey` added / removed (Dimension) | Table recreated — reason `ReplacingMergeTree key changed: @isBusinessKey, SYSTEM_VERSION or @zeroKey` |
+| ReplacingMergeTree (Dimension / Fact): a column marked or unmarked `@isBusinessKey`, a business key column renamed or retyped, `@isSystemVersion` moved, or the surrogate key column added, removed or renamed (Dimension) | Table recreated — reason `ReplacingMergeTree key changed: @isBusinessKey, SYSTEM_VERSION or the surrogate key` |
 | `@orderBy` changed, no `@primaryKey` | Table recreated |
 | `@primaryKey` changed | Table recreated |
 | `@partitionBy` changed | Table recreated |
@@ -984,7 +986,7 @@ On redeploy:
 
 Terms are compared ignoring spaces, backticks and case.
 
-On a Dimension or Fact ReplacingMergeTree, `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it (and the surrogate key with `@zeroKey`), so marking another column `@isBusinessKey` (or removing one), adding / removing `@isSystemVersion`, or adding / removing `@zeroKey` on a Dimension, changes `ORDER BY` and recreates the table. ⚠️ The existing data is lost; the next run reloads the table from the source, so an SCD Type 2 Dimension loses its history.
+On a Dimension or Fact ReplacingMergeTree, `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it (and the surrogate key on a Dimension that has one), so marking another column `@isBusinessKey` (or removing one), adding / removing `@isSystemVersion`, or adding / removing `@zeroKey` on a Dimension, changes `ORDER BY` and recreates the table. ⚠️ The existing data is lost; the next run reloads the table from the source, so an SCD Type 2 Dimension loses its history.
 
 A recreate always runs a non-failing **Warning: Table Recreated (`<reason>`)** stage first. Its comment repeats the reason and, when the sort key changed, shows it as `ORDER BY (<old>) -> (<new>)`, e.g.:
 
@@ -1024,8 +1026,15 @@ ClickHouse has no `MERGE`. A Dimension or Fact load therefore **only inserts** t
 The older copies are removed according to the table engine, set with [`@engine`](#engine) or the package `engine` parameter:
 
 * **MergeTree** (the default) — see below.
-* **ReplacingMergeTree** — created as `ReplacingMergeTree(<@isSystemUpdateDate column>)`. Per `ORDER BY` key, ClickHouse keeps only the row with the latest `SYSTEM_UPDATE_DATE`. `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it (and the surrogate key with `@zeroKey`) — every copy of a row the load replaces has the same values there. `@orderBy` / `@primaryKey` are not accepted. Nothing is deleted.
-* **MergeTree** (the default, or any engine other than a ReplacingMergeTree) — **Clean Up Previous Data** runs after the insert: a `DELETE` of the copies the insert replaced, per business key (plus `SYSTEM_VERSION` for SCD Type 2, plus the surrogate key on a Dimension), keeping the row with the latest `SYSTEM_UPDATE_DATE`. Only keys that now have more than one row are read, and only the target is read — never the source. A plain `SELECT` is correct right after the run.
+* **ReplacingMergeTree** — created as `ReplacingMergeTree(<@isSystemUpdateDate column>)`. Per `ORDER BY` key, ClickHouse keeps only the row with the latest `SYSTEM_UPDATE_DATE`. `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it (and the surrogate key on a Dimension that has one) — every copy of a row the load replaces has the same values there. `@orderBy` / `@primaryKey` are not accepted. Nothing is deleted.
+* **MergeTree** (the default, or any engine other than a ReplacingMergeTree) — **Clean Up Previous Data** runs after the insert: a `DELETE` of the copies the insert replaced, per business key (plus `SYSTEM_VERSION` for SCD Type 2, plus the surrogate key on a Dimension), keeping the row with the latest `SYSTEM_UPDATE_DATE`. Only keys that now have more than one row are read, and only the target is read — never the source. A NULL key is cleaned up like any other (`SETTINGS transform_null_in = 1`). A plain `SELECT` is correct right after the run.
+
+**Both engines give the same result, for every merge strategy.** A MergeTree table holds exactly the rows a ReplacingMergeTree returns when read with `FINAL`: ClickHouse removes the older copies of a ReplacingMergeTree itself, and the load does it for a MergeTree. To keep the two the same, every load also:
+
+* keeps **one source row per key** before it inserts (`LIMIT 1 BY` the business key; for `allColumnMatch`, its match columns), as a ReplacingMergeTree keeps one row per `ORDER BY` key. `lastModified` keeps the row with the newest `@lastModifiedTracking` value, and `allColumnMatch` the one with the latest `@isSystemUpdateDate` when there is one; otherwise which duplicate is kept is not defined — see [Unique Business Keys](#unique-business-keys-fact-and-dimension).
+* matches keys **NULL-safely** (`isNotDistinctFrom`): a NULL business key is one key value, as it is in a ReplacingMergeTree's `ORDER BY`.
+
+This holds when `readWithFinal` is `true`: with it `false`, a ReplacingMergeTree load reads its own copies before they are merged and can differ — see [Reading an Upstream ReplacingMergeTree](#reading-an-upstream-replacingmergetree-readwithfinal). (Tested: changeTracking and lastModified Facts, SCD1 and SCD2 Dimensions and allColumnMatch Facts, each on both engines, with a duplicated key and NULL keys in the source; `EXCEPT` in both directions returned no rows.)
 
 #### Querying a ReplacingMergeTree
 
@@ -1079,7 +1088,7 @@ Together with the package `engine`:
 | `ReplacingMergeTree` | `false` | ReplacingMergeTree, unless `@engine` overrides | As written — correct only when `final = 1` is set on the ClickHouse user or profile Coalesce runs with |
 | `MergeTree` / empty | `false` | MergeTree, unless `@engine` overrides | As written — fine unless an upstream is overridden to a ReplacingMergeTree and the user has no `final = 1` |
 
-A plain-insert or `allColumnMatch` Fact stays MergeTree whatever the package `engine` (see [`@engine`](#engine)). `readWithFinal` = `false` relies on `final = 1` being set on the ClickHouse user in the environment's connection — the one Coalesce runs as — not only on the users analysts connect with.
+A plain-insert Fact stays MergeTree whatever the package `engine` (see [`@engine`](#engine)). `readWithFinal` = `false` relies on `final = 1` being set on the ClickHouse user in the environment's connection — the one Coalesce runs as — not only on the users analysts connect with.
 
 * **Work nodes too:** a Work table is always MergeTree (Work has no `@engine`), but what it reads can be a ReplacingMergeTree, so its load gets the setting like a Dimension or Fact.
 * **Why always:** the engine of what a node reads is not in its metadata — an upstream node's `@engine` is not passed, and a source table can be anything. ClickHouse applies `final = 1` only to the tables that support `FINAL`, so a ReplacingMergeTree upstream (from the package `engine`, its own `@engine`, or an external source table) is read with one row per key, and a MergeTree — whose load already deleted its replaced copies — is read as usual. It covers the node's own target too: a MergeTree target ignores it, a ReplacingMergeTree target is read with `FINAL`.
@@ -1099,9 +1108,9 @@ A plain-insert or `allColumnMatch` Fact stays MergeTree whatever the package `en
 |---|---|---|
 | `changeTracking` (default when `@mergeStrategy` is not set) | `@isBusinessKey` columns | New keys are inserted; changed rows are re-inserted with a newer `SYSTEM_UPDATE_DATE` and the older copy is removed |
 | `lastModified` | `@isBusinessKey` columns, plus exactly one `@lastModifiedTracking` column | Only rows newer than the target's are loaded, then as `changeTracking` |
-| `allColumnMatch` (Fact) | Every non-system column (`@isBusinessKey` is ignored) | Only rows with no fully matching row in the target are inserted; nothing is updated or deleted |
+| `allColumnMatch` (Fact) | The match columns: the non-system columns that come from the source (`@isBusinessKey` is ignored) | Only rows with no matching row in the target are inserted; nothing is updated or deleted. On a ReplacingMergeTree the match columns are the `ORDER BY`, so identical rows also collapse at a merge |
 
-A Fact with no `@isBusinessKey` column and no `@mergeStrategy` is loaded as a plain insert, and an `allColumnMatch` Fact only inserts rows that don't exist yet: neither replaces rows, so nothing is cleaned up, and a package `engine` parameter of `ReplacingMergeTree` does not apply to them: they stay MergeTree (a ReplacingMergeTree would collapse identical rows).
+A Fact with no `@isBusinessKey` column and no `@mergeStrategy` is loaded as a plain insert: it replaces no rows, nothing is cleaned up, and a package `engine` parameter of `ReplacingMergeTree` does not apply to it — it stays MergeTree (a ReplacingMergeTree would collapse identical rows). An `allColumnMatch` Fact only inserts rows that don't exist yet, so nothing is cleaned up either; it does take a `ReplacingMergeTree` engine, ordered by its match columns — see [Fact All Column Match](#fact-all-column-match).
 
 * The ReplacingMergeTree and the clean-up tell the copies apart only by `SYSTEM_UPDATE_DATE`, so they need that column. On a ReplacingMergeTree it is the engine's version argument: required, and it must be marked `@notNull`. Like every column it is `Nullable(...)` without `@notNull`, and ClickHouse does not accept a `Nullable` version argument:
 
@@ -1128,11 +1137,11 @@ A ReplacingMergeTree decides two things: which rows are copies of each other (it
 
 ### Unique Business Keys (Fact and Dimension)
 
-The `@isBusinessKey` column(s) must be unique in the node's source: one row per business key per load. Making sure of this is the user's responsibility; the node types do not check it.
+The `@isBusinessKey` column(s) should be unique in the node's source: one row per business key per load.
 
-If the source returns the same business key more than once, ClickHouse does not fail the load. Both rows are inserted with the same `SYSTEM_UPDATE_DATE`. A ReplacingMergeTree then keeps one of them, whichever ClickHouse merges last; with `@engine("MergeTree")` the clean-up keeps the row(s) with the latest `SYSTEM_UPDATE_DATE` per key, so **both copies stay in the target**.
+If the source returns the same business key more than once, the load keeps **one row per key** (`LIMIT 1 BY` the business key) on either engine, so a MergeTree and a ReplacingMergeTree end the same. Under `lastModified` the row with the newest `@lastModifiedTracking` value is kept; under `changeTracking` which row is kept is **not defined**, and the others are dropped without an error.
 
-De-duplicate the data before it is loaded, for example:
+To decide which row wins, or to stop the run instead, de-duplicate or check the data before it is loaded, for example:
 
 - In the node's SELECT, with `QUALIFY` or `LIMIT 1 BY`:
 
@@ -1150,7 +1159,6 @@ De-duplicate the data before it is loaded, for example:
   ```
 
 - With a node-level `@tests(..., false, "Before")` on the business key, so the run fails instead of loading duplicates — see [Duplicate or NULL Business Key Check](#duplicate-or-null-business-key-check).
-- With a duplicate check or clean-up in `@preSQL`.
 
 ### Surrogate Keys (Dimension)
 
@@ -1206,7 +1214,7 @@ The table's `ORDER BY` (sort) key. Each argument is one term — a column or an 
 |---|---|
 | **term** | A column or expression, e.g. ``"`n_Nationkey`"`` or ``"toYYYYMM(`last_Modified`)"``. Repeat the argument for each term, in sort order. |
 
-* ⛔ Not accepted on a Dimension or Fact ReplacingMergeTree: its `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it (and the surrogate key with `@zeroKey`), and the deploy and the run stop if `@orderBy` is set. Use it on Work nodes and on MergeTree Dimensions and Facts (the default).
+* ⛔ Not accepted on a Dimension or Fact ReplacingMergeTree: its `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it (and the surrogate key on a Dimension that has one), and the deploy and the run stop if `@orderBy` is set. Use it on Work nodes and on MergeTree Dimensions and Facts (the default).
 * Without `@orderBy` (and `@primaryKey`) a MergeTree table uses `ORDER BY tuple()` — see [ClickHouse Cloud Defaults](#clickhouse-cloud-defaults).
 * Written to ClickHouse as given; ClickHouse rejects an invalid key itself.
 * ⚠️ On redeploy, removing trailing terms or adding new columns (without a default) is altered in place when `@primaryKey` is set; any other `@orderBy` change (or renaming / retyping a column used in it) recreates the table — existing data is lost. See [Sort Key and Partition Key Changes](#sort-key-and-partition-key-changes).
@@ -1276,17 +1284,17 @@ The table's MergeTree `SETTINGS`. Each argument is one setting, written as `name
 
 `@engine("ReplacingMergeTree | MergeTree")` — Dimension and Fact only.
 
-The table's `ENGINE`. Must be a MergeTree-family engine: the table is created with `ORDER BY` / `SETTINGS` and redeployed with `CLONE AS`.
+The table's `ENGINE`: **`MergeTree` or `ReplacingMergeTree` only**, written without arguments. The name is not case-sensitive (`@engine("replacingmergetree")` is written `ReplacingMergeTree`), and `MergeTree()` is the same as `MergeTree`. The loads are built for these two engines; other MergeTree-family engines (`SummingMergeTree`, `AggregatingMergeTree`, `CollapsingMergeTree`, ...) change rows at merges, so they are not accepted.
 
 * **Where the engine comes from**, first match wins:
   1. The node's `@engine`.
-  2. The package parameter `engine`, set once for every Dimension and Fact in the package — e.g. `ReplacingMergeTree`, so it does not have to be written on each node. A `ReplacingMergeTree` value is not applied to a plain-insert or `allColumnMatch` Fact (it would collapse identical rows) — that Fact goes on to step 3.
+  2. The package parameter `engine`, set once for every Dimension and Fact in the package — e.g. `ReplacingMergeTree`, so it does not have to be written on each node. A `ReplacingMergeTree` value is not applied to a plain-insert Fact (it would collapse identical rows) — that Fact goes on to step 3. An `allColumnMatch` Fact takes it, ordered by its match columns.
   3. The built-in default: **MergeTree**. No `ENGINE` is written, as when ClickHouse itself is given none (Cloud creates `SharedMergeTree`).
 * **`readWithFinal` parameter:** `true` makes downstream nodes read their upstream ReplacingMergeTree with `FINAL` — see [Reading an Upstream ReplacingMergeTree](#reading-an-upstream-replacingmergetree-readwithfinal).
-* **`ReplacingMergeTree`:** the load only inserts and ClickHouse keeps the latest copy of each row — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). The `@isSystemUpdateDate` column is added as the version argument and must be marked `@notNull`. `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it (and the surrogate key with `@zeroKey`); `@orderBy` / `@primaryKey` are not accepted. Readers need `FINAL` — see [Querying a ReplacingMergeTree](#querying-a-replacingmergetree). The table `COMMENT` is the node description only; nothing is added for the engine.
+* **`ReplacingMergeTree`:** the load only inserts and ClickHouse keeps the latest copy of each row — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). The `@isSystemUpdateDate` column is added as the version argument and must be marked `@notNull`. `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it (and the surrogate key on a Dimension that has one); `@orderBy` / `@primaryKey` are not accepted. Readers need `FINAL` — see [Querying a ReplacingMergeTree](#querying-a-replacingmergetree). The table `COMMENT` is the node description only; nothing is added for the engine.
 * **`MergeTree` (the default):** the load inserts and then deletes the replaced copies in **Clean Up Previous Data**. `@orderBy` / `@primaryKey` can be set. No `ENGINE` and `@engine("MergeTree")` are the same engine: switching between them does not recreate the table.
-* An engine written with its own arguments is used as written, e.g. ``@engine("ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)")``; the column named by its first argument must be marked `@notNull`.
-* **Invalid configuration: engine** stops the deploy and the run for an engine outside the MergeTree family, and for a ReplacingMergeTree with `@orderBy` / `@primaryKey`, or without a business key or `@isSystemUpdateDate` column.
+* **Write `ReplacingMergeTree` without arguments.** The loads set the version argument and `ORDER BY` themselves, so an engine with its own arguments, such as ``@engine("ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)")`` or the same value in the package `engine` parameter, stops the deploy and the run.
+* **Invalid configuration: engine** stops the deploy and the run for any engine other than `MergeTree` / `ReplacingMergeTree`, for an engine written with arguments, and for a ReplacingMergeTree with `@orderBy` / `@primaryKey`, or without a business key or `@isSystemUpdateDate` column (except `allColumnMatch`, which needs neither).
 * On redeploy, a changed `@engine` recreates the table — existing data is lost.
 * **Note:** Ignored on Views.
 
@@ -1310,7 +1318,7 @@ SETTINGS allow_nullable_key = 1
 COMMENT 'Customer dimension'
 ```
 
-With `@zeroKey`, the surrogate key is added to `ORDER BY`: the zero record's business key value (e.g. `0` or `'UNKNOWN'`) can equal a real key.
+`@zeroKey` does not change the table: a ReplacingMergeTree Dimension's `ORDER BY` always includes the surrogate key (when the node has one), which keeps the zero record apart from a real row with the same business key value (e.g. `0` or `'UNKNOWN'`). Adding, changing or removing `@zeroKey` needs no redeploy — see [Zero Key Record](#zero-key-record) and the bullets above on the zero record's `SYSTEM_CREATE_DATE`.
 
 ##### `@final`
 
@@ -1798,7 +1806,7 @@ The default system column expression `CAST(CURRENT_TIMESTAMP AS TIMESTAMP)` give
 Duplicates in the source are not rejected: both copies are inserted and kept. De-duplicate upstream — see [Unique Business Keys](#unique-business-keys-fact-and-dimension).
 
 * **NULL Business Keys**:  
-Dimension and Fact expect every business key to be non-NULL. Matching uses plain equality and NULL never equals NULL, so a source row with a NULL business key never matches its target row: instead of updating it, every run **inserts it again as a new row** (and an SCD2 Dimension never expires the old one). Under `allColumnMatch` the same applies to a NULL in any compared column. Filter or default NULL keys upstream, e.g. `WHERE <business key> IS NOT NULL` or `coalesce(<business key>, '<placeholder>')`, or check it with a `Before` test — see [Duplicate or NULL Business Key Check](#duplicate-or-null-business-key-check).
+A NULL business key is matched like a value (`isNotDistinctFrom`: NULL matches NULL), as it is in a ReplacingMergeTree's `ORDER BY`. All source rows with a NULL key are therefore **one key**: one of them is loaded and then updated like any other key, on both engines. If a NULL key should not be a member at all, filter or default NULL keys upstream, e.g. `WHERE <business key> IS NOT NULL` or `coalesce(<business key>, '<placeholder>')`, or check it with a `Before` test — see [Duplicate or NULL Business Key Check](#duplicate-or-null-business-key-check).
 
 * **`truncateInsert` with SCD Type 2**:  
 `@writeMode("truncateInsert")` empties the table before every load, so an SCD Type 2 dimension (`changeTracking` with an `@isChangeTracking` column, or `lastModified` with `@lastModifiedTracking(2)`) loses all its history on each run — every row is reloaded as version 1. The combination runs without error, but it defeats the purpose of SCD Type 2; use the default `append` for versioned dimensions.
@@ -2195,7 +2203,7 @@ FROM {{ ref('SRC', 'customer') }} `customer`
 
 ##### Duplicate or NULL Business Key Check
 
-Every merge strategy matches rows on the business key, so the source must return exactly one row per key, with no NULL key — on ClickHouse a duplicate is loaded twice instead of failing. A `Before` test runs ahead of the load and fails if the source returns a duplicated or NULL key.
+Every merge strategy loads one row per business key and treats a NULL key as one key value, so a duplicated key is dropped silently. A `Before` test runs ahead of the load and fails the run instead if the source returns a duplicated or NULL key.
 
 ```sql
 @mergeStrategy("changeTracking")
@@ -2261,7 +2269,7 @@ FROM {{ ref('SRC', 'orders') }} `orders`
 
 ##### Fact All Column Match
 
-Every non-system column is compared; a row is inserted only if an identical row doesn't already exist. Nothing is ever updated or deleted, and no `@isBusinessKey` is needed.
+A row is inserted only if no stored row has the same values in its **match columns**. Nothing is ever updated or deleted, and no `@isBusinessKey` is needed.
 
 `allColumnMatch` is how you build a **factless fact table** — a table with no measures, where the existence of a row is the fact itself. Typical uses:
 
@@ -2278,9 +2286,13 @@ SELECT
     CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_CREATE_DATE` @id("1e0008") @isSystemCreateDate
 FROM {{ ref('SRC', 'partsupp') }} `partsupp`
 ```
-* `SYSTEM_CREATE_DATE` is left out of the comparison, so re-running the load doesn't insert the same row again.
-* Matching uses plain equality — a row with a NULL in any compared column never matches and is inserted on every run.
-* Two identical source rows that aren't in the target yet are both inserted — add `DISTINCT` to the SELECT if that's not wanted.
+* **Match columns** are the non-system columns that come from the source: Coalesce's column lineage links them to a source column (`ps_partkey`, `ps_suppkey`, `ps_availqty` above). The load stage shows them in a `/* Match columns … */` comment.
+* **Left out of the match:** system columns (`SYSTEM_CREATE_DATE` above), and any column that is only a transform with no source column — a constant, `now()`, `CURRENT_TIMESTAMP`, `generateUUIDv4()`, a load or batch id. Such a column never makes a stored row look new, so re-running the load doesn't insert the same row again.
+* **No lineage to go on:** when the node has its own `WITH` CTEs (Coalesce does not trace columns through them) or reads a table function, every non-system column is matched. Then a column that changes on every run makes every row new on every run — mark such a timestamp `@isSystemCreateDate` / `@isSystemUpdateDate`, or leave it out.
+* Matching is NULL-safe (`isNotDistinctFrom`): a row with a NULL in a match column matches its stored copy and is not inserted again.
+* **ReplacingMergeTree** (`@engine("ReplacingMergeTree")` or the package `engine` parameter): `ORDER BY` is the match columns, so identical rows also collapse — within one insert and at background merges. The version argument is the `@isSystemUpdateDate` column when the node has one (``ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)``, marked `@notNull`); without one the engine is a bare `ReplacingMergeTree`, which keeps the last copy inserted — the copies only differ in the columns left out of the match. No business key or update date is required; `@orderBy` / `@primaryKey` and an engine with its own arguments stop the deploy and the run (**Invalid configuration: engine**), and so does a node whose columns are all system columns. Readers need `FINAL` — see [Querying a ReplacingMergeTree](#querying-a-replacingmergetree). (The example above sets `@orderBy`, so it is for a MergeTree.)
+* **MergeTree and ReplacingMergeTree give the same result** (as for every strategy — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact)). Each load keeps one source row per combination of match columns (`LIMIT 1 BY`; the row with the latest `@isSystemUpdateDate` when the node has one, as a ReplacingMergeTree's version argument would) and skips combinations already stored. So a MergeTree holds one row per combination — what a ReplacingMergeTree returns with `FINAL` — without needing `FINAL`; on a ReplacingMergeTree, ClickHouse also collapses copies at merges. Columns left out of the match (system columns, transforms) are not compared, so for duplicates that differ only there, the copy kept is not defined unless an `@isSystemUpdateDate` decides it.
+* Changing the match columns (adding or removing a source column) on a ReplacingMergeTree changes its `ORDER BY` and recreates the table on redeploy — see [Sort Key and Partition Key Changes](#sort-key-and-partition-key-changes).
 
 ##### Fact with Dimension Key Lookups
 

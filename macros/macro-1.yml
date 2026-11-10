@@ -8,8 +8,11 @@ macroString: |-
                 turned on once instead of on every node. A node's @engine always wins.
                 Options:
                   "ReplacingMergeTree"  every Dimension / Fact without @engine is a ReplacingMergeTree
-                                        (except a plain-insert / allColumnMatch Fact, which stays MergeTree)
+                                        (except a plain-insert Fact, which stays MergeTree; an
+                                        allColumnMatch Fact is ordered by its match columns)
                   "MergeTree"           every Dimension / Fact without @engine is a MergeTree
+                Only these two values, without arguments (the name in any case); any other value stops the
+                deploy and the run of every Dimension / Fact without @engine (Invalid configuration: engine)
                   ""                    not set: the built-in default, MergeTree (default)
 
     readWithFinal (runtime parameter only — not a package parameter): whether the SQL the node types
@@ -335,11 +338,32 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    safe_equals(left_expr, right_expr, data_type): equality for business-key joins. NULL never matches.
+    safe_equals(left_expr, right_expr, data_type): NULL-safe equality for business-key joins
+    (isNotDistinctFrom: NULL matches NULL). A ReplacingMergeTree treats a NULL key as one key value,
+    so a MergeTree load must too for both engines to hold the same rows.
     data_type is unused, kept so callers don't change.
   ===========================================================================#}
   {%- macro safe_equals(left_expr, right_expr, data_type) -%}
-      {{ left_expr }} = {{ right_expr }}
+      isNotDistinctFrom({{ left_expr }}, {{ right_expr }})
+  {%- endmacro -%}
+
+  {#===========================================================================
+    source_one_per_key(keyCols, orderCol): the `SOURCE_DATA` CTE over `SOURCE_ROWS` for a
+    changeTracking / lastModified load — one source row per business key (LIMIT 1 BY), the row
+    with the newest orderCol (the @lastModifiedTracking column) first when given. A ReplacingMergeTree
+    keeps one row per key, so a MergeTree load keeps one too and both engines end the same.
+    Which row is kept for duplicates under changeTracking is not defined.
+  ===========================================================================#}
+  {%- macro source_one_per_key(keyCols, orderCol='') -%}
+            `SOURCE_DATA` AS (
+                /* One source row per business key, as a ReplacingMergeTree keeps */
+                SELECT *
+                FROM `SOURCE_ROWS`
+                {%- if orderCol %}
+                ORDER BY `{{ orderCol }}` DESC
+                {%- endif %}
+                LIMIT 1 BY {% for name in keyCols %}`{{ name }}`{%- if not loop.last %}, {% endif %}{% endfor %}
+            ),
   {%- endmacro -%}
 
   {#===========================================================================
@@ -518,28 +542,36 @@ macroString: |-
   {#===========================================================================
     validate_table_engine(isDimension, hardFail): Dimension / Fact @engine checks, after
     set_table_engine(). One failing stage lists every problem:
-      - only MergeTree-family engines: the CREATE writes ORDER BY / SETTINGS, and redeploys use
-        CLONE AS
+      - only MergeTree and ReplacingMergeTree, without arguments (the name in any case): the loads are
+        built for these two — other MergeTree-family engines (Summing, Aggregating, Collapsing, ...)
+        change rows at merges, and the load sets a ReplacingMergeTree's version argument and ORDER BY
       - a ReplacingMergeTree builds its own ORDER BY from the replace key, so it needs a business
         key and a version argument (@isSystemUpdateDate), and does not accept @orderBy / @primaryKey:
         a manual key could collapse different rows or keep replaced copies. SYSTEM_VERSION is optional
         on an SCD Type 1 Dimension (an SCD Type 2 one requires it through the system column check)
+      - allColumnMatch (a factless fact) needs no business key and no @isSystemUpdateDate: its ORDER BY
+        is the match columns, and a bare ReplacingMergeTree keeps the last inserted copy. It needs at
+        least one non-system column to match on
   ===========================================================================#}
   {%- macro validate_table_engine(isDimension, hardFail=false) -%}
       {%- set nsProblems = namespace(items=[]) -%}
-      {%- set engineFamily = nsNodeVariables.desiredEngine.split('(')[0] | trim | lower -%}
-      {%- if engineFamily and not engineFamily.endswith('mergetree') -%}
-          {%- set nsProblems.items = nsProblems.items + ['@engine("' ~ nsNodeVariables.desiredEngine ~ '") is not a MergeTree-family engine. The table is created with ORDER BY / SETTINGS and redeployed with CLONE AS, which only MergeTree-family engines support. Use MergeTree (the default) or ReplacingMergeTree.'] -%}
+      {%- if nsNodeVariables.desiredInvalidEngine | default('', true) -%}
+          {%- set nsProblems.items = nsProblems.items + [{'text': nsNodeVariables.desiredEngineSource ~ ' is "' ~ nsNodeVariables.desiredInvalidEngine ~ '". Only MergeTree and ReplacingMergeTree are supported, written without arguments: the loads are built for these two engines (others change rows at merges), and the load sets a ReplacingMergeTree\'s version argument (the @isSystemUpdateDate column) and ORDER BY itself.', 'example': '@engine("ReplacingMergeTree") or @engine("MergeTree")'}] -%}
+      {%- endif -%}
+      {%- set isAllColumnMatch = nsNodeVariables.desiredAllColumnMatch | default(false) -%}
+      {%- if isAllColumnMatch and not nsNodeVariables.desiredReplaceKey -%}
+          {%- set nsProblems.items = nsProblems.items + ['@mergeStrategy("allColumnMatch") matches rows on their non-system columns, but every column of this node is a system column, so there is nothing to match on. Add the columns that make up the fact.'] -%}
       {%- endif -%}
       {%- if nsNodeVariables.desiredEngineReplacing -%}
-          {%- set keyText = 'the business key' ~ (', SYSTEM_VERSION (when the node has it) and, with @zeroKey, the surrogate key' if isDimension else '') -%}
+          {%- set keyText = ('the allColumnMatch match columns (the non-system columns that come from the source)' if isAllColumnMatch
+                             else 'the business key' ~ (', SYSTEM_VERSION (when the node has it) and the surrogate key (when the node has one)' if isDimension else '')) -%}
           {%- if nsNodeVariables.desiredManualSortKey -%}
               {%- set nsProblems.items = nsProblems.items + [nsNodeVariables.desiredManualSortKey | join(' / ') ~ ' is not accepted on a ReplacingMergeTree. Its ORDER BY decides which rows are copies of each other, so it is built from ' ~ keyText ~ ': ORDER BY (' ~ (nsNodeVariables.desiredReplaceKey | join(', ')) ~ '). A manual key can collapse different rows into one or keep the copies the load replaces. Remove ' ~ (nsNodeVariables.desiredManualSortKey | join(' / ')) ~ ', or use @engine("MergeTree") to set your own sort key.'] -%}
           {%- endif -%}
-          {%- if not (columns | selectattr('isBusinessKey') | list) -%}
+          {%- if not isAllColumnMatch and not (columns | selectattr('isBusinessKey') | list) -%}
               {%- set nsProblems.items = nsProblems.items + ['A ReplacingMergeTree keeps one row per business key, but no column is marked @isBusinessKey, so every row would be collapsed into one. Mark the business key with @isBusinessKey, or use @engine("MergeTree").'] -%}
           {%- endif -%}
-          {%- if not nsNodeVariables.desiredVersionColumn -%}
+          {%- if not isAllColumnMatch and not nsNodeVariables.desiredVersionColumn -%}
               {%- set nsProblems.items = nsProblems.items + [{'text': 'A ReplacingMergeTree needs a version argument to keep the latest copy of a row, but no column is marked @isSystemUpdateDate (or the engine names no column of the node). Add the column:', 'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate @notNull'}] -%}
           {%- endif -%}
       {%- endif -%}
@@ -993,10 +1025,10 @@ macroString: |-
           SELECT 1
       {%- endif -%}
 
-      {# allColumnMatch matches on every non-system column, so @isBusinessKey / @lastModifiedTracking are never read. Warn only — the merge still runs. #}
+      {# allColumnMatch matches on its match columns (acm_match_columns()), so @isBusinessKey / @lastModifiedTracking are never read. Warn only — the merge still runs. #}
       {%- if isAllColumnMatch and hasBusinessKey %}
           {{ test_stage('Warning: mergeStrategy', true) }}
-          -- @mergeStrategy("allColumnMatch") matches on every non-system column, so @isBusinessKey is ignored — all columns are used as the business key for comparison. Remove @isBusinessKey, or switch mergeStrategy to use it.
+          -- @mergeStrategy("allColumnMatch") matches on the non-system columns that come from the source, so @isBusinessKey is ignored. Remove @isBusinessKey, or switch mergeStrategy to changeTracking or lastModified to use it.
           SELECT 1
       {%- endif -%}
 
@@ -1228,6 +1260,43 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
+    acm_match_columns(cols, srcs, ns): the columns an allColumnMatch Fact (a factless fact) matches
+    on — the load's comparison and, on a ReplacingMergeTree, its ORDER BY. Sets ns.items (column
+    names, in column order) and ns.fromLineage.
+      - Only columns that come from the source: a non-system column with Coalesce column lineage
+        (sources[0].columns[].sourceColumns names a source column). A column that is only a
+        transform — a constant, now(), generateUUIDv4(), a load id — is left out, so it never makes
+        a stored row look new.
+      - System columns (create / update date and the other system roles) are always left out.
+      - No lineage to go on (the node has its own CTEs, which Coalesce does not trace, or reads a
+        table function): every non-system column.
+  ===========================================================================#}
+  {%- macro acm_match_columns(cols, srcs, ns) -%}
+      {%- set nsC = namespace(candidates=[], sourced=[]) -%}
+      {%- for col in cols | default([], true) if not (col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemVersion
+                                                    or col.isSystemCurrentFlag or col.isSystemEndDate or col.isSurrogateKey) -%}
+          {%- set nsC.candidates = nsC.candidates + [col.name] -%}
+      {%- endfor -%}
+      {%- set srcList = srcs | default([], true) | list -%}
+      {%- set src = srcList[0] if srcList else none -%}
+      {%- if src is not none and not (src.cteString | default('', true) | trim) -%}
+          {%- for srcCol in src.columns | default([], true) if srcCol.name in nsC.candidates and srcCol.name not in nsC.sourced -%}
+              {%- for ref in srcCol.sourceColumns | default([], true) if ref is mapping and ref.column is defined -%}
+                  {%- if srcCol.name not in nsC.sourced -%}
+                      {%- set nsC.sourced = nsC.sourced + [srcCol.name] -%}
+                  {%- endif -%}
+              {%- endfor -%}
+          {%- endfor -%}
+      {%- endif -%}
+      {%- set ns.fromLineage = nsC.sourced | length > 0 -%}
+      {%- set nsOut = namespace(items=[]) -%}
+      {%- for name in nsC.candidates if (name in nsC.sourced or not ns.fromLineage) -%}
+          {%- set nsOut.items = nsOut.items + [name] -%}
+      {%- endfor -%}
+      {%- set ns.items = nsOut.items -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
     ch_table_engine(cols, cfg, isDimension, ns): the ENGINE of a Dimension or Fact table for one
     state (desired: columns / config; current: currentState's). Sets on ns:
       engine         the ENGINE clause without "ENGINE =", '' when none is written (ClickHouse Cloud
@@ -1238,20 +1307,34 @@ macroString: |-
                      otherwise
       replaceKey     a ReplacingMergeTree's ORDER BY, always built here: the business key, plus
                      SYSTEM_VERSION on a Dimension that has it (one row per version; optional on SCD
-                     Type 1, where it is always 1), plus the surrogate key with
-                     @zeroKey (keeps the zero record apart from a real row with the same business key
-                     value). Every copy of a row the load replaces has the same values in these columns.
+                     Type 1, where it is always 1), plus the surrogate key on a Dimension that has one.
+                     The load keeps a row's surrogate key whenever it re-inserts that row, so it never
+                     splits copies; it keeps the zero record apart from a real row with the same business
+                     key value, so @zeroKey never changes the table (the same key as the MergeTree
+                     clean-up). Every copy of a row the load replaces has the same values in these columns.
+                     An allColumnMatch Fact (a factless fact) uses its match columns instead, see
+                     acm_match_columns().
+      allColumnMatch the node is an allColumnMatch Fact
+    srcs is the state's sources (sources / currentState.sources), read for the column lineage.
     The engine is taken from, in order:
       1. the node's @engine
       2. packageParameter.engine, set once for every Dimension and Fact — except a ReplacingMergeTree
-         for a table whose load does not replace rows (no business key, or allColumnMatch), which
-         falls through to 3: a ReplacingMergeTree would collapse its identical rows
+         for a plain-insert Fact (no business key, no @mergeStrategy), which falls through to 3:
+         a ReplacingMergeTree would collapse its identical rows. An allColumnMatch Fact takes it: its
+         ORDER BY is the match columns, so only true duplicates collapse
       3. the built-in default: no ENGINE is written, so the table is a MergeTree (ClickHouse Cloud:
          SharedMergeTree), as when ClickHouse is given no ENGINE
-    A bare ReplacingMergeTree gets the @isSystemUpdateDate column as its version argument; an engine
-    written with its own arguments is used as written.
+    A bare ReplacingMergeTree gets the @isSystemUpdateDate column as its version argument; without one
+    it stays bare (allColumnMatch: the copies of a row are identical in the match columns, so keeping
+    the last inserted is enough). The load decides the version column and ORDER BY for
+    changeTracking / lastModified and allColumnMatch, so a ReplacingMergeTree written with its own
+    arguments is not accepted.
+    Accepted engines: MergeTree and ReplacingMergeTree, without arguments, the name in any case
+    ("replacingmergetree" is written ReplacingMergeTree, "MergeTree()" is MergeTree). Anything else
+    (another engine, arguments) is set in ns.invalidEngine, and validate_table_engine() stops the
+    deploy and the run.
   ===========================================================================#}
-  {%- macro ch_table_engine(cols, cfg, isDimension, ns) -%}
+  {%- macro ch_table_engine(cols, cfg, isDimension, ns, srcs=[]) -%}
       {%- set nsEngine = namespace(items=[]) -%}
       {%- set nsStrategy = namespace(items=[]) -%}
       {{- collect_key_terms(cfg.engine, nsEngine) -}}
@@ -1261,9 +1344,15 @@ macroString: |-
       {%- set bizKeys = cols | selectattr('isBusinessKey') | map(attribute='name') | list -%}
       {%- set versionCols = cols | selectattr('isSystemVersion') | map(attribute='name') | list if isDimension else [] -%}
       {%- set surrogateCols = cols | selectattr('isSurrogateKey') | map(attribute='name') | list
-                              if (isDimension and cfg.zeroKey is defined) else [] -%}
+                              if isDimension else [] -%}
+      {%- set isAllColumnMatch = strategy == 'allcolumnmatch' and not isDimension -%}
+      {%- set ns.allColumnMatch = isAllColumnMatch -%}
+      {%- set nsMatch = namespace(items=[], fromLineage=false) -%}
+      {%- if isAllColumnMatch -%}
+          {{- acm_match_columns(cols, srcs, nsMatch) -}}
+      {%- endif -%}
       {%- set nsKey = namespace(items=[]) -%}
-      {%- for name in bizKeys + versionCols + surrogateCols -%}
+      {%- for name in (nsMatch.items if isAllColumnMatch else bizKeys + versionCols + surrogateCols) -%}
           {%- set nsKey.items = nsKey.items + ['`' ~ name ~ '`'] -%}
       {%- endfor -%}
       {%- set ns.replaceKey = nsKey.items -%}
@@ -1272,24 +1361,34 @@ macroString: |-
       {%- set packageEngine = (packageParameter.engine | default('', true) | string | trim) if packageParameter is defined else '' -%}
       {%- if nsEngine.items -%}
           {%- set engine = nsEngine.items[0] -%}
-      {%- elif packageEngine and (replacesRows or 'replacingmergetree' not in (packageEngine | lower)) -%}
+      {%- elif packageEngine and (replacesRows or isAllColumnMatch or 'replacingmergetree' not in (packageEngine | lower)) -%}
           {%- set engine = packageEngine -%}
       {%- else -%}
           {%- set engine = '' -%}
       {%- endif -%}
-      {%- set ns.replacing = 'replacingmergetree' in (engine.split('(')[0] | trim | lower) -%}
+      {#- Only MergeTree and ReplacingMergeTree, without arguments; the name in any case. "MergeTree()" is
+          MergeTree. Anything else is kept as written in ns.invalidEngine for validate_table_engine() #}
+      {%- set ns.invalidEngine = '' -%}
+      {%- if engine -%}
+          {%- set engineName = engine.split('(')[0] | trim | lower -%}
+          {%- set engineArgs = (engine.split('(', 1)[1] | replace(')', '') | trim) if '(' in engine else '' -%}
+          {%- if engineName == 'mergetree' and not engineArgs -%}
+              {%- set engine = 'MergeTree' -%}
+          {%- elif engineName == 'replacingmergetree' and not engineArgs -%}
+              {%- set engine = 'ReplacingMergeTree' -%}
+          {%- else -%}
+              {%- set ns.invalidEngine = engine -%}
+          {%- endif -%}
+      {%- endif -%}
+      {%- set ns.replacing = engine == 'ReplacingMergeTree' -%}
+      {%- set ns.customArgs = false -%}
+      {%- set ns.engineSource = '@engine' if nsEngine.items else 'the package engine parameter' -%}
       {%- set updateDateCols = cols | selectattr('isSystemUpdateDate') | map(attribute='name') | list -%}
       {%- set ns.versionColumn = '' -%}
       {%- set ns.engine = engine -%}
       {%- if ns.replacing and '(' not in engine and updateDateCols -%}
           {%- set ns.versionColumn = updateDateCols[0] -%}
           {%- set ns.engine = engine ~ '(`' ~ ns.versionColumn ~ '`)' -%}
-      {%- elif ns.replacing and '(' in engine -%}
-          {#- Written with its own arguments: the first one names the version column #}
-          {%- set firstArg = engine.split('(', 1)[1].split(',')[0].split(')')[0] | replace('`', '') | replace('"', '') | trim -%}
-          {%- if firstArg in (cols | map(attribute='name') | list) -%}
-              {%- set ns.versionColumn = firstArg -%}
-          {%- endif -%}
       {%- endif -%}
   {%- endmacro -%}
 
@@ -1303,9 +1402,12 @@ macroString: |-
   ===========================================================================#}
   {%- macro set_table_engine(isDimension) -%}
       {%- if columns is defined and columns and nsNodeVariables.desiredMatType == 'table' -%}
-          {%- set nsDes = namespace(engine='', replacing=false, versionColumn='', replaceKey=[]) -%}
-          {{- ch_table_engine(columns, config, isDimension, nsDes) -}}
+          {%- set nsDes = namespace(engine='', replacing=false, versionColumn='', replaceKey=[], customArgs=false, engineSource='', allColumnMatch=false, invalidEngine='') -%}
+          {{- ch_table_engine(columns, config, isDimension, nsDes, sources if sources is defined else []) -}}
+          {%- set nsNodeVariables.desiredAllColumnMatch = nsDes.allColumnMatch -%}
           {%- set nsNodeVariables.desiredEngine = nsDes.engine -%}
+          {%- set nsNodeVariables.desiredInvalidEngine = nsDes.invalidEngine -%}
+          {%- set nsNodeVariables.desiredEngineSource = nsDes.engineSource -%}
           {%- set nsNodeVariables.desiredEngineReplacing = nsDes.replacing -%}
           {%- set nsNodeVariables.desiredVersionColumn = nsDes.versionColumn -%}
           {%- set nsNodeVariables.desiredReplaceKey = nsDes.replaceKey -%}
@@ -1321,8 +1423,9 @@ macroString: |-
           {%- endif -%}
       {%- endif -%}
       {%- if currentState is defined and currentState and nsNodeVariables.currentMatType == 'table' -%}
-          {%- set nsCur = namespace(engine='', replacing=false, versionColumn='', replaceKey=[]) -%}
-          {{- ch_table_engine(currentState.columns, currentState.config, isDimension, nsCur) -}}
+          {%- set nsCur = namespace(engine='', replacing=false, versionColumn='', replaceKey=[], customArgs=false, engineSource='', allColumnMatch=false, invalidEngine='') -%}
+          {{- ch_table_engine(currentState.columns, currentState.config, isDimension, nsCur,
+                              currentState.sources if currentState.sources is defined else []) -}}
           {%- set nsNodeVariables.currentEngine = nsCur.engine -%}
           {%- set nsNodeVariables.currentEngineReplacing = nsCur.replacing -%}
           {%- if nsCur.replacing -%}
@@ -1695,7 +1798,11 @@ macroString: |-
       {%- if keyChanged -%}
           {%- if nsNodeVariables.desiredEngineReplacing and nsNodeVariables.currentEngineReplacing -%}
               {#- Built by set_table_engine(), never by @orderBy: name what the user changed #}
-              {%- set ns.reasons = ns.reasons + ['ReplacingMergeTree key changed: @isBusinessKey, SYSTEM_VERSION or @zeroKey'] -%}
+              {%- if nsNodeVariables.desiredAllColumnMatch | default(false) -%}
+                  {%- set ns.reasons = ns.reasons + ['ReplacingMergeTree key changed: the allColumnMatch match columns'] -%}
+              {%- else -%}
+                  {%- set ns.reasons = ns.reasons + ['ReplacingMergeTree key changed: @isBusinessKey, SYSTEM_VERSION or the surrogate key'] -%}
+              {%- endif -%}
           {%- elif not nsNodeVariables.currentPrimaryKey and not nsNodeVariables.desiredPrimaryKey -%}
               {%- set ns.reasons = ns.reasons + ['ORDER BY changed without @primaryKey'] -%}
           {%- else -%}
@@ -1965,6 +2072,29 @@ macroString: |-
           toDate('2149-06-06')
       {%- else -%}
           '2299-12-31 23:59:59.999999'
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    ch_zero_record_date(col): the SYSTEM_CREATE_DATE every zero key record gets — 1970-01-01 00:00:00
+    UTC (epoch 0) in the column's type. A load stamps real rows with the load time, so this value
+    marks a row as a zero record for good: the load leaves every such row out of change detection,
+    whatever @zeroKey says now (a zero record whose surrogate value was changed, or whose @zeroKey was
+    removed, is never matched to a real row with the same business key).
+  ===========================================================================#}
+  {%- macro ch_zero_record_date(col) -%}
+      {%- set dt = col.dataType | default('', true) | lower | replace(' ', '') -%}
+      {%- set dt = dt[9:-1] if dt.startswith('nullable(') else dt -%}
+      {%- if dt.startswith('datetime64') -%}
+          toDateTime64(0, 6)
+      {%- elif dt.startswith('datetime') -%}
+          toDateTime(0)
+      {%- elif dt.startswith('date32') -%}
+          toDate32(0)
+      {%- elif dt.startswith('date') -%}
+          toDate(0)
+      {%- else -%}
+          toDateTime64(0, 6)
       {%- endif -%}
   {%- endmacro -%}
 
