@@ -1,6 +1,8 @@
 @id("5d000000-0000-4000-8000-000000000009")
 @nodeType("SQLFact")
+@partitionBy("`region`")
 @tests("SELECT 1 FROM {{ this }} SETTINGS final = 1", true, "After")
+@tests("SELECT 1 FROM {{ this }} WHERE `SYSTEM_CREATE_DATE` < toDateTime('{{ parameters.cutoff | default('2000-01-01 00:00:00') }}') SETTINGS final = 1", true, "After")
 SELECT
     `k` AS `k` @id("r00001") @isBusinessKey,
     `name` AS `name` @id("r00002"),

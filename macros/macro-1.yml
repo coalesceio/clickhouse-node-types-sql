@@ -14,17 +14,6 @@ macroString: |-
                 Only these two values, without arguments (the name in any case); any other value stops the
                 deploy and the run of every Dimension / Fact without @engine (Invalid configuration: engine)
                   ""                    not set: the built-in default, MergeTree (default)
-
-    readWithFinal (runtime parameter only — not a package parameter): whether the SQL the node types
-    run reads ReplacingMergeTree tables with FINAL (SETTINGS final = 1): every load (its sources and
-    the node's own target), the zero key record, the Last Modified NULL check, the column tests, and
-    views without @final. Set per environment (Environment > Parameters) or per job run:
-      {"readWithFinal": true}
-                Options:
-                  true  (or 1)          SETTINGS final = 1 is added to every load's SELECT (and to a view
-                                        without @final, when it is created)
-                  false (or 0)          not added
-                  not set               not added (same as false)
   ===========================================================================#}
   {%- set packageParameter = namespace(engine = "ReplacingMergeTree") -%}
 
@@ -564,7 +553,7 @@ macroString: |-
       {%- endif -%}
       {%- if nsNodeVariables.desiredEngineReplacing -%}
           {%- set keyText = ('the allColumnMatch match columns (the non-system columns that come from the source)' if isAllColumnMatch
-                             else 'the business key' ~ (', SYSTEM_VERSION (when the node has it) and the surrogate key (when the node has one)' if isDimension else '')) -%}
+                             else 'the business key' ~ (' and SYSTEM_VERSION (when the node has it)' if isDimension else '')) -%}
           {%- if nsNodeVariables.desiredManualSortKey -%}
               {%- set nsProblems.items = nsProblems.items + [nsNodeVariables.desiredManualSortKey | join(' / ') ~ ' is not accepted on a ReplacingMergeTree. Its ORDER BY decides which rows are copies of each other, so it is built from ' ~ keyText ~ ': ORDER BY (' ~ (nsNodeVariables.desiredReplaceKey | join(', ')) ~ '). A manual key can collapse different rows into one or keep the copies the load replaces. Remove ' ~ (nsNodeVariables.desiredManualSortKey | join(' / ')) ~ ', or use @engine("MergeTree") to set your own sort key.'] -%}
           {%- endif -%}
@@ -824,7 +813,8 @@ macroString: |-
               'example': none,
               'reason': '@zeroKey requires a surrogate key column to match the zero record against; none was found on this node.'
           }] -%}
-      {%- elif type2Dimension and not hasSurrogateKey -%}
+      {%- endif -%}
+      {%- if type2Dimension and not hasSurrogateKey and config.zeroKey is not defined -%}
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': false,
               'annotation': '@isSurrogateKey',
@@ -969,6 +959,22 @@ macroString: |-
           -- Set a shorter value on the column with @zeroKey("'<value>'"), or widen the column.
           SELECT 1 AS MESSAGE
           {%- endif %}
+      {%- endif -%}
+
+      {#- Column-level @zeroKey only overrides a value of the zero record, which node-level @zeroKey creates: without
+          node-level @zeroKey there is no zero record and the column values are ignored. Warn only. #}
+      {%- if config.zeroKey is not defined -%}
+          {%- set nsColZk = namespace(items=[]) -%}
+          {%- for col in columns if col.zeroKey is defined -%}
+              {%- set nsColZk.items = nsColZk.items + [col.name] -%}
+          {%- endfor -%}
+          {%- if nsColZk.items %}
+          {{ test_stage('Warning: Column @zeroKey without node-level @zeroKey', true) }}
+          -- Column-level @zeroKey on {{ nsColZk.items | join(', ') }} is ignored: it only overrides a value of the zero record,
+          -- and no zero record is written without the node-level @zeroKey.
+          -- Fix: add the node-level @zeroKey (e.g. @zeroKey("00000000-0000-0000-0000-000000000000")), or remove the column-level @zeroKey.
+          SELECT 1 AS MESSAGE
+          {%- endif -%}
       {%- endif -%}
   {%- endmacro -%}
 
@@ -1307,11 +1313,12 @@ macroString: |-
                      otherwise
       replaceKey     a ReplacingMergeTree's ORDER BY, always built here: the business key, plus
                      SYSTEM_VERSION on a Dimension that has it (one row per version; optional on SCD
-                     Type 1, where it is always 1), plus the surrogate key on a Dimension that has one.
-                     The load keeps a row's surrogate key whenever it re-inserts that row, so it never
-                     splits copies; it keeps the zero record apart from a real row with the same business
-                     key value, so @zeroKey never changes the table (the same key as the MergeTree
-                     clean-up). Every copy of a row the load replaces has the same values in these columns.
+                     Type 1, where it is always 1). @zeroKey never changes it. The zero record is
+                     version 1 like a real row, so its business key values must differ from every real
+                     business key (override them with a column-level @zeroKey, e.g. -1 or 'UNKNOWN'):
+                     a zero record sharing a real row's key would be one key with it. The MergeTree
+                     clean-up uses the same key. Every copy of a row the load replaces has
+                     the same values in these columns.
                      An allColumnMatch Fact (a factless fact) uses its match columns instead, see
                      acm_match_columns().
       allColumnMatch the node is an allColumnMatch Fact
@@ -1343,8 +1350,6 @@ macroString: |-
 
       {%- set bizKeys = cols | selectattr('isBusinessKey') | map(attribute='name') | list -%}
       {%- set versionCols = cols | selectattr('isSystemVersion') | map(attribute='name') | list if isDimension else [] -%}
-      {%- set surrogateCols = cols | selectattr('isSurrogateKey') | map(attribute='name') | list
-                              if isDimension else [] -%}
       {%- set isAllColumnMatch = strategy == 'allcolumnmatch' and not isDimension -%}
       {%- set ns.allColumnMatch = isAllColumnMatch -%}
       {%- set nsMatch = namespace(items=[], fromLineage=false) -%}
@@ -1352,7 +1357,7 @@ macroString: |-
           {{- acm_match_columns(cols, srcs, nsMatch) -}}
       {%- endif -%}
       {%- set nsKey = namespace(items=[]) -%}
-      {%- for name in (nsMatch.items if isAllColumnMatch else bizKeys + versionCols + surrogateCols) -%}
+      {%- for name in (nsMatch.items if isAllColumnMatch else bizKeys + versionCols) -%}
           {%- set nsKey.items = nsKey.items + ['`' ~ name ~ '`'] -%}
       {%- endfor -%}
       {%- set ns.replaceKey = nsKey.items -%}
@@ -1801,7 +1806,7 @@ macroString: |-
               {%- if nsNodeVariables.desiredAllColumnMatch | default(false) -%}
                   {%- set ns.reasons = ns.reasons + ['ReplacingMergeTree key changed: the allColumnMatch match columns'] -%}
               {%- else -%}
-                  {%- set ns.reasons = ns.reasons + ['ReplacingMergeTree key changed: @isBusinessKey, SYSTEM_VERSION or the surrogate key'] -%}
+                  {%- set ns.reasons = ns.reasons + ['ReplacingMergeTree key changed: @isBusinessKey or SYSTEM_VERSION'] -%}
               {%- endif -%}
           {%- elif not nsNodeVariables.currentPrimaryKey and not nsNodeVariables.desiredPrimaryKey -%}
               {%- set ns.reasons = ns.reasons + ['ORDER BY changed without @primaryKey'] -%}

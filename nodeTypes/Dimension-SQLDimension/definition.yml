@@ -59,7 +59,7 @@ metadata:
             • The table's ORDER BY (sort) key. Each argument is one term — a column or an expression, written as it should appear in the SQL.
               Ex. orderBy("`n_Nationkey`")
               Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)")
-            • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 only (engine("MergeTree")). ⛔ Not accepted on a ReplacingMergeTree — its ORDER BY is built from the business key + SYSTEM_VERSION when present (+ the surrogate key when the node has one), and the deploy and the run stop if orderBy is set.
+            • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 only (engine("MergeTree")). ⛔ Not accepted on a ReplacingMergeTree — its ORDER BY is built from the business key + SYSTEM_VERSION when present , and the deploy and the run stop if orderBy is set.
             • Without orderBy (and primaryKey) a MergeTree table uses ORDER BY tuple(). Ignored on views.
             • ⚠️ On redeploy, removing trailing terms or adding new columns (without a default) is altered in place when primaryKey is set; any other orderBy change (or renaming / retyping a column used in it) recreates the table — existing data is lost.
           isRequired: false
@@ -108,7 +108,7 @@ metadata:
               • The @isSystemUpdateDate column is the version argument: ReplacingMergeTree → ReplacingMergeTree(`SYSTEM_UPDATE_DATE`). Required, and must be marked @notNull.
               • Like every column it is Nullable without @notNull, and ClickHouse rejects a Nullable version argument: a "Warning: @isSystemUpdateDate without @notNull" stage is shown, the flow continues, and the create (or the redeploy's ALTER) fails with ClickHouse's error.
                 Ex. CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
-              • ORDER BY is always built from the business key + SYSTEM_VERSION when the node has it (+ the surrogate key when the node has one) — orderBy / primaryKey are not accepted (a manual key could collapse different rows or keep replaced copies). SYSTEM_VERSION is optional for SCD Type 1 and required for SCD Type 2.
+              • ORDER BY is always built from the business key + SYSTEM_VERSION when the node has it — orderBy / primaryKey are not accepted (a manual key could collapse different rows or keep replaced copies). SYSTEM_VERSION is optional for SCD Type 1 and required for SCD Type 2.
               • Until a merge, a plain SELECT can return the replaced copies as well — query with FINAL (SELECT ... FROM <table> FINAL, or SETTINGS final = 1). With the readWithFinal runtime parameter true, the load and the column tests end with SETTINGS final = 1; with it false they read the table as stored, so set final = 1 on the ClickHouse user. A "Note: Query with FINAL" deploy stage reminds whoever deploys.
             • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 — the load inserts and then DELETEs the replaced copies (Clean Up Previous Data). orderBy / primaryKey can be set.
             • Write ReplacingMergeTree without arguments: the load sets the version argument and ORDER BY itself.
@@ -206,7 +206,8 @@ metadata:
             • Inserts a default "zero key" record into the target — a placeholder row used to catch unresolved foreign key lookups.
             • Numeric columns (integer, decimal, float) always get 0 — 𝘀𝘂𝗿𝗿𝗼𝗴𝗮𝘁𝗲𝗞𝗲𝘆𝗩𝗮𝗹𝘂𝗲 applies to the surrogate key column only. Override any column with a column-level zeroKey. A string value is written with its own quotes, e.g. "'UNKNOWN'".
             • Written by its own run stage, independent of the main load: inserted when no zero record has the current surrogate value, refreshed when its values change, otherwise nothing. Adding, changing or removing zeroKey needs no redeploy.
-            • Every zero record gets SYSTEM_CREATE_DATE = 1970-01-01 00:00:00 UTC, which keeps it out of the main load's change detection for good. Changing the surrogate value inserts a new zero record and keeps the earlier one; removing zeroKey keeps the stored ones. Delete any you no longer want yourself.
+            • ⚠️ The zero record's business key values must be unique: different from every business key in the data. Numeric key columns get 0 and string ones 'UNKNOWN' by default — if the data can contain that value, override it on the business key column with a column-level zeroKey, e.g. @zeroKey("-1") or @zeroKey("'N/A'"). A zero record that shares a real row's business key (and version) is the same table key: a ReplacingMergeTree keeps only one of them, and the MergeTree clean-up deletes one.
+            • Every zero record gets SYSTEM_CREATE_DATE = 1970-01-01 00:00:00 UTC, which keeps it out of the main load's change detection for good. Changing the surrogate value replaces the zero record (same business key and version); removing zeroKey keeps the stored one.
             • Ignored on views.
           isRequired: false
           parameters:
@@ -359,7 +360,7 @@ metadata:
             • Adds a custom zero key value (ghost record) to this column, overriding the node-level 𝘇𝗲𝗿𝗼𝗞𝗲𝘆 defaults for it.
             • 𝗩𝗮𝗹𝘂𝗲 𝗶𝘀 𝗽𝗮𝘀𝘁𝗲𝗱 𝗶𝗻𝘁𝗼 𝘁𝗵𝗲 𝗦𝗤𝗟 𝗲𝘅𝗮𝗰𝘁𝗹𝘆 𝗮𝘀 𝘄𝗿𝗶𝘁𝘁𝗲𝗻 — no quotes, casing, or wrapping is added for you.
             • For a string, include your own quotes (e.g. "'N/A'"); for a date/time, write the full expression yourself (e.g. "CAST('1900-01-01' AS TIMESTAMP)"); a number or boolean can be given bare (e.g. 10, true).
-            • Ignored unless zeroKey is enabled at the node level.
+            • Ignored unless zeroKey is enabled at the node level: without it a non-failing "Warning: Column @zeroKey without node-level @zeroKey" stage lists the columns.
             • Ignored on views.
           isRequired: false
           parameters:

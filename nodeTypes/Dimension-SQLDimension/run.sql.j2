@@ -154,9 +154,11 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {%- endfor %}
         {{ stage('Load ' + materializationType + ' - Zero Key Record') }}
             {# Inserted only when there is no zero record with the current surrogate value yet, or its values differ
-               from the @zeroKey values: an unchanged run writes nothing. A new surrogate value inserts a new zero record
-               and leaves the earlier one as it is (both stay zero records). SYSTEM_CREATE_DATE is the zero-record
+               from the @zeroKey values: an unchanged run writes nothing. SYSTEM_CREATE_DATE is the zero-record
                marker (ch_zero_record_date()); a refreshed record's newer SYSTEM_UPDATE_DATE replaces the old copy.
+               The zero record is version 1, like a real row: its business key values must differ from every real
+               business key (column-level @zeroKey), or the two would be one table key. A zero record with a new
+               surrogate value replaces the previous one (same business key and version).
                Each @zeroKey value is cast to the column's table type before the comparison, so 'UNKNOWN'
                equals the stored FixedString value. #}
             INSERT INTO {{ targetPath }}
@@ -563,16 +565,14 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
     {# == Update (not on a ReplacingMergeTree, which replaces the copies itself): delete the copies the INSERT
           replaced (and the previous zero key record) — per business key
-          (+ SYSTEM_VERSION for SCD2, + the surrogate key, which keeps the zero record apart from a real row with
-          the same business key value) only the row with the latest SYSTEM_UPDATE_DATE is kept.
+          (+ SYSTEM_VERSION when the node has it — the same key as a ReplacingMergeTree's ORDER BY) only the row with
+          the latest SYSTEM_UPDATE_DATE is kept.
           Only keys with more than one row (this includes the re-inserted zero record) can have replaced copies, so the
           DELETE and its subquery read just those keys. The clean-up reads only the target, never the source: a DELETE
           cannot use the node's own CTEs (ClickHouse resolves a CTE name inside a DELETE as a table) == #}
     {%- set businessKeyCols = columns | selectattr("isBusinessKey") | list %}
-    {%- set surrogateKeyCols = columns | selectattr("isSurrogateKey") | map(attribute="name") | list %}
     {%- set replaceKeyCols = (businessKeyCols | map(attribute="name") | list)
-                             + (columns | selectattr("isSystemVersion") | map(attribute="name") | list if type2Dimension else [])
-                             + surrogateKeyCols %}
+                             + (columns | selectattr("isSystemVersion") | map(attribute="name") | list) %}
     {%- set updateDateCols = columns | selectattr("isSystemUpdateDate") | map(attribute="name") | list %}
     {%- if businessKeyCols | length > 0 and updateDateCols | length > 0 and not nsNodeVariables.desiredEngineReplacing %}
         {%- set replaceKey = '`' ~ (replaceKeyCols | join('`, `')) ~ '`' %}
