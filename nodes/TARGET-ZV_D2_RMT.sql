@@ -8,7 +8,7 @@
 @tests("SELECT 1 FROM {{ this }} SETTINGS final = 0", true, "After")
 SELECT
     generateUUIDv4()                     AS `ZV_D2_RMT_KEY`         @id("h00000") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
-    `n_Nationkey`                        AS `n_Nationkey`        @id("h00001") @isBusinessKey,
+    CAST(`n_Nationkey` AS Int32)         AS `n_Nationkey`        @id("h00001") @isBusinessKey @zeroKey("-1"),
     `n_Name`                             AS `n_Name`             @id("h00002") @isChangeTracking,
     1                                                   AS `SYSTEM_VERSION`      @id("h00010") @isSystemVersion,
     'Y'                                                 AS `SYSTEM_CURRENT_FLAG` @id("h00011") @isSystemCurrentFlag,

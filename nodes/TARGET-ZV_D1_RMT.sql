@@ -1,6 +1,6 @@
 @id("a05c0e51-0000-4000-8000-0000000000c1")
 @nodeType("SQLDimension")
-@zeroKey("00000000-0000-0000-0000-000000000001", "'NA'")
+@zeroKey("00000000-0000-0000-0000-000000000001", "'N/A'")
 @tests("SELECT 1 FROM {{ this }} SETTINGS final = 1", true, "After")
 @tests("SELECT 1 FROM {{ this }} WHERE `ZV_D1_RMT_KEY` = toUUID('00000000-0000-0000-0000-000000000000') SETTINGS final = 1", true, "After")
 @tests("SELECT 1 FROM {{ this }} WHERE `ZV_D1_RMT_KEY` = toUUID('00000000-0000-0000-0000-000000000001') SETTINGS final = 1", true, "After")
@@ -8,7 +8,7 @@
 @tests("SELECT 1 FROM {{ this }} SETTINGS final = 0", true, "After")
 SELECT
     generateUUIDv4()                     AS `ZV_D1_RMT_KEY`         @id("h00000") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
-    `n_Nationkey`                        AS `n_Nationkey`        @id("h00001") @isBusinessKey,
+    CAST(`n_Nationkey` AS Int32)         AS `n_Nationkey`        @id("h00001") @isBusinessKey @zeroKey("-1"),
     `n_Name`                             AS `n_Name`             @id("h00002"),
     1                                                   AS `SYSTEM_VERSION`      @id("h00010") @isSystemVersion,
     CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_CREATE_DATE` @id("h00008") @isSystemCreateDate,

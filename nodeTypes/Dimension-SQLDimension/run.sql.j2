@@ -161,6 +161,21 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                surrogate value replaces the previous one (same business key and version).
                Each @zeroKey value is cast to the column's table type before the comparison, so 'UNKNOWN'
                equals the stored FixedString value. #}
+            {#- One value per column, built once: the inserted row and the existence check use the same expressions #}
+            {%- set nsZeroVal = namespace(items=[]) %}
+            {%- for col in source.columns %}
+                {%- set zeroValue %}
+                    {%- if col.isSurrogateKey %}{{ zero_key_surrogate_value(col) }}
+                    {%- elif col.isSystemCurrentFlag %}'Y'
+                    {%- elif col.isSystemEndDate %}{{ ch_high_date(col) }}
+                    {%- elif col.isSystemCreateDate %}{{ ch_zero_record_date(col) }}
+                    {%- elif col.isSystemUpdateDate %}{{ loadTimestamp }}
+                    {%- elif col.isSystemVersion %}1
+                    {%- else %}{{ resolve_zero_key(col) }}
+                    {%- endif %}
+                {%- endset %}
+                {%- set nsZeroVal.items = nsZeroVal.items + [{'name': col.name, 'value': zeroValue | trim}] %}
+            {%- endfor %}
             INSERT INTO {{ targetPath }}
             (
                 {%- for col in columns %}
@@ -170,52 +185,26 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             )
             SELECT
             {%- for col in columns %}
-                `SOURCE_ZERO`.`{{ col.name }}`
-                AS `{{ col.name }}`
+                {%- for zv in nsZeroVal.items if zv.name == col.name %}
+                {{ zv.value }} AS `{{ col.name }}`
+                {%- endfor %}
                 {%- if not loop.last %}, {%- endif %}
             {%- endfor %}
-            FROM
-            (
-                SELECT
-                {%- for col in source.columns %}
-                    {%- if col.isSurrogateKey %}
-                        {{ zero_key_surrogate_value(col) }}
-                    {%- elif col.isSystemCurrentFlag %}
-                        'Y'
-                    {%- elif col.isSystemEndDate %}
-                        {{ ch_high_date(col) }}
-                    {%- elif col.isSystemCreateDate %}
-                        {{ ch_zero_record_date(col) }}
-                    {%- elif col.isSystemUpdateDate %}
-                        {{ loadTimestamp }}
-                    {%- elif col.isSystemVersion %}
-                        1
-                    {%- else %}
-                        {{ resolve_zero_key(col) }}
-                    {%- endif %}
-                    AS `{{ col.name }}`
-                    {%- if not loop.last %}, {%- endif %}
-                {%- endfor %}
-            ) AS `SOURCE_ZERO`
-            CROSS JOIN
-            (
-                {# Always one row: count() is 0 when there is no zero record yet #}
-                SELECT
-                    count() AS `ZERO_KEY_EXISTS`
-                    {%- for col in nsZeroCmp.cols %},
-                    any(`{{ col.name }}`) AS `EZ_{{ col.name }}`
-                    {%- endfor %}
+            {# Skipped when an identical zero record (same surrogate value and values) is already stored #}
+            WHERE NOT EXISTS (
+                SELECT 1
                 FROM {{ targetRead }}
                 WHERE
                 {%- for col in columns if col.isSurrogateKey %}
                     {%- if not loop.first %} AND {%- endif %}
                     `{{ col.name }}` = {{ zero_key_surrogate_value(col) }}
                 {%- endfor %}
-            ) AS `EXISTING_ZERO`
-            WHERE `EXISTING_ZERO`.`ZERO_KEY_EXISTS` = 0
-            {%- for col in nsZeroCmp.cols %}
-               OR isDistinctFrom(`EXISTING_ZERO`.`EZ_{{ col.name }}`, CAST(`SOURCE_ZERO`.`{{ col.name }}` AS {{ ch_column_type(col) }}))
-            {%- endfor %}
+                {%- for col in nsZeroCmp.cols %}
+                    {%- for zv in nsZeroVal.items if zv.name == col.name %}
+                  AND isNotDistinctFrom(`{{ col.name }}`, CAST({{ zv.value }} AS {{ ch_column_type(col) }}))
+                    {%- endfor %}
+                {%- endfor %}
+            )
             {{- target_final_setting() }}
     {%- endif %}
 

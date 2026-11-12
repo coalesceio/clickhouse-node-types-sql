@@ -1,6 +1,6 @@
 @id("b16c0e51-0000-4000-8000-0000000000d1")
 @nodeType("SQLDimension")
-@zeroKey("00000000-0000-0000-0000-000000000001", "'NA'")
+@zeroKey("00000000-0000-0000-0000-000000000001", "'N/A'")
 @tests("SELECT 1 FROM {{ this }} SETTINGS final = 1", true, "After")
 @tests("SELECT 1 FROM {{ this }} WHERE `ZW_D1_RMT_KEY` = toUUID('00000000-0000-0000-0000-000000000001') SETTINGS final = 1", true, "After")
 @tests("SELECT 1 FROM {{ this }} WHERE `ZW_D1_RMT_KEY` != toUUID('00000000-0000-0000-0000-000000000001') SETTINGS final = 1", true, "After")
