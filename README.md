@@ -22,6 +22,12 @@ Three decisions to make after installing the package and **before the first depl
 
 Sets the `ENGINE` of every Dimension and Fact table that has no [`@engine`](#engine) of its own (Work tables are always MergeTree). Set it in the package's parameters:
 
+```
+{%- set packageParameter = namespace(engine = "ReplacingMergeTree") -%}
+```
+
+Use `"MergeTree"` (or `""` for the default) in place of `"ReplacingMergeTree"`.
+
 | `engine` | Use it when | What it means |
 |---|---|---|
 | not set / `"MergeTree"` (default) | You want every table to be correct to a plain `SELECT` | Each load inserts, then deletes the replaced copies (**Clean Up Previous Data**). Slower loads; no `FINAL` needed anywhere. |
@@ -36,8 +42,12 @@ Sets the `ENGINE` of every Dimension and Fact table that has no [`@engine`](#eng
 **Required when any table is a ReplacingMergeTree** (from the package parameter or `@engine`). Set it in each environment's parameters (**Environment → Parameters**), or on a job run:
 
 ```json
-{ "readWithFinal": true }
+{
+  "readWithFinal": true
+}
 ```
+
+When the environment already has parameters, add `"readWithFinal": true` to the same JSON object.
 
 * With `true`, the package's own SQL reads every ReplacingMergeTree with `FINAL`: the loads (their sources **and the node's own target** — e.g. the current SCD Type 2 rows used for change detection), the zero key record, the column-level tests, and views without [`@final`](#final).
 * Without it (or `false`), those reads see the copies a ReplacingMergeTree has not merged yet. Writing `FINAL` in the node's SQL is **not enough**: it covers only the tables it follows, not the node's own target, which the load reads in its own CTEs. Results can then contain duplicates, and an SCD Type 2 Dimension can end up with two current versions of a key.
@@ -919,7 +929,13 @@ These rely on Cloud's `default_table_engine` and `create_table_empty_primary_key
 
 ### Package Parameters
 
-Package-level defaults, set once for every node instead of on each one. A node's own annotation always wins.
+Package-level defaults, set once for every node instead of on each one. A node's own annotation always wins. Syntax:
+
+```
+{%- set packageParameter = namespace(engine = "ReplacingMergeTree") -%}
+```
+
+Use `"MergeTree"` (or `""` for the default) in place of `"ReplacingMergeTree"`.
 
 **`engine`** — the Dimension / Fact `ENGINE` when the node has no [`@engine`](#engine).
 
@@ -941,7 +957,9 @@ Set per environment (**Environment → Parameters**) or per job run — not a pa
 Example (Environment → Parameters):
 
 ```json
-{ "readWithFinal": true }
+{
+  "readWithFinal": true
+}
 ```
 
 | Value | Loads, zero key record, column-level tests and views without `@final` |
