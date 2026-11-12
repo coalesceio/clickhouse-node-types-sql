@@ -1,6 +1,6 @@
 @id("2f989a55-0c9c-4837-9c7e-1ece4a55dc99")
 @nodeType("SQLFact")
-@engine("ReplacingMergeTree(SYSTEM_CREATE_DATE)")
+@engine("ReplacingMergeTree")
 SELECT
     "n_Nationkey"                        AS "n_Nationkey"        @id("8f7590") @isBusinessKey,
     "n_Name"                             AS "n_Name"             @id("84d449"),
