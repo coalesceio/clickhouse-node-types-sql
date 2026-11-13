@@ -1,7 +1,7 @@
 @id("ce000000-0000-4000-8000-000000000001")
 @nodeType("SQLWork")
 WITH `base` AS (SELECT number AS `n` FROM numbers(6))
-SELECT
+SELECT DISTINCT
     CAST(`n` AS UInt32)                                                                        AS `cust_id`,
     CAST(concat('CUST_', toString(`n`)) AS String)                                            AS `name`,
     CAST(`n` % 3 AS UInt32)                                                                    AS `region`,

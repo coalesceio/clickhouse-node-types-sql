@@ -9,6 +9,7 @@ SELECT
     "n_Name"                                            AS "n_Name"                 @id("0faed4") ,
     "n_Regionkey"                                       AS "n_Regionkey"            @id("75993f"),
     "n_Comment"                                         AS "n_Comment"              @id("982ca2"),
+     coalesce(n_Comment, 'UNKNOWN')                     AS "c_n_Comment"            @id("982ca3"),
     "last_Modified"                                     AS "last_Modified"          @id("43895a") @lastModifiedTracking(1),
     1                                                   AS "SYSTEM_VERSION"         @id("45cb50") @isSystemVersion,
     'Y'                                                 AS "SYSTEM_CURRENT_FLAG"    @id("29f5f5") @isSystemCurrentFlag,
@@ -16,3 +17,5 @@ SELECT
     CAST(CURRENT_TIMESTAMP AS TIMESTAMP)                AS "SYSTEM_UPDATE_DATE"     @id("53b236") @isSystemUpdateDate @notNull,
     CAST('2299-12-31 23:59:59.999999' AS DateTime64(6)) AS "SYSTEM_END_DATE"        @id("2fa30b") @isSystemEndDate
 FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`
+SETTINGS max_threads = 4
+

@@ -7,5 +7,6 @@ SELECT
     `f`.`cust_id`                        AS `cust_id`,
     `f`.`dim_key`                        AS `dim_key`,
     `f`.`dim_name`                       AS `dim_name`,
-    CAST(`f`.`amount` AS Decimal(12, 2)) AS `amount`
+    CAST(`f`.`amount` AS Decimal(12, 2)) AS `amount`,
+    upper(`f`.`dim_name`)                AS `dim_name_upper`
 FROM `f`
