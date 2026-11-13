@@ -550,7 +550,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {#- An upstream ReplacingMergeTree is read with FINAL (readWithFinal parameter) #}
         {{- source_final_setting(sources, joinAtEnd=false) }}
     {# NEW rows are found with TGT_ROW_EXISTS (0 or NULL when unmatched), not by a target column being NULL, so the
-       load needs no join_use_nulls: the node's own SELECT and JOINs run with the user's settings, as in Preview #}
+       load works with either join_use_nulls. The node's own SELECT and JOINs run with the user's settings, as in
+       Preview, unless the joinUseNulls runtime parameter is true: the load then ends with join_use_nulls = 1 #}
 
     {# == Update (not on a ReplacingMergeTree, which replaces the copies itself): delete the copies the INSERT
           replaced (and the previous zero key record) — per business key

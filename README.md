@@ -1023,6 +1023,11 @@ LEFT JOIN regions r ON r.region_id = c.region_id
 * Change detection, SCD Type 2 versioning and the clean-up work the same with either value — only the columns your SQL takes from a join are affected.
 * A node can still set its own value in its SQL (`SETTINGS join_use_nulls = 0`); it takes priority for that node — see [A Node's Own `SETTINGS`](#a-nodes-own-settings).
 * With `false`, keep `join_use_nulls` the same on the ClickHouse users of every environment, so they all load the same data.
+* **Keep joined columns nullable.** A `NULL` can only be stored in a `Nullable` column: in a column marked `@notNull`, ClickHouse stores the type's default value instead (`''`, `0`, nil UUID), without an error. So don't add `@notNull` to a column taken directly from a `LEFT JOIN` — or give it a fallback first:
+
+  ```sql
+  coalesce(`r`.`region_name`, 'UNKNOWN') AS `region_name` @notNull
+  ```
 * Not applied to node-level `@tests`, `@preSQL` / `@postSQL`, queries outside Coalesce, or Preview (which uses the ClickHouse user's settings).
 * An invalid value stops the deploy and the run with **Invalid configuration: joinUseNulls**.
 * This is a query setting: `@settings("join_use_nulls = 1")` holds table settings for `CREATE TABLE` and does not affect loads.
