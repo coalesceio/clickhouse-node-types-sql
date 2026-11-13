@@ -25,6 +25,23 @@ macroString: |-
       {%- set nsReadWithFinal.origin = 'runtime parameter' -%}
   {%- endif -%}
 
+  {#- joinUseNulls in effect: the runtime parameter, written as the query setting join_use_nulls on the
+      node's own SQL (see source_final_setting()), so an unmatched LEFT JOIN column has the same value
+      whatever the ClickHouse user's settings:
+        true / 1   -> join_use_nulls = 1: an unmatched column is NULL
+        false / 0  -> nothing is added (as readWithFinal = false): the ClickHouse server / profile / user /
+                      session setting applies (ClickHouse default 0: the type's default, '' / 0 / nil UUID)
+        not set    -> same as false
+        other      -> 'invalid': validate_materialization_type() stops the deploy and the run
+      The package's own load gives the same result with either value: new rows are found with
+      ifNull(TGT_ROW_EXISTS, 0), not by a column being NULL. #}
+  {%- set nsJoinUseNulls = namespace(value='', raw='') -%}
+  {%- if parameters is defined and parameters is mapping and parameters.joinUseNulls is defined and parameters.joinUseNulls is not none -%}
+      {%- set nsJoinUseNulls.raw = parameters.joinUseNulls | string | trim -%}
+      {%- set nsJoinUseNulls.value = '1' if (nsJoinUseNulls.raw | lower) in ['true', '1']
+                                     else ('0' if (nsJoinUseNulls.raw | lower) in ['false', '0'] else 'invalid') -%}
+  {%- endif -%}
+
   {#===========================================================================
     SECTION 1: Shared setup (keep first: the aliases and nsNodeVariables are set up before any template code runs)
   ===========================================================================#}
@@ -392,6 +409,14 @@ macroString: |-
           -- Fix: remove @final, or set @materializationType("view").
           SELECT 1
       {%- endif %}
+      {%- if nsJoinUseNulls.value == 'invalid' %}
+          {{ test_stage('Invalid configuration: joinUseNulls', false) }}
+          -- The joinUseNulls runtime parameter is "{{ nsJoinUseNulls.raw }}". It takes true (or 1) or false (or 0):
+          --   true  -> join_use_nulls = 1: an unmatched LEFT JOIN column is NULL
+          --   false -> nothing is added: the ClickHouse user's / session's join_use_nulls applies (ClickHouse default 0: the type's default, '' / 0 / nil UUID)
+          -- Fix: set "joinUseNulls" to true or false in the environment's parameters, or remove it to use the ClickHouse user's setting.
+          {{ fail_sql(true, 'Invalid configuration: joinUseNulls') }}
+      {%- endif %}
       {%- if nsNodeVariables.desiredMatType == 'view' and config is defined and config.optimize is defined %}
           {{ test_stage('Warning: @optimize on a view', true) }}
           -- @optimize applies to tables only (OPTIMIZE TABLE ... FINAL after the load). The view {{ node.name }} stores no data, so nothing is optimized.
@@ -648,17 +673,25 @@ macroString: |-
     "Ends with" = the last source's join has SETTINGS after its last ')', so a SETTINGS inside a
     subquery is not mistaken for the node's own.
     useFinal overrides readWithFinal when given (see view_final_setting()).
+    The same clause also gets join_use_nulls = 1 when the joinUseNulls runtime parameter is true
+    (nsJoinUseNulls at the top) — on every run for a load, once at deploy for a view. With false or not
+    set nothing is added, so the ClickHouse user's / session's setting applies.
+    joinAtEnd = false where the node's SQL is not the end of the statement (the Dimension and Fact
+    change-detection loads put it inside the SOURCE_ROWS CTE, the Last Modified NULL check inside a
+    subquery): its own SETTINGS then stays with it, and the statement gets its own SETTINGS clause.
   ===========================================================================#}
-  {%- macro source_final_setting(srcs, useFinal=none) -%}
+  {%- macro source_final_setting(srcs, useFinal=none, joinAtEnd=true) -%}
       {%- set applyFinal = nsReadWithFinal.value if useFinal is none else useFinal -%}
-      {%- if applyFinal -%}
+      {%- set items = (['final = 1'] if applyFinal else [])
+                      + (['join_use_nulls = 1'] if nsJoinUseNulls.value == '1' else []) -%}
+      {%- if items -%}
           {%- set srcList = srcs | default([], true) | list -%}
           {%- set lastJoin = (srcList[-1].join | default('', true)) if srcList else '' -%}
           {%- set tailText = ' ' ~ (lastJoin.split(')')[-1] | lower | replace('\n', ' ') | replace('\t', ' ') | replace('\r', ' ')) ~ ' ' -%}
-          {%- if ' settings ' in tailText %}
-      , final = 1
+          {%- if joinAtEnd and ' settings ' in tailText %}
+      , {{ items | join(', ') }}
           {%- else %}
-      SETTINGS final = 1
+      SETTINGS {{ items | join(', ') }}
           {%- endif -%}
       {%- endif -%}
   {%- endmacro -%}
@@ -833,6 +866,18 @@ macroString: |-
               'reason': ('A UUID surrogate key needs @defaultValue("generateUUIDv4()"): new rows and new SCD Type 2 versions take their key from it.'
                          if isUuidKey else
                          'Without @defaultValue, new rows and new SCD Type 2 versions take the value the SELECT computes for ' ~ col.name ~ ', so the SELECT must give every new row a unique key. @defaultValue("generateUUIDv4()") on a UUID column does this for you.')
+          }] -%}
+      {%- endfor -%}
+
+      {# The surrogate key must be NOT NULL. It is not forced in the column type (ch_column_type()), so that the
+         column's nullability in Coalesce matches the table and adding @notNull later is not a column change:
+         a surrogate key without @notNull stops the create and the run. #}
+      {%- for col in columns if col.isSurrogateKey and col.nullable != false -%}
+          {%- set missingSystemColumns.items = missingSystemColumns.items + [{
+              'required': true,
+              'annotation': '@notNull on ' ~ col.name,
+              'example': 'generateUUIDv4() AS `' ~ col.name ~ '` @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")',
+              'reason': 'The surrogate key (@isSurrogateKey) identifies every row and must never be NULL. Without @notNull the column is Nullable, in the table and in the node\'s mapping. Add @notNull to ' ~ col.name ~ '.'
           }] -%}
       {%- endfor -%}
 
@@ -1493,7 +1538,9 @@ macroString: |-
     used by the CREATE, ADD COLUMN, MODIFY COLUMN and views, so they all agree.
       - Coalesce infers SQL node columns as nullable and may wrap the type in Nullable(...);
         a wrapped type counts as nullable unless the column is NOT NULL (@notNull).
-      - A surrogate key (@isSurrogateKey) is never Nullable: every row gets a key.
+      - A surrogate key (@isSurrogateKey) follows the same rule: it must be NOT NULL, but the type is not forced,
+        so the column's nullability in Coalesce matches the table. validate_dimension_requirements() stops the
+        create and the run when it has no @notNull.
       - A ReplacingMergeTree's version argument (@isSystemUpdateDate) follows the same rule as any
         column: Nullable unless @notNull. ClickHouse rejects a Nullable version argument, so
         validate_update_date_not_null() warns first and ClickHouse's error stops the CREATE / ALTER.
@@ -1507,7 +1554,7 @@ macroString: |-
       {%- set dataType = col.dataType | trim -%}
       {%- set isWrapped = (dataType | lower).startswith('nullable(') and dataType.endswith(')') -%}
       {%- set baseType = dataType[9:-1] | trim if isWrapped else dataType -%}
-      {%- set isNullable = col.nullable != false and not col.isSurrogateKey -%}
+      {%- set isNullable = col.nullable != false -%}
       {%- set family = baseType.split('(')[0] | trim | lower -%}
       {%- if family in ['array', 'map', 'tuple', 'nested', 'json', 'object', 'dynamic', 'variant',
                         'aggregatefunction', 'simpleaggregatefunction',

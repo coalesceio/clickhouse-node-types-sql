@@ -12,7 +12,7 @@ The Coalesce Base Node Types - SQL Package for ClickHouse includes:
 
 Concepts shared across every node type — ClickHouse table defaults, sort and partition keys, column types, data quality tests, known limitations, and usage examples — are documented once in [Common Reference](#common-reference) and linked to from each node type below.
 
-> **After installing:** read [Before You Start](#before-you-start) — set the package `engine` parameter and the `readWithFinal` runtime parameter before the first deployment.
+> **After installing:** read [Before You Start](#before-you-start) — set the package `engine` parameter and the `readWithFinal` and `joinUseNulls` runtime parameters before the first deployment.
 
 ## Before You Start
 
@@ -54,7 +54,23 @@ When the environment already has parameters, add `"readWithFinal": true` to the 
 * With only MergeTree tables it makes no difference.
 * Details: [Runtime Parameters](#runtime-parameters).
 
-### 3. ClickHouse `final = 1` for the people and tools that read the tables
+### 3. Runtime parameter `joinUseNulls` — set it once, the same in every environment
+
+**Recommended whenever nodes use `LEFT JOIN`.** Controls what a column from a `LEFT JOIN` holds when no row matches, so every environment loads the same data:
+
+```json
+{
+  "readWithFinal": true,
+  "joinUseNulls": true
+}
+```
+
+* `true` (recommended): no match gives `NULL`, as in standard SQL, and `coalesce(<col>, <default>)` works as expected.
+* `false` or not set: the package adds nothing, and the `join_use_nulls` configured in ClickHouse (server, settings profile, user or session) applies. ClickHouse's default gives the type's default value (`''`, `0`, nil UUID).
+* ⚠️ **Choose once, before the first load**, and use the same value in every environment — see [Changing `joinUseNulls`](#known-limitations).
+* Details: [Runtime Parameters](#runtime-parameters).
+
+### 4. ClickHouse `final = 1` for the people and tools that read the tables
 
 **Recommended when any table is a ReplacingMergeTree.** `readWithFinal` only covers the package's own SQL. Everyone else who queries the tables — BI tools, analysts, exports — sees the unmerged copies unless they read with `FINAL`. Set it once on their ClickHouse user or settings profile:
 
@@ -72,6 +88,7 @@ Other ways to get clean output (views with `@final`, `@optimize`, MergeTree) are
 |---|---|---|
 | Package `engine` set before the first deployment | ✅ (or leave unset) | ✅ `"ReplacingMergeTree"` (or `@engine` per node) |
 | `{ "readWithFinal": true }` in every environment | optional | **required** |
+| `joinUseNulls` set, the same in every environment | recommended | recommended |
 | `final = 1` on the readers' ClickHouse users / profiles | not needed | recommended |
 
 ## Node Type Comparison
@@ -496,7 +513,7 @@ Marks this column as the node's surrogate key.
 * Optional for SCD Type 1 — the load joins and detects changes entirely off the business key.
 * Recommended for SCD Type 2 — a stable surrogate key per version is the standard way to identify a versioned row, though it isn't enforced by the load itself. Without one, the non-failing **Surrogate Key Not Set/Using Custom Surrogate Key Logic** stage is shown.
 * Required only when the node-level `@zeroKey` is set, since the zero/ghost record is matched against the target by surrogate key value.
-* Always created **not null** (e.g. `UUID`, never `Nullable(UUID)`), with or without `@notNull`, because every row must have a key.
+* **Requires `@notNull`**, because every row must have a key. Without it the column is `Nullable` and the **Missing Required System Columns** check stops the deploy and the run.
 * New rows and new SCD Type 2 versions get their key from `@defaultValue`; rows the load re-inserts (an expired version, an in-place update) keep the key they already have. See [Surrogate Keys](#surrogate-keys-dimension).
 * **Note:** Ignored on Views. Agentic creation only — manual creation adds this column automatically.
 * Expected expression: `generateUUIDv4() AS "<NODE_NAME>_KEY" @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")` — type the node name yourself, e.g. `generateUUIDv4() AS "DIM_CUSTOMER_KEY" @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")`.
@@ -969,9 +986,57 @@ Example (Environment → Parameters):
 | not set | Same as `false` |
 
 * Loads read the value on every run. A view without [`@final`](#final) takes it once, when it is created.
-* When the node's SQL already ends with its own `SETTINGS` clause, `final = 1` is appended to it — e.g. `SETTINGS max_threads = 4, final = 1`. If that clause already sets `final`, the node's own value wins: `SETTINGS final = 0, final = 1` reads without `FINAL`, so `SETTINGS final = 0` opts a node out.
+* The node's own `SETTINGS` clause — see [A Node's Own `SETTINGS`](#a-nodes-own-settings).
 * The **Note: Query with FINAL** deploy stage says which value is in effect (runtime parameter, or not set).
 * See [Reading an Upstream ReplacingMergeTree](#reading-an-upstream-replacingmergetree-readwithfinal) for how the package `engine` and `readWithFinal` combine.
+
+**`joinUseNulls`** — with `true`, sets ClickHouse's `join_use_nulls = 1` for every Work, Dimension and Fact node, so a `LEFT JOIN` without a match gives `NULL` in every environment, whatever the ClickHouse user's own settings. With `false` the package leaves the setting to ClickHouse.
+
+```json
+{
+  "readWithFinal": true,
+  "joinUseNulls": true
+}
+```
+
+| Value | Added to the node's SQL | A `LEFT JOIN` column with no match |
+|---|---|---|
+| `true` (or `1`) — recommended | `SETTINGS join_use_nulls = 1` | `NULL` |
+| `false` (or `0`), or not set | Nothing | As configured in ClickHouse (server, profile, user or session). ClickHouse's default: the type's default value — `''`, `0`, nil UUID (`NULL` if the joined column is `Nullable`) |
+
+**How it affects your data** — a customer whose region is missing from the lookup:
+
+```sql
+SELECT c.customer_id,
+       r.region_name                         AS region_name,
+       coalesce(r.region_name, 'UNKNOWN')    AS region_name_clean
+FROM customers c
+LEFT JOIN regions r ON r.region_id = c.region_id
+```
+
+| `joinUseNulls` | `region_name` | `region_name_clean` |
+|---|---|---|
+| `true` | `NULL` | `UNKNOWN` |
+| `false`, with ClickHouse's default | `''` (empty) | `''` — `coalesce()` only replaces `NULL` |
+
+* Applies to every load and to views (a view keeps the value it was created with). With `readWithFinal`, both are added together: `SETTINGS final = 1, join_use_nulls = 1`.
+* Change detection, SCD Type 2 versioning and the clean-up work the same with either value — only the columns your SQL takes from a join are affected.
+* A node can still set its own value in its SQL (`SETTINGS join_use_nulls = 0`); it takes priority for that node — see [A Node's Own `SETTINGS`](#a-nodes-own-settings).
+* With `false`, keep `join_use_nulls` the same on the ClickHouse users of every environment, so they all load the same data.
+* Not applied to node-level `@tests`, `@preSQL` / `@postSQL`, queries outside Coalesce, or Preview (which uses the ClickHouse user's settings).
+* An invalid value stops the deploy and the run with **Invalid configuration: joinUseNulls**.
+* This is a query setting: `@settings("join_use_nulls = 1")` holds table settings for `CREATE TABLE` and does not affect loads.
+
+#### A Node's Own `SETTINGS`
+
+A node's SQL can end with its own `SETTINGS` clause (e.g. `SETTINGS max_threads = 4`). The package's query settings (`final = 1`, `join_use_nulls`) are combined with it, and any setting the node sets itself takes priority for that node:
+
+| Node | Resulting SQL |
+|---|---|
+| Work, plain-insert Fact, views | `… SETTINGS max_threads = 4, final = 1, join_use_nulls = 1` |
+| Dimension, Fact with a merge strategy | The node's clause stays with its own `SELECT`; the load ends with `SETTINGS final = 1, join_use_nulls = 1` |
+
+So `SETTINGS final = 0` or `SETTINGS join_use_nulls = 0` in a node's SQL opts that single node out.
 
 ### Column Types
 
@@ -981,7 +1046,7 @@ Each column is created with the type Coalesce infers for it, with its nullabilit
 |---|---|
 | Default (Coalesce infers SQL node columns as nullable) | `Nullable(<type>)` |
 | Marked `@notNull` | `<type>` |
-| `@isSurrogateKey` (Dimension) | `<type>`, with or without `@notNull` — every row gets a key |
+| `@isSurrogateKey` (Dimension) | Same rule, and `@notNull` is required: without it the **Missing Required System Columns** check stops the deploy and the run |
 | `@isSystemUpdateDate` on a ReplacingMergeTree (the engine's version argument) | Same rule: `<type>` only with `@notNull`. ClickHouse rejects a `Nullable` version argument, so mark it `@notNull` |
 | `LowCardinality(<type>)`, nullable | `LowCardinality(Nullable(<type>))` |
 | `Array`, `Map`, `Tuple`, `Nested`, `JSON` / `Object`, `Dynamic`, `Variant`, `AggregateFunction`, `SimpleAggregateFunction`, geo types (`Point`, `Ring`, `LineString`, `MultiLineString`, `Polygon`, `MultiPolygon`, `Geometry`) | `<type>` — ClickHouse cannot make these `Nullable` |
@@ -1172,7 +1237,7 @@ A plain-insert Fact stays MergeTree whatever the package `engine` (see [`@engine
 * **Why always:** the engine of what a node reads is not in its metadata — an upstream node's `@engine` is not passed, and a source table can be anything. ClickHouse applies `final = 1` only to the tables that support `FINAL`, so a ReplacingMergeTree upstream (from the package `engine`, its own `@engine`, or an external source table) is read with one row per key, and a MergeTree — whose load already deleted its replaced copies — is read as usual. It covers the node's own target too: a MergeTree target ignores it, a ReplacingMergeTree target is read with `FINAL`.
 * **Where:** the load `INSERT ... SELECT` of every Work, Dimension and Fact and the **Check Last Modified Column - NULL Values** test, on every run. A view gets it in its definition when it is created — with [`@final`](#final), or when `readWithFinal` is `true` at that deploy.
 * **Cost:** `FINAL` merges the replaced copies at read time, so loads reading a large ReplacingMergeTree take longer. If background merges keep up, or the ClickHouse user already has `final = 1`, use `false`.
-* **Always added** when `readWithFinal` is `true`. When the node's SQL already ends with its own `SETTINGS` clause, `final = 1` is appended to it (`SETTINGS max_threads = 4, final = 1`); if that clause already sets `final`, the node's own value wins: `SETTINGS final = 0, final = 1` reads without `FINAL`, so `SETTINGS final = 0` opts a node out.
+* **Always added** when `readWithFinal` is `true`. When the node's SQL ends with its own `SETTINGS` clause, see [A Node's Own `SETTINGS`](#a-nodes-own-settings); if that clause already sets `final`, the node's own value wins, so `SETTINGS final = 0` opts a node out.
 * With `readWithFinal` = `false`, a single node can still read an upstream with `FINAL` in its SQL: ``FROM {{ ref('TARGET', 'DIM_CUSTOMER') }} FINAL``.
 
 **Independent of `readWithFinal`:**
@@ -1200,7 +1265,7 @@ A Fact with no `@isBusinessKey` column and no `@mergeStrategy` is loaded as a pl
 * A ReplacingMergeTree requires a business key. `SYSTEM_VERSION` is required on an SCD Type 2 Dimension and optional on SCD Type 1 — see [`SYSTEM_VERSION` on a ReplacingMergeTree](#system_version-on-a-replacingmergetree-dimension). Without a business key, or with `@orderBy` / `@primaryKey` set, **Invalid configuration: engine** stops the deploy and the run: a manual sort key could collapse different rows into one, or keep the copies the load replaces. Use MergeTree (the default, or `@engine("MergeTree")` when the package parameter is ReplacingMergeTree) to set your own sort key.
 * A ReplacingMergeTree only replaces rows within one partition. When a row moves partition (its `@partitionBy` value changes), the old copy stays in the old partition for good: background merges never cross partitions. Reads with `FINAL` still show one row per key, because ClickHouse's `FINAL` de-duplicates across partitions by default (`do_not_merge_across_partitions_select_final = 0`); a read without `FINAL` shows both copies. Prefer a `@partitionBy` whose value cannot change for a business key.
 * On a MergeTree, a reader can briefly see both copies of a changed row between the insert and the clean-up. If the clean-up stage fails, the extra copies stay until the next successful run's clean-up removes them.
-* The load reads its own SELECT with the user's settings, as in Preview — it does not set `join_use_nulls`.
+* The load runs the node's SELECT with the ClickHouse user's settings, as Preview does — except `join_use_nulls` when the [`joinUseNulls`](#runtime-parameters) runtime parameter is set.
 
 #### `SYSTEM_VERSION` on a ReplacingMergeTree (Dimension)
 
@@ -1242,7 +1307,7 @@ To decide which row wins, or to stop the run instead, de-duplicate or check the 
 
 ClickHouse has no identity columns. The surrogate key is a plain column, and the Dimension load gives a **new row or a new SCD Type 2 version** its key from the column's `@defaultValue`. Rows that are re-inserted by the load (an expired version, an in-place update) keep the key they already have.
 
-The `@isSurrogateKey` column is always created **not null** (never `Nullable`), with or without `@notNull`, because every row must have a key. This applies to Dimensions only: Facts have no surrogate key.
+The `@isSurrogateKey` column **requires `@notNull`**, because every row must have a key. The package does not force the type to not null: the column follows `@notNull` like every other column, so its nullability in the node's mapping matches the table. Without `@notNull` the **Missing Required System Columns** check stops the deploy and the run. This applies to Dimensions only: Facts have no surrogate key.
 
 The recommended key is a UUID, which is what a new Dimension's generated SELECT uses:
 
@@ -1877,6 +1942,9 @@ Changing the parameter does not recreate tables already deployed. Coalesce rende
 * **Changing `readWithFinal` on Views**:  
 A view's definition is compared before and after using the parameter's current value, so turning `readWithFinal` on or off does not recreate views already deployed — they keep the definition they were created with. Loads follow the new value on their next run. To change a view, add or remove [`@final`](#final) (the redeploy recreates it), or drop the view and redeploy. See [Reading an Upstream ReplacingMergeTree](#reading-an-upstream-replacingmergetree-readwithfinal).
 
+* **Changing `joinUseNulls`**:  
+Switching the value on tables that already hold data changes the unmatched join values (e.g. `''` becomes `NULL`), so the next run updates those rows even though the source has not changed — on a Dimension, as new SCD Type 2 versions when the joined column is `@isChangeTracking`. Deployed views keep the value they were created with until they are recreated, as with [`readWithFinal`](#known-limitations). Choose the value before the first load and use the same one in every environment.
+
 * **Loads Within the Same Second**:  
 The default system column expression `CAST(CURRENT_TIMESTAMP AS TIMESTAMP)` gives a `DateTime` column, which stores whole seconds. The ReplacingMergeTree and the clean-up tell a row's copies apart by `SYSTEM_UPDATE_DATE`, so if two loads change the same key within one second both copies have the same value: a ReplacingMergeTree keeps the one inserted last, the clean-up keeps both. Use a `DateTime64` type for `SYSTEM_UPDATE_DATE` (e.g. `CAST(now64(6) AS DateTime64(6))`) if a node can run more than once a second.
 
@@ -2394,7 +2462,7 @@ LEFT JOIN {{ ref('TARGET', 'DIM_CUSTOMER') }} `dc` ON `dc`.`c_custkey` = `ol`.`o
 LEFT JOIN {{ ref('TARGET', 'DIM_PART') }} `dp` ON `dp`.`p_partkey` = `ol`.`l_partkey`
 ```
 
-* On ClickHouse an unmatched `LEFT JOIN` column is the type's default (e.g. the nil UUID) unless `join_use_nulls = 1` is set; the `coalesce()` gives the same result either way.
+* An order line with no matching customer or part gets the nil UUID either way: with [`joinUseNulls`](#runtime-parameters) `true` the `coalesce()` fills it in, and with ClickHouse's default `join_use_nulls` it is already the UUID default. For other fallbacks (e.g. `'UNKNOWN'`), use `joinUseNulls: true` — see [Runtime Parameters](#runtime-parameters).
 
 #### Sort Key, Partition Key and Settings
 

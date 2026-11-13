@@ -44,7 +44,9 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {# CreateSQL for Table, used by the first create and by the rebuild so both write the same table.
            ENGINE from @engine or the package engine parameter (a ReplacingMergeTree gets the @isSystemUpdateDate
            column as its version; Cloud makes it SharedReplacingMergeTree). Without either no ENGINE is written and
-           Cloud adds SharedMergeTree(...). ORDER BY tuple() is added by Cloud when no ORDER BY is written.
+           Cloud adds SharedMergeTree(...). Without @orderBy / @primaryKey, ORDER BY tuple()
+           is written: self-hosted ClickHouse rejects a MergeTree without one (create_table_empty_primary_key_by_default
+           is only on by default in Cloud).
            Column types from ch_column_type(): Nullable(<type>) unless the column is not null (@notNull); the surrogate
            key is never Nullable. A ReplacingMergeTree's version argument needs @notNull: ClickHouse rejects a Nullable one. ClickHouse has no identity columns, so the surrogate key is a plain column
            (a UUID key gets its value from @defaultValue("generateUUIDv4()")).
@@ -82,6 +84,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                                    != (orderBy | join(',') | replace(' ', '') | replace('`', '') | lower) %}
             PRIMARY KEY ({{ primaryKey | join(', ') }})
             {%- endif %}
+            {%- else %}
+            ORDER BY tuple()
             {%- endif %}
             {%- if nsSettings.items %}
             SETTINGS {{ nsSettings.items | join(', ') }}

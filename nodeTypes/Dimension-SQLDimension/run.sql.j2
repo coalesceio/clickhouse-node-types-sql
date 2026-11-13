@@ -120,7 +120,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {{ source.join }}
                 ) `T`
                 WHERE `T`.`CHECK_COL` IS NULL
-                {{- source_final_setting(sources) }}
+                {{- source_final_setting(sources, joinAtEnd=false) }}
             {%- endif %}
         {%- endfor %}
     {%- endif %}
@@ -548,7 +548,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             WHERE `CHANGE_TYPE` IN ('NEW', 'CHANGED')
         {%- endif %}
         {#- An upstream ReplacingMergeTree is read with FINAL (readWithFinal parameter) #}
-        {{- source_final_setting(sources) }}
+        {{- source_final_setting(sources, joinAtEnd=false) }}
     {# NEW rows are found with TGT_ROW_EXISTS (0 or NULL when unmatched), not by a target column being NULL, so the
        load needs no join_use_nulls: the node's own SELECT and JOINs run with the user's settings, as in Preview #}
 

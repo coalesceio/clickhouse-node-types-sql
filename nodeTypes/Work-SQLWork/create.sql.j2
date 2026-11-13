@@ -35,7 +35,9 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {{ object_drop_sql() }}
 
         {# CreateSQL for Table, used by the first create and by the rebuild so both write the same table.
-           ClickHouse Cloud adds ENGINE = SharedMergeTree(...) and ORDER BY tuple() when they are not written.
+           ClickHouse Cloud adds ENGINE = SharedMergeTree(...) when it is not written. Without @orderBy / @primaryKey,
+           ORDER BY tuple() is written: self-hosted ClickHouse rejects a MergeTree without one
+           (create_table_empty_primary_key_by_default is only on by default in Cloud).
            Column types from ch_column_type(): Nullable(<type>) unless the column is not null.
            @orderBy / @primaryKey are written as given (PRIMARY KEY only when it differs from ORDER BY);
            ClickHouse rejects an invalid key itself. SETTINGS adds allow_nullable_key = 1 when there is a
@@ -66,6 +68,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                                    != (orderBy | join(',') | replace(' ', '') | replace('`', '') | lower) %}
             PRIMARY KEY ({{ primaryKey | join(', ') }})
             {%- endif %}
+            {%- else %}
+            ORDER BY tuple()
             {%- endif %}
             {%- if nsSettings.items %}
             SETTINGS {{ nsSettings.items | join(', ') }}

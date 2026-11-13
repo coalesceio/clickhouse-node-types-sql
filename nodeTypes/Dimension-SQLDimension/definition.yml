@@ -382,7 +382,7 @@ metadata:
             Expected expression:
             generateUUIDv4() AS "<NODE_NAME>_KEY" @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")
             Ex. generateUUIDv4() AS "DIM_CUSTOMER_KEY" @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")
-            • Always created NOT NULL (a plain UUID, never Nullable(UUID)), with or without @notNull.
+            • 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝘀 @notNull — always write @isSurrogateKey together with @notNull. Without @notNull the column is Nullable, and the "Missing Required System Columns" check stops the deploy and the run.
 
             Agentic creation only — manual creation adds this column automatically.
           isRequired: false
