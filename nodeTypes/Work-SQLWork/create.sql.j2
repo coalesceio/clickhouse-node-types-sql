@@ -29,6 +29,9 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
            (description), or Metadata Update-Default — see view_redeploy_sql() #}
         {{ view_redeploy_sql() }}
 
+        {# Info: runtime parameters are set that this view does not follow (it takes settings from the node only) #}
+        {{ view_runtime_parameter_note() }}
+
     {%- elif desiredMatType == 'table' %}
 
         {# Drop the current object if it was another type (a table rename/move is cloned to the new path) #}

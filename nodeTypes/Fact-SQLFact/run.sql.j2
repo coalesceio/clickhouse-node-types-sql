@@ -338,7 +338,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             WHERE {{ touchedKeys }}
             GROUP BY {{ businessKey }}
         )
-        SETTINGS transform_null_in = 1
+        {{ cleanup_settings() }}
     {%- endif %}
 
     {%- endif %}

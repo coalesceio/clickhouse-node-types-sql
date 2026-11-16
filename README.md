@@ -49,7 +49,7 @@ Use `"MergeTree"` (or `""` for the default) in place of `"ReplacingMergeTree"`.
 
 When the environment already has parameters, add `"readWithFinal": true` to the same JSON object.
 
-* With `true`, the package's own SQL reads every ReplacingMergeTree with `FINAL`: the loads (their sources **and the node's own target** — e.g. the current SCD Type 2 rows used for change detection), the zero key record, the column-level tests, and views without [`@final`](#final).
+* With `true`, the package's own SQL reads every ReplacingMergeTree with `FINAL`: the loads (their sources **and the node's own target** — e.g. the current SCD Type 2 rows used for change detection), the zero key record and the column-level tests. Views read with `FINAL` only with [`@final`](#final) — they never follow runtime parameters.
 * Without it (or `false`), those reads see the copies a ReplacingMergeTree has not merged yet. Writing `FINAL` in the node's SQL is **not enough**: it covers only the tables it follows, not the node's own target, which the load reads in its own CTEs. Results can then contain duplicates, and an SCD Type 2 Dimension can end up with two current versions of a key.
 * With only MergeTree tables it makes no difference.
 * Details: [Runtime Parameters](#runtime-parameters).
@@ -104,8 +104,10 @@ A side-by-side view of which annotations each node type supports, so it's easy t
 | `@primaryKey` | ✅ | ✅ | ✅ |
 | `@partitionBy` | ✅ | ✅ | ✅ |
 | `@settings` | ✅ | ✅ | ✅ |
+| `@querySettings` | ✅ | ✅ | ✅ |
 | `@engine` | ➖ | ✅ | ✅ |
 | `@final` | view only | view only | view only |
+| `@joinUseNulls` | view only | view only | view only |
 | `@optimize` | ➖ | table only | table only |
 | `@writeMode` | ✅ | ✅ | ✅ |
 | `@mergeStrategy` | ➖ | ✅<br/>* changeTracking<br/>* lastModified | ✅<br/>* changeTracking<br/>* lastModified<br/>* allColumnMatch |
@@ -171,8 +173,10 @@ The Work Node type has three configuration groups:
 | [`@orderBy(term, ...)`](#orderby) | The table's `ORDER BY` (sort) key. |
 | [`@primaryKey(term, ...)`](#primarykey) | The table's `PRIMARY KEY` — the leading terms of `@orderBy`. |
 | [`@partitionBy(term, ...)`](#partitionby) | The table's `PARTITION BY` key. |
-| [`@settings(setting, ...)`](#settings) | The table's MergeTree `SETTINGS`. |
+| [`@settings(setting, ...)`](#settings) | Table settings: the table's MergeTree `SETTINGS`, written in `CREATE TABLE`. |
+| [`@querySettings(setting, ...)`](#querysettings) | Query settings for the node's load or view (memory, threads, spill to disk). |
 | [`@final`](#final) | Views only: the view reads its sources with `FINAL` (`SETTINGS final = 1`). |
+| [`@joinUseNulls`](#joinusenulls) | Views only: the view's unmatched `LEFT JOIN` columns are `NULL` (`SETTINGS join_use_nulls = 1`), whatever the runtime parameter. |
 | [`@writeMode("truncateInsert \| append")`](#writemode) | How each run writes to the target: truncateInsert or append<br/>*Not specified in the SQL editor → defaults to **truncateInsert**.* |
 | [`@disableTests`](#disabletests) **²** | Controls whether configured tests are skipped. |
 | [`@tests(querySQL, continueOnFailure?, runOrder?)`](#tests) **²** ***(repeatable)*** | Node-level data quality test. |
@@ -345,8 +349,10 @@ The Dimension Node type has three configuration groups:
 | [`@orderBy(term, ...)`](#orderby) | The table's `ORDER BY` (sort) key. |
 | [`@primaryKey(term, ...)`](#primarykey) | The table's `PRIMARY KEY` — the leading terms of `@orderBy`. |
 | [`@partitionBy(term, ...)`](#partitionby) | The table's `PARTITION BY` key. |
-| [`@settings(setting, ...)`](#settings) | The table's MergeTree `SETTINGS`. |
+| [`@settings(setting, ...)`](#settings) | Table settings: the table's MergeTree `SETTINGS`, written in `CREATE TABLE`. |
+| [`@querySettings(setting, ...)`](#querysettings) | Query settings for the node's load or view (memory, threads, spill to disk). |
 | [`@final`](#final) | Views only: the view reads its sources with `FINAL` (`SETTINGS final = 1`). |
+| [`@joinUseNulls`](#joinusenulls) | Views only: the view's unmatched `LEFT JOIN` columns are `NULL` (`SETTINGS join_use_nulls = 1`), whatever the runtime parameter. |
 | [`@optimize`](#optimize) | Tables only: runs `OPTIMIZE TABLE … FINAL` after the load, before Post-SQL. |
 | [`@engine(engine)`](#engine) | The table's `ENGINE`.<br/>*Not specified in the SQL editor → the package's `engine` parameter, else **MergeTree** (no `ENGINE` written).* |
 | [`@writeMode("truncateInsert \| append")`](#writemode) | How each run writes to the target: truncateInsert or append<br/>*Not specified in the SQL editor → defaults to **append**.* |
@@ -736,8 +742,10 @@ The Fact Node type has three configuration groups:
 | [`@orderBy(term, ...)`](#orderby) | The table's `ORDER BY` (sort) key. |
 | [`@primaryKey(term, ...)`](#primarykey) | The table's `PRIMARY KEY` — the leading terms of `@orderBy`. |
 | [`@partitionBy(term, ...)`](#partitionby) | The table's `PARTITION BY` key. |
-| [`@settings(setting, ...)`](#settings) | The table's MergeTree `SETTINGS`. |
+| [`@settings(setting, ...)`](#settings) | Table settings: the table's MergeTree `SETTINGS`, written in `CREATE TABLE`. |
+| [`@querySettings(setting, ...)`](#querysettings) | Query settings for the node's load or view (memory, threads, spill to disk). |
 | [`@final`](#final) | Views only: the view reads its sources with `FINAL` (`SETTINGS final = 1`). |
+| [`@joinUseNulls`](#joinusenulls) | Views only: the view's unmatched `LEFT JOIN` columns are `NULL` (`SETTINGS join_use_nulls = 1`), whatever the runtime parameter. |
 | [`@optimize`](#optimize) | Tables only: runs `OPTIMIZE TABLE … FINAL` after the load, before Post-SQL. |
 | [`@engine(engine)`](#engine) | The table's `ENGINE`.<br/>*Not specified in the SQL editor → the package's `engine` parameter, else **MergeTree** (no `ENGINE` written).* |
 | [`@writeMode("truncateInsert \| append")`](#writemode) | How each run writes to the target: truncateInsert or append<br/>*Not specified in the SQL editor → defaults to **append**.* |
@@ -967,9 +975,9 @@ Use `"MergeTree"` (or `""` for the default) in place of `"ReplacingMergeTree"`.
 
 ### Runtime Parameters
 
-Set per environment (**Environment → Parameters**) or per job run — not a package parameter.
+Set per environment (**Environment → Parameters**) or per job run — not a package parameter. They apply to **table loads**; views take their settings from the node only — see [Views Use Node Settings Only](#views-use-node-settings-only).
 
-**`readWithFinal`** — whether the SQL the Work, Dimension and Fact node types run reads ReplacingMergeTree tables with `FINAL`: every load (its sources and the node's own target), the zero key record, the Last Modified NULL check, the column-level tests, and views without [`@final`](#final). A run-time query setting, not related to [`@settings`](#settings), which are the target table's settings in `CREATE TABLE`.
+**`readWithFinal`** — whether the SQL the Work, Dimension and Fact node types run reads ReplacingMergeTree tables with `FINAL`: every load (its sources and the node's own target), the zero key record, the Last Modified NULL check and the column-level tests. Not views: a view reads with `FINAL` only with [`@final`](#final). A run-time query setting, not related to [`@settings`](#settings), which are the target table's settings in `CREATE TABLE`.
 
 Example (Environment → Parameters):
 
@@ -979,14 +987,14 @@ Example (Environment → Parameters):
 }
 ```
 
-| Value | Loads, zero key record, column-level tests and views without `@final` |
+| Value | Loads, zero key record and column-level tests |
 |---|---|
 | `true` (or `1`) | End with `SETTINGS final = 1`, so any ReplacingMergeTree they read is read with `FINAL`; ClickHouse ignores it for tables that do not support `FINAL`, e.g. MergeTree |
 | `false` (or `0`) | Run as written — readers rely on `final = 1` set on the ClickHouse user, or `FINAL` in the node's SQL |
 | not set | Same as `false` |
 
-* Loads read the value on every run. A view without [`@final`](#final) takes it once, when it is created.
-* The node's own `SETTINGS` clause — see [A Node's Own `SETTINGS`](#a-nodes-own-settings).
+* Loads read the value on every run.
+* The node's own `SETTINGS` clause — see [Where Query Settings Go](#where-query-settings-go).
 * The **Note: Query with FINAL** deploy stage says which value is in effect (runtime parameter, or not set).
 * See [Reading an Upstream ReplacingMergeTree](#reading-an-upstream-replacingmergetree-readwithfinal) for how the package `engine` and `readWithFinal` combine.
 
@@ -1019,9 +1027,9 @@ LEFT JOIN regions r ON r.region_id = c.region_id
 | `true` | `NULL` | `UNKNOWN` |
 | `false`, with ClickHouse's default | `''` (empty) | `''` — `coalesce()` only replaces `NULL` |
 
-* Applies to every load and to views (a view keeps the value it was created with). With `readWithFinal`, both are added together: `SETTINGS final = 1, join_use_nulls = 1`.
+* Applies to every load. Not views: a view sets `join_use_nulls = 1` only with [`@joinUseNulls`](#joinusenulls). With `readWithFinal`, both are added together: `SETTINGS final = 1, join_use_nulls = 1`.
 * Change detection, SCD Type 2 versioning and the clean-up work the same with either value — only the columns your SQL takes from a join are affected.
-* A node can still set its own value in its SQL (`SETTINGS join_use_nulls = 0`); it takes priority for that node — see [A Node's Own `SETTINGS`](#a-nodes-own-settings).
+* A node can still set its own value in its SQL (`SETTINGS join_use_nulls = 0`); it takes priority for that node — see [Where Query Settings Go](#where-query-settings-go).
 * With `false`, keep `join_use_nulls` the same on the ClickHouse users of every environment, so they all load the same data.
 * **Keep joined columns nullable.** A `NULL` can only be stored in a `Nullable` column: in a column marked `@notNull`, ClickHouse stores the type's default value instead (`''`, `0`, nil UUID), without an error. So don't add `@notNull` to a column taken directly from a `LEFT JOIN` — or give it a fallback first:
 
@@ -1032,16 +1040,81 @@ LEFT JOIN regions r ON r.region_id = c.region_id
 * An invalid value stops the deploy and the run with **Invalid configuration: joinUseNulls**.
 * This is a query setting: `@settings("join_use_nulls = 1")` holds table settings for `CREATE TABLE` and does not affect loads.
 
-#### A Node's Own `SETTINGS`
+**`querySettings`** — ClickHouse query settings for the load of every Work, Dimension and Fact table: memory limits, spill to disk, threads, block size. A node's [`@querySettings`](#querysettings) overrides the settings it names; the rest still come from here. Not views: a view uses only its own `@querySettings`. A list with one `name = value` setting per item:
 
-A node's SQL can end with its own `SETTINGS` clause (e.g. `SETTINGS max_threads = 4`). The package's query settings (`final = 1`, `join_use_nulls`) are combined with it, and any setting the node sets itself takes priority for that node:
+```json
+{
+  "readWithFinal": true,
+  "joinUseNulls": true,
+  "querySettings": ["max_memory_usage = 10000000000", "max_bytes_before_external_group_by = 5000000000", "max_threads = 4"]
+}
+```
+
+A single string with the settings separated by commas is accepted too: `"querySettings": "max_memory_usage = 10000000000, max_threads = 4"`.
+
+Settings are merged **per setting name**: each one is taken from the highest level that names it, and every level adds the settings the others do not name.
+
+| Priority | Level | Example |
+|---|---|---|
+| 1 | `SETTINGS` at the end of the node's SQL | `… SETTINGS max_threads = 2` |
+| 2 | The node's `@querySettings` | `@querySettings("max_threads = 7", "max_block_size = 4096")` |
+| 3 | The `querySettings` runtime parameter (tables only) | `["max_threads = 4", "max_memory_usage = 10000000000"]` |
+
+With all three above, the load ends with `SETTINGS max_threads = 2, max_block_size = 4096, max_memory_usage = 10000000000`: `max_threads` from the SQL, `max_block_size` from the node, `max_memory_usage` from the environment. A view gets only levels 1 and 2.
+
+* **Changing values:**
+  * A setting taken from the runtime parameter (tables only): the load picks up the new value on its next run, with no deploy.
+  * A setting the node names (`@querySettings` or the node SQL's own `SETTINGS`): changing that setting in the runtime parameter does **not** change it for this node, on the next run or any later one. Edit the node, deploy it (a metadata update for a table, a recreate for a view), then run.
+* `final` and `join_use_nulls` are ignored here, with a warning stage. Use `readWithFinal` and `joinUseNulls`.
+* Applies to the same queries as [`@querySettings`](#querysettings).
+
+#### Where Query Settings Go
+
+Put query settings in [`@querySettings`](#querysettings) (one node) or the [`querySettings`](#runtime-parameters) runtime parameter (every table). Use `readWithFinal` / `@final` for FINAL and `joinUseNulls` for `join_use_nulls`. The package then writes each setting once, in one `SETTINGS` clause, in this priority: the node SQL's own `SETTINGS`, then `@querySettings`, then the `querySettings` runtime parameter. A lower-priority value for a setting that is already set is left out, not repeated: ClickHouse does not resolve a repeated setting the same way in a table load and in a view (an `INSERT … SELECT` keeps the first value; a view may keep the first or the last), so the package never relies on the order.
+
+
+
+| Setting | Decided by |
+|---|---|
+| `final` | Table: `readWithFinal`. View: `@final` |
+| `join_use_nulls` | Table: `joinUseNulls`. View: `@joinUseNulls` |
+| Any other query setting | Per setting: the node SQL's own `SETTINGS`, else `@querySettings`, else (tables only) the `querySettings` runtime parameter |
+
+**A `SETTINGS` clause in the node's SQL** (e.g. `… SETTINGS max_threads = 4`) is the highest level. The package adds its settings to that clause and skips any setting the clause already sets, so the node's own value is the one used:
 
 | Node | Resulting SQL |
 |---|---|
 | Work, plain-insert Fact, views | `… SETTINGS max_threads = 4, final = 1, join_use_nulls = 1` |
-| Dimension, Fact with a merge strategy | The node's clause stays with its own `SELECT`; the load ends with `SETTINGS final = 1, join_use_nulls = 1` |
+| Dimension, Fact with a merge strategy | The node's clause stays with its own `SELECT`; the load ends with its own `SETTINGS …` |
 
-So `SETTINGS final = 0` or `SETTINGS join_use_nulls = 0` in a node's SQL opts that single node out.
+**`SETTINGS` inside a CTE or subquery** applies to that CTE or subquery only. The rest of the query, including the other CTEs, runs with the load's settings. For example, with `@querySettings("max_threads = 8")` and `readWithFinal: true`:
+
+```sql
+WITH a AS (SELECT ... SETTINGS max_threads = 2, final = 0),  -- runs with max_threads = 2, final = 0
+     b AS (SELECT ...)                                       -- runs with max_threads = 8, final = 1
+SELECT ... FROM a JOIN b ...                                 -- runs with max_threads = 8, final = 1
+```
+
+The package only reads the `SETTINGS` at the very end of the node's SQL, so an inner one gives no warning and is never changed.
+
+**A view keeps its own settings.** The `SETTINGS` stored in a view (its `@querySettings`, `final = 1` from `@final`, `join_use_nulls = 1` from `@joinUseNulls`) win over the settings of the query that reads it. For example, `SELECT * FROM my_view SETTINGS max_threads = 3` still runs the view's `SELECT` with the view's `max_threads`. To change a view's settings, change the node and deploy it, which recreates the view.
+
+#### Views Use Node Settings Only
+
+A view is created at deploy, not at run time, so it takes every setting from its node and **never from the runtime parameters**. The same view returns the same data in every environment, and changing a runtime parameter never leaves deployed views out of step with each other.
+
+| Setting | Table load (every run) | View (fixed when created) |
+|---|---|---|
+| `final` | `readWithFinal` runtime parameter | [`@final`](#final) |
+| `join_use_nulls` | `joinUseNulls` runtime parameter | [`@joinUseNulls`](#joinusenulls) |
+| Other query settings | [`@querySettings`](#querysettings), else the `querySettings` runtime parameter | [`@querySettings`](#querysettings) |
+
+When a runtime parameter is set that a view does not follow, the view's deploy shows a passing **Info: Runtime parameters not used by views** stage, e.g.:
+
+```
+-- readWithFinal = true: this view does not read with FINAL. Add @final to read its ReplacingMergeTree sources with FINAL.
+-- joinUseNulls = true: this view does not set join_use_nulls = 1 ... Add @joinUseNulls for NULL.
+```
 
 ### Column Types
 
@@ -1180,7 +1253,7 @@ The older copies are removed at a background merge, at a time ClickHouse picks. 
 |---|---|---|---|---|
 | 1 | **`final = 1` on the ClickHouse user or settings profile** (recommended) | ClickHouse: `ALTER USER` / `ALTER SETTINGS PROFILE` | Every query from that user: BI tools, analysts, downstream jobs | Nobody has to remember `FINAL`. See below. |
 | 2 | **`FINAL` or `SETTINGS final = 1` in the query** | The query | That one query | `SETTINGS final = 1` covers every table in the query, CTEs and joins included. |
-| 3 | **`readWithFinal: true`** (runtime parameter) | `--parameters` on each run | The package's own SQL: loads (sources and the node's own target), the zero key record, column-level tests, and views without `@final` when they are created | Not node-level `@tests` / `@preSQL` / `@postSQL` — add `FINAL` there yourself (a warning reminds you). See [Runtime Parameters](#runtime-parameters). |
+| 3 | **`readWithFinal: true`** (runtime parameter) | `--parameters` on each run | The package's own SQL: loads (sources and the node's own target), the zero key record and column-level tests. Not views | Not node-level `@tests` / `@preSQL` / `@postSQL` — add `FINAL` there yourself (a warning reminds you). See [Runtime Parameters](#runtime-parameters). |
 | 4 | **`@final` on a view** | Node annotation (Work, Dimension, Fact views) | Everyone who reads the view | The view's `SELECT` ends with `SETTINGS final = 1`, whatever `readWithFinal` is. See [`@final`](#final). |
 | 5 | **`@optimize` on a Dimension / Fact table** | Node annotation | The stored table itself: after each load `OPTIMIZE TABLE … FINAL` merges it, so even a plain `SELECT` returns one row per key | Rewrites the table on every run — for small or medium tables. A row whose `@partitionBy` value changed keeps an old copy in its old partition (only `FINAL` hides it). See [`@optimize`](#optimize). |
 | 6 | **`@engine("MergeTree")`** instead of ReplacingMergeTree | Node annotation or package `engine` parameter | The stored table itself: **Clean Up Previous Data** deletes the replaced copies after each load, so a plain `SELECT` is always right | Slower loads (a `DELETE` per run); no `FINAL` needed anywhere. Same result as a ReplacingMergeTree read with `FINAL` — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). |
@@ -1240,15 +1313,15 @@ A plain-insert Fact stays MergeTree whatever the package `engine` (see [`@engine
 
 * **Work nodes too:** a Work table is always MergeTree (Work has no `@engine`), but what it reads can be a ReplacingMergeTree, so its load gets the setting like a Dimension or Fact.
 * **Why always:** the engine of what a node reads is not in its metadata — an upstream node's `@engine` is not passed, and a source table can be anything. ClickHouse applies `final = 1` only to the tables that support `FINAL`, so a ReplacingMergeTree upstream (from the package `engine`, its own `@engine`, or an external source table) is read with one row per key, and a MergeTree — whose load already deleted its replaced copies — is read as usual. It covers the node's own target too: a MergeTree target ignores it, a ReplacingMergeTree target is read with `FINAL`.
-* **Where:** the load `INSERT ... SELECT` of every Work, Dimension and Fact and the **Check Last Modified Column - NULL Values** test, on every run. A view gets it in its definition when it is created — with [`@final`](#final), or when `readWithFinal` is `true` at that deploy.
+* **Where:** the load `INSERT ... SELECT` of every Work, Dimension and Fact and the **Check Last Modified Column - NULL Values** test, on every run. A view gets it in its definition only with [`@final`](#final).
 * **Cost:** `FINAL` merges the replaced copies at read time, so loads reading a large ReplacingMergeTree take longer. If background merges keep up, or the ClickHouse user already has `final = 1`, use `false`.
-* **Always added** when `readWithFinal` is `true`. When the node's SQL ends with its own `SETTINGS` clause, see [A Node's Own `SETTINGS`](#a-nodes-own-settings); if that clause already sets `final`, the node's own value wins, so `SETTINGS final = 0` opts a node out.
+* **Always added** when `readWithFinal` is `true`. When the node's SQL ends with its own `SETTINGS` clause, see [Where Query Settings Go](#where-query-settings-go); if that clause already sets `final`, the node's own value wins, so `SETTINGS final = 0` opts a node out.
 * With `readWithFinal` = `false`, a single node can still read an upstream with `FINAL` in its SQL: ``FROM {{ ref('TARGET', 'DIM_CUSTOMER') }} FINAL``.
 
 **Independent of `readWithFinal`:**
 
 * **A ReplacingMergeTree node reads its own target with `FINAL` only through this setting** — in its load (change detection and the zero key record) and in its column-level tests. With `readWithFinal` = `false` they read it as stored: set `final = 1` on the ClickHouse user Coalesce runs as. Without either, change detection compares against copies not merged yet, and the results show it (unchanged rows inserted again, a key with two current SCD2 versions).
-* **Only the node type's own SQL gets the setting** — the load, the zero key record, the Last Modified NULL check, the column-level tests and view definitions. Node-level `@tests`, `@preSQL` and `@postSQL` run as written; on a ReplacingMergeTree with `readWithFinal` = `true`, the ones that read it without `FINAL` get a warning at the top of their own stage.
+* **Only the node type's own SQL gets the setting** — the load, the zero key record, the Last Modified NULL check and the column-level tests (views: [`@final`](#final)). Node-level `@tests`, `@preSQL` and `@postSQL` run as written; on a ReplacingMergeTree with `readWithFinal` = `true`, the ones that read it without `FINAL` get a warning at the top of their own stage.
 * **Queries outside Coalesce** — BI tools, analysts — are not covered: set `final = 1` on their ClickHouse user or profile (see [Querying a ReplacingMergeTree](#querying-a-replacingmergetree)).
 * **[`@settings`](#settings) is unrelated:** it holds the target table's MergeTree settings, written into `CREATE TABLE`. `final` is not a table setting — do not put it there.
 
@@ -1416,7 +1489,7 @@ The table's `PARTITION BY` key. Each argument is one term — a column or an exp
 
 `@settings(setting, ...)`
 
-The table's MergeTree `SETTINGS`. Each argument is one setting, written as `name = value`.
+**Table settings** — the table's MergeTree `SETTINGS`, written in `CREATE TABLE` and stored with the table. Each argument is one setting, written as `name = value`. For the settings the node's queries run with (memory, threads, spill to disk), use [`@querySettings`](#querysettings).
 
 * `allow_nullable_key = 1` is added automatically when the table has an `@orderBy`, `@primaryKey` or `@partitionBy`, so `Nullable` columns can be key terms — set it here to override it.
 * On redeploy, changes are applied in place: **Modify Settings** (`MODIFY SETTING`) for added or changed values, **Reset Settings** (`RESET SETTING`) for removed ones. Settings are compared by name (case-insensitive) and value (ignoring spaces).
@@ -1427,6 +1500,32 @@ The table's MergeTree `SETTINGS`. Each argument is one setting, written as `name
 ```sql
 @settings("index_granularity = 8192", "min_bytes_for_wide_part = 0")
 ```
+
+##### `@querySettings`
+
+`@querySettings(setting, ...)`
+
+**Query settings** — ClickHouse settings for the queries this node runs, so a large model can be kept within memory, spill to disk, or use more or fewer threads. Each argument is one setting, written as `name = value`.
+
+```sql
+@querySettings("max_memory_usage = 20000000000", "max_bytes_before_external_group_by = 10000000000", "max_threads = 8", "max_block_size = 65536")
+```
+
+* **Where they apply:** the load `INSERT` (Work, Dimension and Fact, including the change detection), the **Clean Up Previous Data** step, and the view definition. Not applied to `@tests`, `@preSQL` / `@postSQL`, or Preview.
+* **Merged with the environment's, per setting:** a setting named in `@querySettings` overrides the same setting in the [`querySettings`](#runtime-parameters) runtime parameter; every other runtime setting still applies to the table (so an environment-wide memory limit stays in force). Views use only `@querySettings`. A `SETTINGS` clause at the end of the node's SQL overrides both.
+* **`final` and `join_use_nulls` are ignored here**, with a **Warning: final / join_use_nulls in querySettings** stage. They change the data, not only how it is computed, so they have their own parameters: [`readWithFinal`](#runtime-parameters) / [`@final`](#final) and [`joinUseNulls`](#runtime-parameters) / [`@joinUseNulls`](#joinusenulls).
+* **Changing it:** edit `@querySettings`, deploy, then run. A table's next load uses the new values after the deploy (a metadata update); a view is recreated with them. Changing a setting in the `querySettings` runtime parameter has no effect on a node whose `@querySettings` names it.
+* Not the same as [`@settings`](#settings), which are table settings stored with the table.
+* **`transform_null_in`:** Clean Up Previous Data (MergeTree Dimension / Fact) runs with `transform_null_in = 1` by default, so rows with a `NULL` business key are cleaned up too. A `transform_null_in` in `@querySettings` / `querySettings` is respected there as well. With `0` and a nullable business key column, a non-failing **Warning: transform_null_in = 0 in querySettings** stage explains that older copies of rows with a `NULL` key are not removed. Mark the business key `@notNull` to avoid it.
+
+The load then ends with:
+
+```sql
+SETTINGS max_memory_usage = 20000000000, max_bytes_before_external_group_by = 10000000000,
+         max_threads = 8, max_block_size = 65536, final = 1, join_use_nulls = 1
+```
+
+(`final = 1` and `join_use_nulls = 1` only when `readWithFinal` / `joinUseNulls` are `true`.)
 
 ##### `@engine`
 
@@ -1474,18 +1573,14 @@ COMMENT 'Customer dimension'
 
 The view's `SELECT` ends with `SETTINGS final = 1`, so any ReplacingMergeTree it reads is read with `FINAL` — one row per key, without the copies a load replaced.
 
-A view is fixed when it is deployed, so it decides then, first match wins:
+| `@final` | The view's `SELECT` |
+|---|---|
+| Set | Ends with `SETTINGS final = 1` |
+| Not set | No `SETTINGS final = 1`, whatever `readWithFinal` is (an **Info** stage says so when it is `true`) |
 
-| `@final` | `readWithFinal` at deploy | The view's `SELECT` |
-|---|---|---|
-| Set | any | Ends with `SETTINGS final = 1` |
-| Not set | `true` | Ends with `SETTINGS final = 1` |
-| Not set | `false` | No `SETTINGS final = 1` |
-| Not set | not set | No `SETTINGS final = 1` |
-
+* A view never follows `readWithFinal` — see [Views Use Node Settings Only](#views-use-node-settings-only).
 * Adding or removing `@final` on redeploy recreates the view (**Create View**).
-* Changing `readWithFinal` later does not change a deployed view — see [Changing `readWithFinal` on Views](#known-limitations). Use `@final` to fix a view's behaviour whatever the parameter.
-* When the view's SQL already ends with its own `SETTINGS` clause, `final = 1` is appended to it (`SETTINGS max_threads = 4, final = 1`); if that clause already sets `final`, the node's own value wins: `SETTINGS final = 0, final = 1` reads without `FINAL`, so `SETTINGS final = 0` opts a node out.
+* When the view's SQL already ends with its own `SETTINGS` clause, `final = 1` is appended to it (`SETTINGS max_threads = 4, final = 1`). If that clause already sets `final`, the node's own value is kept and `final = 1` is not added, so `SETTINGS final = 0` opts a node out.
 * **On a table** `@final` does nothing: a non-failing **Warning: @final on a table** stage is shown at deploy and on every run, and the load follows `readWithFinal`.
 
 **Example:**
@@ -1493,6 +1588,32 @@ A view is fixed when it is deployed, so it decides then, first match wins:
 ```sql
 @materializationType("view")
 @final
+```
+
+##### `@joinUseNulls`
+
+`@joinUseNulls` — Work, Dimension and Fact, **views only**.
+
+The view's `SELECT` ends with `SETTINGS join_use_nulls = 1`, fixed when the view is created, so an unmatched `LEFT JOIN` column is `NULL` whatever the ClickHouse user's settings. It is the `join_use_nulls` counterpart of [`@final`](#final).
+
+| `@joinUseNulls` | The view's `SELECT` | An unmatched join column |
+|---|---|---|
+| Set | Ends with `SETTINGS join_use_nulls = 1` | `NULL` |
+| Not set | Nothing added, whatever `joinUseNulls` is (an **Info** stage says so when it is `true`) | As the ClickHouse user is configured when the view is read (ClickHouse default: the type's default — `''`, `0`, nil UUID) |
+
+* A view never follows the `joinUseNulls` runtime parameter — see [Views Use Node Settings Only](#views-use-node-settings-only).
+
+* The view's stored setting wins over the reader's: `SELECT … FROM view SETTINGS join_use_nulls = 0` still returns `NULL`.
+* Adding or removing `@joinUseNulls` on redeploy recreates the view (**Create View**).
+* If the view's SQL ends with its own `SETTINGS` that sets `join_use_nulls`, that value is kept.
+* **On a table** `@joinUseNulls` does nothing: a non-failing **Warning: @joinUseNulls on a table** stage is shown at deploy and on every run, and the load follows the `joinUseNulls` runtime parameter.
+
+**Example:**
+
+```sql
+@materializationType("view")
+@final
+@joinUseNulls
 ```
 
 ##### `@optimize`
@@ -1944,11 +2065,8 @@ Changing the parameter does not recreate tables already deployed. Coalesce rende
   
   Remove any `@orderBy` / `@primaryKey` from nodes that become a ReplacingMergeTree first — they are not accepted on one. Decide the package `engine` before the first deployment where possible.
 
-* **Changing `readWithFinal` on Views**:  
-A view's definition is compared before and after using the parameter's current value, so turning `readWithFinal` on or off does not recreate views already deployed — they keep the definition they were created with. Loads follow the new value on their next run. To change a view, add or remove [`@final`](#final) (the redeploy recreates it), or drop the view and redeploy. See [Reading an Upstream ReplacingMergeTree](#reading-an-upstream-replacingmergetree-readwithfinal).
-
 * **Changing `joinUseNulls`**:  
-Switching the value on tables that already hold data changes the unmatched join values (e.g. `''` becomes `NULL`), so the next run updates those rows even though the source has not changed — on a Dimension, as new SCD Type 2 versions when the joined column is `@isChangeTracking`. Deployed views keep the value they were created with until they are recreated, as with [`readWithFinal`](#known-limitations). Choose the value before the first load and use the same one in every environment.
+Switching the value on tables that already hold data changes the unmatched join values (e.g. `''` becomes `NULL`), so the next run updates those rows even though the source has not changed — on a Dimension, as new SCD Type 2 versions when the joined column is `@isChangeTracking`. Views are not affected: they use [`@joinUseNulls`](#joinusenulls). Choose the value before the first load and use the same one in every environment.
 
 * **Loads Within the Same Second**:  
 The default system column expression `CAST(CURRENT_TIMESTAMP AS TIMESTAMP)` gives a `DateTime` column, which stores whole seconds. The ReplacingMergeTree and the clean-up tell a row's copies apart by `SYSTEM_UPDATE_DATE`, so if two loads change the same key within one second both copies have the same value: a ReplacingMergeTree keeps the one inserted last, the clean-up keeps both. Use a `DateTime64` type for `SYSTEM_UPDATE_DATE` (e.g. `CAST(now64(6) AS DateTime64(6))`) if a node can run more than once a second.

@@ -42,6 +42,20 @@ macroString: |-
                                      else ('0' if (nsJoinUseNulls.raw | lower) in ['false', '0'] else 'invalid') -%}
   {%- endif -%}
 
+  {#- querySettings runtime parameter: ClickHouse query settings ("name = value") for the queries of every
+      node WITHOUT its own @querySettings (see query_settings()). A list, one setting per item, or one
+      string with the settings separated by commas:
+        "querySettings": ["max_memory_usage = 10000000000", "max_threads = 4"]
+        "querySettings": "max_memory_usage = 10000000000, max_threads = 4" #}
+  {%- set nsRuntimeQuerySettings = namespace(items=[]) -%}
+  {%- if parameters is defined and parameters is mapping and parameters.querySettings is defined and parameters.querySettings is not none -%}
+      {%- set rawQs = parameters.querySettings -%}
+      {%- set qsList = (rawQs | string).split(',') if rawQs is string else (rawQs | list if rawQs is iterable and rawQs is not mapping else [rawQs | string]) -%}
+      {%- for qs in qsList if (qs | string | trim) -%}
+          {%- set nsRuntimeQuerySettings.items = nsRuntimeQuerySettings.items + [qs | string | trim] -%}
+      {%- endfor -%}
+  {%- endif -%}
+
   {#===========================================================================
     SECTION 1: Shared setup (keep first: the aliases and nsNodeVariables are set up before any template code runs)
   ===========================================================================#}
@@ -409,6 +423,13 @@ macroString: |-
           -- Fix: remove @final, or set @materializationType("view").
           SELECT 1
       {%- endif %}
+      {%- if nsNodeVariables.desiredMatType == 'table' and config is defined and config.joinUseNulls is defined %}
+          {{ test_stage('Warning: @joinUseNulls on a table', true) }}
+          -- @joinUseNulls applies to views only (the view's SELECT ends with SETTINGS join_use_nulls = 1). On the table {{ node.name }} it does nothing.
+          -- The table's load uses the joinUseNulls runtime parameter on every run.
+          -- Fix: remove @joinUseNulls, or set @materializationType("view").
+          SELECT 1
+      {%- endif %}
       {%- if nsJoinUseNulls.value == 'invalid' %}
           {{ test_stage('Invalid configuration: joinUseNulls', false) }}
           -- The joinUseNulls runtime parameter is "{{ nsJoinUseNulls.raw }}". It takes true (or 1) or false (or 0):
@@ -422,6 +443,47 @@ macroString: |-
           -- @optimize applies to tables only (OPTIMIZE TABLE ... FINAL after the load). The view {{ node.name }} stores no data, so nothing is optimized.
           -- Fix: remove @optimize, or set @materializationType("table").
           SELECT 1
+      {%- endif %}
+      {{ validate_query_settings() }}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    validate_query_settings(): non-failing warnings about query settings (see query_settings()):
+      - "Warning: final / join_use_nulls in querySettings": they are left out of the SETTINGS clause;
+        readWithFinal / @final and joinUseNulls decide them, so the data does not depend on where a
+        setting was written.
+  ===========================================================================#}
+  {%- macro validate_query_settings() -%}
+      {%- set nsQs = namespace(items=[], ignored=[], origin='') -%}
+      {{- query_settings(config if config is defined else none, nsQs, nsNodeVariables.desiredMatType != 'view') -}}
+      {%- if nsQs.ignored %}
+          {{ test_stage('Warning: final / join_use_nulls in querySettings', true) }}
+          -- {{ node.name }}: {{ nsQs.ignored | join(', ') }} in the {{ nsQs.origin }} is ignored. These settings change the data, so they have their own parameters:
+          --   final           -> the readWithFinal runtime parameter (all nodes), or @final on a view
+          --   join_use_nulls  -> the joinUseNulls runtime parameter (all nodes), or @joinUseNulls on a view
+          -- Fix: remove them from {{ nsQs.origin }} and set the dedicated parameter instead.
+          SELECT 1
+      {%- endif %}
+      {#- transform_null_in = 0: Clean Up Previous Data (MergeTree Dimension / Fact) uses it as given,
+          so rows with a NULL business key keep their older copies #}
+      {%- set nsTniWarn = namespace(zero=false) -%}
+      {%- for item in nsQs.items if (item.split('=')[0] | trim | lower) == 'transform_null_in' -%}
+          {%- set nsTniWarn.zero = (item.split('=')[1:] | join('=') | trim | trim('"') | trim("'") | lower) in ['0', 'false'] -%}
+      {%- endfor -%}
+      {%- if nsTniWarn.zero and nsNodeVariables.desiredMatType == 'table' and not nsNodeVariables.desiredEngineReplacing and columns is defined -%}
+          {%- set nsKeys = namespace(names=[]) -%}
+          {%- for col in columns if col.isBusinessKey and col.nullable != false -%}
+              {%- set nsKeys.names = nsKeys.names + [col.name] -%}
+          {%- endfor -%}
+          {%- set nullableKeys = nsKeys.names -%}
+          {%- set hasUpdateDate = columns | selectattr('isSystemUpdateDate') | list | length > 0 -%}
+          {%- if nullableKeys and hasUpdateDate %}
+          {{ test_stage('Warning: transform_null_in = 0 in querySettings', true) }}
+          -- {{ node.name }}: transform_null_in = 0 in the {{ nsQs.origin }} is used as given, also by Clean Up Previous Data.
+          -- Clean Up Previous Data matches business keys with IN; with transform_null_in = 0 a NULL business key never matches, so older copies of rows with a NULL key ({{ nullableKeys | join(', ') }}) are not removed and can appear more than once.
+          -- Fix: mark the business key columns @notNull, or remove transform_null_in from the {{ nsQs.origin }}.
+          SELECT 1
+          {%- endif %}
       {%- endif %}
   {%- endmacro -%}
 
@@ -660,63 +722,179 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    source_final_setting(srcs): 'SETTINGS final = 1' to end a SELECT that reads the node's sources
-    (srcs = sources), so an upstream ReplacingMergeTree is read with FINAL — one row per key, without
-    the copies its load replaced. Added whenever readWithFinal is true (the runtime parameter —
-    see nsReadWithFinal at the top): the source engines are not in the node's metadata, and
-    ClickHouse applies the setting only to the tables that support FINAL — a MergeTree (upstream,
-    source or the node's own target) is read as usual.
-    When the node's own SQL already ends with a SETTINGS clause, ', final = 1' is appended to that
-    clause instead (a second SETTINGS clause is invalid). If the node's own SETTINGS already sets
-    final, its value wins: ClickHouse accepts SETTINGS final = 0, final = 1 and reads without FINAL
-    (tested), so SETTINGS final = 0 opts a node out.
+    query_settings(cfg, ns, useRuntime): the query settings ("name = value") a node's queries run with, in ns.items,
+    merged per setting name (case-insensitive):
+      1. the node's own @querySettings;
+      2. the querySettings runtime parameter (nsRuntimeQuerySettings at the top) for every setting the node
+         does not name — unless useRuntime is false (a view: it takes its settings from the node only).
+    A SETTINGS clause at the end of the node's SQL ranks above both (source_final_setting() skips the
+    names it sets), so each setting is written once, from the highest level that names it.
+    ns.origin names where the settings came from ('@querySettings', 'querySettings runtime parameter',
+    both, or '').
+    final and join_use_nulls are left out (into ns.ignored): they change the data, so readWithFinal /
+    @final and joinUseNulls / @joinUseNulls decide them (see validate_query_settings()).
+    cfg = the node's config (a view passes the state it renders, so a changed @querySettings recreates it).
+  ===========================================================================#}
+  {%- macro query_settings(cfg, ns, useRuntime=true) -%}
+      {%- set nsNodeQs = namespace(items=[], names=[], fromRuntime=false) -%}
+      {%- if cfg is defined and cfg and cfg.querySettings is defined -%}
+          {{- collect_key_terms(cfg.querySettings, nsNodeQs) -}}
+      {%- endif -%}
+      {%- for qs in nsNodeQs.items -%}
+          {%- set nsNodeQs.names = nsNodeQs.names + [qs.split('=')[0] | trim | lower] -%}
+      {%- endfor -%}
+      {%- set nsMerged = namespace(items=nsNodeQs.items) -%}
+      {%- if useRuntime -%}
+          {%- for qs in nsRuntimeQuerySettings.items if (qs.split('=')[0] | trim | lower) not in nsNodeQs.names -%}
+              {%- set nsMerged.items = nsMerged.items + [qs] -%}
+              {%- set nsNodeQs.fromRuntime = true -%}
+          {%- endfor -%}
+      {%- endif -%}
+      {%- set ns.origin = ('@querySettings and the querySettings runtime parameter' if nsNodeQs.fromRuntime else '@querySettings') if nsNodeQs.items
+                          else ('querySettings runtime parameter' if nsNodeQs.fromRuntime else '') -%}
+      {%- for qs in nsMerged.items -%}
+          {%- if (qs.split('=')[0] | trim | lower) in ['final', 'join_use_nulls'] -%}
+              {%- set ns.ignored = ns.ignored + [qs] -%}
+          {%- else -%}
+              {%- set ns.items = ns.items + [qs] -%}
+          {%- endif -%}
+      {%- endfor -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    source_final_setting(srcs): the SETTINGS clause that ends a SELECT reading the node's sources
+    (srcs = sources) — the load of a table, the definition of a view. In this order:
+      1. the node's query settings (query_settings(): @querySettings, else the querySettings runtime
+         parameter);
+      2. final = 1 when readWithFinal is true (the runtime parameter — see nsReadWithFinal at the
+         top; useFinal overrides it, see view_final_setting()), so an upstream ReplacingMergeTree is read
+         with FINAL — one row per key, without the copies its load replaced. The source engines are not
+         in the node's metadata, and ClickHouse applies the setting only to the tables that support
+         FINAL — a MergeTree (upstream, source or the node's own target) is read as usual;
+      3. join_use_nulls = 1 when the joinUseNulls runtime parameter is true (nsJoinUseNulls at the
+         top). With false or not set nothing is added, so the ClickHouse user's / session's setting
+         applies.
+    Each setting is written once: ClickHouse does not resolve a repeated setting the same way
+    everywhere (tested on 26.6: an INSERT / SELECT keeps the first value, a view the last one).
+    When the node's own SQL already ends with a SETTINGS clause, the settings are appended to that
+    clause instead (a second SETTINGS clause is invalid), and a setting it already sets is not added,
+    so the node's own value is the one used (SETTINGS final = 0 opts a node out).
     "Ends with" = the last source's join has SETTINGS after its last ')', so a SETTINGS inside a
     subquery is not mistaken for the node's own.
-    useFinal overrides readWithFinal when given (see view_final_setting()).
-    The same clause also gets join_use_nulls = 1 when the joinUseNulls runtime parameter is true
-    (nsJoinUseNulls at the top) — on every run for a load, once at deploy for a view. With false or not
-    set nothing is added, so the ClickHouse user's / session's setting applies.
     joinAtEnd = false where the node's SQL is not the end of the statement (the Dimension and Fact
     change-detection loads put it inside the SOURCE_ROWS CTE, the Last Modified NULL check inside a
     subquery): its own SETTINGS then stays with it, and the statement gets its own SETTINGS clause.
+    cfg = the config whose @querySettings apply (default: the node's).
+    useJoinNulls (a view's @joinUseNulls, see view_final_setting()) replaces the joinUseNulls runtime
+    parameter when given: true -> join_use_nulls = 1, false -> nothing.
+    useRuntime = false: the querySettings runtime parameter is not used (a view).
   ===========================================================================#}
-  {%- macro source_final_setting(srcs, useFinal=none, joinAtEnd=true) -%}
+  {%- macro source_final_setting(srcs, useFinal=none, joinAtEnd=true, cfg=none, useJoinNulls=none, useRuntime=true) -%}
       {%- set applyFinal = nsReadWithFinal.value if useFinal is none else useFinal -%}
-      {%- set items = (['final = 1'] if applyFinal else [])
-                      + (['join_use_nulls = 1'] if nsJoinUseNulls.value == '1' else []) -%}
-      {%- if items -%}
-          {%- set srcList = srcs | default([], true) | list -%}
-          {%- set lastJoin = (srcList[-1].join | default('', true)) if srcList else '' -%}
-          {%- set tailText = ' ' ~ (lastJoin.split(')')[-1] | lower | replace('\n', ' ') | replace('\t', ' ') | replace('\r', ' ')) ~ ' ' -%}
-          {%- if joinAtEnd and ' settings ' in tailText %}
-      , {{ items | join(', ') }}
+      {%- set nsQs = namespace(items=[], ignored=[], origin='') -%}
+      {{- query_settings(config if cfg is none else cfg, nsQs, useRuntime) -}}
+      {%- set candidates = nsQs.items
+                           + (['final = 1'] if applyFinal else [])
+                           + ((['join_use_nulls = 1'] if nsJoinUseNulls.value == '1' else []) if useJoinNulls is none
+                              else (['join_use_nulls = 1'] if useJoinNulls else [])) -%}
+      {%- set srcList = srcs | default([], true) | list -%}
+      {%- set lastJoin = (srcList[-1].join | default('', true)) if srcList else '' -%}
+      {%- set tailText = ' ' ~ (lastJoin.split(')')[-1] | lower | replace('\n', ' ') | replace('\t', ' ') | replace('\r', ' ')) ~ ' ' -%}
+      {%- set ownSettings = joinAtEnd and ' settings ' in tailText -%}
+      {%- set nsOwn = namespace(names=[], items=[]) -%}
+      {%- if ownSettings -%}
+          {%- for part in tailText.split(' settings ')[-1].split(',') -%}
+              {%- set nsOwn.names = nsOwn.names + [part.split('=')[0] | trim] -%}
+          {%- endfor -%}
+      {%- endif -%}
+      {%- for item in candidates if (item.split('=')[0] | trim | lower) not in nsOwn.names -%}
+          {%- set nsOwn.items = nsOwn.items + [item] -%}
+      {%- endfor -%}
+      {%- if nsOwn.items -%}
+          {%- if ownSettings %}
+      , {{ nsOwn.items | join(', ') }}
           {%- else %}
-      SETTINGS {{ items | join(', ') }}
+      SETTINGS {{ nsOwn.items | join(', ') }}
           {%- endif -%}
       {%- endif -%}
   {%- endmacro -%}
 
   {#===========================================================================
-    view_final_setting(state): 'SETTINGS final = 1' for a view's SELECT. A view is fixed when it is
-    deployed, so it decides here, in this order:
-      1. @final, @final(true) or @final("true")  -> SETTINGS final = 1
-      2. @final with any other value             -> nothing, whatever readWithFinal is
-      3. no @final, readWithFinal = true  -> SETTINGS final = 1
-      4. no @final, false or not set             -> nothing
-    @final is part of the definition compared on redeploy, so adding, removing or changing it
-    recreates the view. A later change to readWithFinal alone does not (both states render
-    with it).
+    cleanup_settings(): the SETTINGS clause of the Clean Up Previous Data DELETE.
+      - transform_null_in = 1 by default, so a NULL business key matches in IN / NOT IN and the older
+        copies of its rows are removed too;
+      - the node's query settings (query_settings()) follow. A transform_null_in in them replaces the
+        default (the user's choice is respected; validate_query_settings() warns when it is 0 and a
+        business key column is nullable).
+  ===========================================================================#}
+  {%- macro cleanup_settings() -%}
+      {%- set nsQs = namespace(items=[], ignored=[], origin='') -%}
+      {{- query_settings(config, nsQs) -}}
+      {%- set nsTni = namespace(userSet=false) -%}
+      {%- for item in nsQs.items if (item.split('=')[0] | trim | lower) == 'transform_null_in' -%}
+          {%- set nsTni.userSet = true -%}
+      {%- endfor -%}
+      SETTINGS {{ ((['transform_null_in = 1'] if not nsTni.userSet else []) + nsQs.items) | join(', ') }}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    view_final_setting(state): the SETTINGS clause for a view's SELECT. A view is created at deploy and
+    takes its settings from the node only — never from the runtime parameters (readWithFinal,
+    joinUseNulls, querySettings), which belong to runs:
+      @final (or @final(true))               -> final = 1           (any other value or no @final: nothing)
+      @joinUseNulls (or @joinUseNulls(true)) -> join_use_nulls = 1  (any other value or none: nothing)
+      @querySettings                         -> those settings      (none: nothing)
+    view_runtime_parameter_note() tells the deployer when a runtime parameter is set but not used.
+    @final, @joinUseNulls and @querySettings are part of the definition compared on redeploy, so adding,
+    removing or changing them recreates the view.
   ===========================================================================#}
   {%- macro view_final_setting(state) -%}
       {%- set cfg = state.config if (state.config is defined and state.config) else {} -%}
-      {%- if cfg.final is defined -%}
-          {%- set finalArgs = cfg.final.parameters if (cfg.final is mapping and cfg.final.parameters is defined and cfg.final.parameters) else [] -%}
-          {%- set finalValue = (finalArgs[0] | string | trim | trim('"') | trim("'") | lower) if finalArgs else 'true' -%}
-          {%- set useFinal = finalValue == 'true' -%}
-      {%- else -%}
-          {%- set useFinal = nsReadWithFinal.value -%}
+      {%- set useFinal = view_annotation_on(cfg, 'final') == 'true' -%}
+      {%- set useJoinNulls = view_annotation_on(cfg, 'joinUseNulls') == 'true' -%}
+      {{- source_final_setting(state.sources, useFinal, cfg=cfg, useJoinNulls=useJoinNulls, useRuntime=false) -}}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    view_annotation_on(cfg, name): 'true' when the view's flag annotation (@final / @joinUseNulls) is set
+    bare or with true / "true" / 1, else ''.
+  ===========================================================================#}
+  {%- macro view_annotation_on(cfg, name) -%}
+      {%- set ann = cfg[name] if (cfg is mapping and name in cfg) else none -%}
+      {%- if ann is not none -%}
+          {%- set args = ann.parameters if (ann is mapping and ann.parameters is defined and ann.parameters) else [] -%}
+          {%- set value = (args[0] | string | trim | trim('"') | trim("'") | lower) if args else 'true' -%}
+          {{- 'true' if value in ['true', '1'] else '' -}}
       {%- endif -%}
-      {{- source_final_setting(state.sources, useFinal) -}}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    view_runtime_parameter_note(): non-failing "Info: Runtime parameters not used by views" deploy stage
+    when a runtime parameter is set that a view would otherwise follow, and the view does not have the
+    matching annotation — so nobody expects FINAL / join_use_nulls / query settings that the view does
+    not have.
+  ===========================================================================#}
+  {%- macro view_runtime_parameter_note() -%}
+      {%- set cfg = config if (config is defined and config) else {} -%}
+      {%- set nsNote = namespace(lines=[]) -%}
+      {%- if nsReadWithFinal.value and view_annotation_on(cfg, 'final') != 'true' -%}
+          {%- set nsNote.lines = nsNote.lines + ['readWithFinal = true: this view does not read with FINAL. Add @final to read its ReplacingMergeTree sources with FINAL.'] -%}
+      {%- endif -%}
+      {%- if nsJoinUseNulls.value == '1' and view_annotation_on(cfg, 'joinUseNulls') != 'true' -%}
+          {%- set nsNote.lines = nsNote.lines + ['joinUseNulls = true: this view does not set join_use_nulls = 1 (an unmatched LEFT JOIN column follows the ClickHouse setting of whoever reads it). Add @joinUseNulls for NULL.'] -%}
+      {%- endif -%}
+      {%- if nsRuntimeQuerySettings.items and not (cfg.querySettings is defined and cfg.querySettings) -%}
+          {%- set nsNote.lines = nsNote.lines + ['querySettings (' ~ (nsRuntimeQuerySettings.items | join(', ')) ~ '): not applied to this view. Add @querySettings for settings of its own.'] -%}
+      {%- endif -%}
+      {%- if nsNote.lines %}
+
+          {{ test_stage('Info: Runtime parameters not used by views', true) }}
+          -- {{ node.name }} is a view: it is created at deploy and takes its settings from the node only (@final, @joinUseNulls, @querySettings), not from runtime parameters.
+          {%- for line in nsNote.lines %}
+          -- {{ line }}
+          {%- endfor %}
+          SELECT 1 WHERE 0
+      {%- endif -%}
   {%- endmacro -%}
 
   {#===========================================================================
@@ -732,7 +910,7 @@ macroString: |-
       -- Engine: from the package engine parameter ({{ packageEngine }}) - this node has no @engine.
       {%- endif %}
       {%- if nsReadWithFinal.value %}
-      -- readWithFinal = true ({{ nsReadWithFinal.origin }}): the loads and views of downstream Work / Dimension / Fact nodes read it with FINAL (SETTINGS final = 1).
+      -- readWithFinal = true ({{ nsReadWithFinal.origin }}): the loads of downstream Work / Dimension / Fact tables read it with FINAL (SETTINGS final = 1); a downstream view needs @final.
       {%- else %}
       -- readWithFinal = false ({{ nsReadWithFinal.origin }}): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.
       {%- endif %}

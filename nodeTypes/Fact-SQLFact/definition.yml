@@ -20,7 +20,6 @@ metadata:
         Ex. CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
 
     deployStrategy: advanced
-    enableCTESupport: true
 
     annotations:
         node:
@@ -117,7 +116,8 @@ metadata:
 
             - name: settings
               description: |-
-                • The table's MergeTree SETTINGS. Each argument is one setting, written as name = value.
+                • Table settings (CREATE TABLE): the table's MergeTree SETTINGS, stored with the table. Each argument is one setting, written as name = value.
+                • For settings of the queries the node runs (memory, threads, spill to disk), use querySettings.
                   Ex. settings("index_granularity = 8192")
                   Ex. settings("index_granularity = 8192", "min_bytes_for_wide_part = 0")
                 • allow_nullable_key = 1 is added automatically when the table has an orderBy, primaryKey or partitionBy, so nullable columns can be key terms — set it here to override it.
@@ -130,17 +130,29 @@ metadata:
                   isRequired: true
                   example: index_granularity = 8192
 
+        - groupName: View Specific Options
+          description: >-
+            Views only: settings fixed into the view's SELECT when it is created. A view takes its settings from the node only, never from runtime parameters.
+          items:
+
             - name: final
               description: |-
                 • 𝗩𝗶𝗲𝘄𝘀 𝗼𝗻𝗹𝘆 — the view reads its sources with FINAL (SETTINGS final = 1 at the end of its SELECT), so an upstream ReplacingMergeTree shows one row per key, without the copies its load replaced.
                   Ex. @materializationType("view") @final
-                • A view is fixed when it is deployed. It uses, in order:
-                  1. @final → SETTINGS final = 1
-                  2. no @final, readWithFinal runtime parameter true → SETTINGS final = 1
-                  3. no @final, readWithFinal false or not set → no SETTINGS
-                • When the view's SQL already ends with its own SETTINGS clause, final = 1 is appended to it (SETTINGS max_threads = 4, final = 1). If that clause already sets final, its own value wins (SETTINGS final = 0, final = 1 reads without FINAL).
-                • Adding or removing @final on redeploy recreates the view. Changing readWithFinal later does not change a deployed view.
+                • Without @final a view does not read with FINAL, whatever the readWithFinal runtime parameter (views take their settings from the node only; an Info stage says so when readWithFinal is true).
+                • When the view's SQL already ends with its own SETTINGS clause, final = 1 is appended to it (SETTINGS max_threads = 4, final = 1). If that clause already sets final, its own value is kept and final = 1 is not added.
+                • Adding or removing @final on redeploy recreates the view.
                 • On a table it does nothing: a non-failing "Warning: @final on a table" stage is shown, and the load follows readWithFinal.
+              isRequired: false
+
+            - name: joinUseNulls
+              description: |-
+                • 𝗩𝗶𝗲𝘄𝘀 𝗼𝗻𝗹𝘆 — the view's SELECT ends with SETTINGS join_use_nulls = 1, fixed when the view is created, so an unmatched LEFT JOIN column is NULL whatever the ClickHouse user's settings.
+                  Ex. @materializationType("view") @joinUseNulls
+                • Without @joinUseNulls nothing is added, whatever the joinUseNulls runtime parameter (views take their settings from the node only; an Info stage says so when joinUseNulls is true).
+                • If the view's SQL ends with its own SETTINGS that sets join_use_nulls, that value is kept.
+                • Adding or removing @joinUseNulls on redeploy recreates the view.
+                • On a table it does nothing: a non-failing "Warning: @joinUseNulls on a table" stage is shown, and the load follows the joinUseNulls runtime parameter.
               isRequired: false
 
         - groupName: Load Options
@@ -221,6 +233,21 @@ metadata:
                 • Rewrites the whole table on every run — use it on small or medium tables, or when reads must not need FINAL.
                 • On a view it does nothing: a non-failing "Warning: @optimize on a view" stage is shown.
               isRequired: false
+
+            - name: querySettings
+              description: |-
+                • Query settings (every load / view query): ClickHouse settings for the queries this node runs — the load INSERT, the Dimension / Fact change detection and clean-up, the view definition. Each argument is one setting, written as name = value.
+                  Ex. querySettings("max_memory_usage = 20000000000", "max_threads = 8")
+                  Ex. querySettings("max_bytes_before_external_group_by = 10000000000", "max_bytes_before_external_sort = 10000000000", "max_block_size = 65536")
+                • Merged per setting with the querySettings runtime parameter: a setting named here overrides the same one there, the others still apply (tables only — views take their settings from the node only). A SETTINGS clause at the end of the node's SQL overrides both.
+                • final and join_use_nulls are ignored here (warning stage): use readWithFinal / final and joinUseNulls / joinUseNulls (view annotation).
+                • To change a value: edit it here, deploy (metadata update for a table, recreate for a view), then run. Changing a setting in the querySettings runtime parameter does not affect this node if it is named here.
+              isRequired: false
+              parameters:
+                - name: setting
+                  type: string
+                  isRequired: true
+                  example: max_memory_usage = 20000000000
 
         - groupName: Other Options
           description: >-
