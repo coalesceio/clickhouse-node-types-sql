@@ -1,11 +1,12 @@
-@id("4d68ba6f-253c-44b8-a9a5-e77a9c3a0a79")
+@id("9215b7c5-bc46-4dce-b225-bd222685c592")
 @nodeType("SQLWork")
-@writeMode("append")
 SELECT
+     `DIM_Nation_Test_KEY` AS `DIM_Nation_Test_KEY`,
      `n_Nationkey` AS `n_Nationkey`,
      `n_Name` AS `n_Name`,
      `n_Regionkey` AS `n_Regionkey`,
      `n_Comment` AS `n_Comment`,
-     `last_Modified` AS `last_Modified_1` @freshness(1, "WEEK"),
-     `last_Modified` AS `last_Modified_2` @relative_time("=", "last_Modified_1")
-FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`
+     `last_Modified` AS `last_Modified`,
+     `SYSTEM_CREATE_DATE` AS `SYSTEM_CREATE_DATE`,
+     `SYSTEM_UPDATE_DATE` AS `SYSTEM_UPDATE_DATE`
+FROM {{ ref('TARGET', 'DIM_RMT_CT_SCD1') }} `DIM_RMT_CT_SCD1`

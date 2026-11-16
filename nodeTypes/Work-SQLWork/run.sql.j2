@@ -51,6 +51,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {%- if not loop.last -%}, {%- endif %}
     {%- endfor %}
     {{ sources[0].join }}
+    {{- source_final_setting(sources) }}
 
     {#== Post-SQL ==#}
     {{ run_pre_post_sql('Post') }}

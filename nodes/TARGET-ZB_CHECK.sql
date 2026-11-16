@@ -1,0 +1,16 @@
+@id("6aa05866-310e-4ef2-bdba-03b3a07c4cea")
+@nodeType("SQLWork")
+@tests("SELECT `k`, `attr`, `last_Modified` FROM {{ ref('TARGET', 'ZB_F_CT_MT') }} EXCEPT SELECT `k`, `attr`, `last_Modified` FROM {{ ref('TARGET', 'ZB_F_CT_RMT') }} FINAL", true, "After")
+@tests("SELECT `k`, `attr`, `last_Modified` FROM {{ ref('TARGET', 'ZB_F_CT_RMT') }} FINAL EXCEPT SELECT `k`, `attr`, `last_Modified` FROM {{ ref('TARGET', 'ZB_F_CT_MT') }}", true, "After")
+@tests("SELECT 1 FROM {{ ref('TARGET', 'ZB_F_CT_MT') }}", true, "After")
+@tests("SELECT `k`, `attr`, `last_Modified` FROM {{ ref('TARGET', 'ZB_F_LM_MT') }} EXCEPT SELECT `k`, `attr`, `last_Modified` FROM {{ ref('TARGET', 'ZB_F_LM_RMT') }} FINAL", true, "After")
+@tests("SELECT `k`, `attr`, `last_Modified` FROM {{ ref('TARGET', 'ZB_F_LM_RMT') }} FINAL EXCEPT SELECT `k`, `attr`, `last_Modified` FROM {{ ref('TARGET', 'ZB_F_LM_MT') }}", true, "After")
+@tests("SELECT 1 FROM {{ ref('TARGET', 'ZB_F_LM_MT') }}", true, "After")
+@tests("SELECT `k`, `attr`, `last_Modified` FROM {{ ref('TARGET', 'ZB_D1_MT') }} EXCEPT SELECT `k`, `attr`, `last_Modified` FROM {{ ref('TARGET', 'ZB_D1_RMT') }} FINAL", true, "After")
+@tests("SELECT `k`, `attr`, `last_Modified` FROM {{ ref('TARGET', 'ZB_D1_RMT') }} FINAL EXCEPT SELECT `k`, `attr`, `last_Modified` FROM {{ ref('TARGET', 'ZB_D1_MT') }}", true, "After")
+@tests("SELECT 1 FROM {{ ref('TARGET', 'ZB_D1_MT') }}", true, "After")
+@tests("SELECT `k`, `attr`, `last_Modified`, `SYSTEM_VERSION`, `SYSTEM_CURRENT_FLAG` FROM {{ ref('TARGET', 'ZB_D2_MT') }} EXCEPT SELECT `k`, `attr`, `last_Modified`, `SYSTEM_VERSION`, `SYSTEM_CURRENT_FLAG` FROM {{ ref('TARGET', 'ZB_D2_RMT') }} FINAL", true, "After")
+@tests("SELECT `k`, `attr`, `last_Modified`, `SYSTEM_VERSION`, `SYSTEM_CURRENT_FLAG` FROM {{ ref('TARGET', 'ZB_D2_RMT') }} FINAL EXCEPT SELECT `k`, `attr`, `last_Modified`, `SYSTEM_VERSION`, `SYSTEM_CURRENT_FLAG` FROM {{ ref('TARGET', 'ZB_D2_MT') }}", true, "After")
+@tests("SELECT 1 FROM {{ ref('TARGET', 'ZB_D2_MT') }}", true, "After")
+SELECT
+    CAST((SELECT count() FROM {{ ref('TARGET', 'ZB_F_CT_MT') }}) + (SELECT count() FROM {{ ref('TARGET', 'ZB_F_CT_RMT') }}) + (SELECT count() FROM {{ ref('TARGET', 'ZB_F_LM_MT') }}) + (SELECT count() FROM {{ ref('TARGET', 'ZB_F_LM_RMT') }}) + (SELECT count() FROM {{ ref('TARGET', 'ZB_D1_MT') }}) + (SELECT count() FROM {{ ref('TARGET', 'ZB_D1_RMT') }}) + (SELECT count() FROM {{ ref('TARGET', 'ZB_D2_MT') }}) + (SELECT count() FROM {{ ref('TARGET', 'ZB_D2_RMT') }}) AS UInt64) AS `n`
