@@ -1,0 +1,103 @@
+fileVersion: 1
+id: 7fe71c4e-8810-42a6-a712-ca5ca9f46639
+name: PSTG_Nation_Test
+operation:
+  config:
+    insertStrategy: INSERT
+    orderBy: tuple()
+    partitionBy: ""
+    postSQL: ""
+    preSQL: ""
+    tableEngine: ReplacingMergeTree
+    testsEnabled: true
+    truncateBefore: false
+  database: ""
+  deployEnabled: true
+  description: ""
+  isMultisource: false
+  locationName: TARGET
+  materializationType: table
+  metadata:
+    appliedNodeTests: []
+    columns:
+      - columnReference:
+          columnCounter: d1e46d1e-b348-45b3-ad9e-218fe333f672
+          stepCounter: 7fe71c4e-8810-42a6-a712-ca5ca9f46639
+        dataType: UInt32
+        description: ""
+        name: n_Nationkey
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences:
+              - columnCounter: 53ee3494-90c0-4a1a-bd6a-62ac29b89804
+                stepCounter: 142b8811-8006-48e9-8e11-94a8287ab056
+            transform: ""
+      - columnReference:
+          columnCounter: 8c8255aa-e45c-478d-8fe4-f58d8c025ffb
+          stepCounter: 7fe71c4e-8810-42a6-a712-ca5ca9f46639
+        dataType: FixedString(25)
+        description: ""
+        name: n_Name
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences:
+              - columnCounter: 22ec8534-5f4c-4ad0-b67f-f6584e72a544
+                stepCounter: 142b8811-8006-48e9-8e11-94a8287ab056
+            transform: ""
+      - columnReference:
+          columnCounter: d04b3d5d-9c7c-48a1-8634-7147fbf8bdf6
+          stepCounter: 7fe71c4e-8810-42a6-a712-ca5ca9f46639
+        dataType: UInt32
+        description: ""
+        name: n_Regionkey
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences:
+              - columnCounter: 6b709e3d-1d6c-45e2-a1de-6c4ca7e8caef
+                stepCounter: 142b8811-8006-48e9-8e11-94a8287ab056
+            transform: ""
+      - columnReference:
+          columnCounter: 6ae507bf-7356-42ed-8874-1fb2574e8564
+          stepCounter: 7fe71c4e-8810-42a6-a712-ca5ca9f46639
+        dataType: String
+        description: ""
+        name: n_Comment
+        nullable: true
+        sourceColumnReferences:
+          - columnReferences:
+              - columnCounter: 76bfcc50-9923-4afc-bef3-d4e87d0ba3b4
+                stepCounter: 142b8811-8006-48e9-8e11-94a8287ab056
+            transform: ""
+      - columnReference:
+          columnCounter: 6b2a2a37-1777-451b-953a-2bb54875d9fe
+          stepCounter: 7fe71c4e-8810-42a6-a712-ca5ca9f46639
+        dataType: DateTime64(3)
+        description: ""
+        name: last_Modified
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences:
+              - columnCounter: 4cbd2232-7d4d-499b-b3c9-8ce770927167
+                stepCounter: 142b8811-8006-48e9-8e11-94a8287ab056
+            transform: ""
+    cteString: ""
+    enabledColumnTestIDs: []
+    sourceMapping:
+      - aliases:
+          Nation_Test: 142b8811-8006-48e9-8e11-94a8287ab056
+        customSQL:
+          customSQL: ""
+        dependencies:
+          - locationName: SRC
+            nodeName: Nation_Test
+        join:
+          joinCondition: FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`
+        name: PSTG_Nation_Test
+        noLinkRefs: []
+  name: PSTG_Nation_Test
+  overrideSQL: false
+  schema: ""
+  sqlType: persistentStage
+  type: sql
+  version: 1
+type: Node

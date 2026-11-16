@@ -1,5 +1,6 @@
 @id("a1d9cf22-49a3-4438-bc32-fc6deb6d8c04")
 @nodeType("SQLWork")
+@materializationType("view")
 SELECT
      `DIM_Nation_LM_SCD2_KEY` AS `DIM_Nation_LM_SCD2_KEY`,
      `n_Nationkey` AS `n_Nationkey`,

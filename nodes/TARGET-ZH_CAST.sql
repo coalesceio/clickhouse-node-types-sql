@@ -4,6 +4,7 @@
 @tests("SELECT 1 FROM {{ this }} WHERE length(`h_cast`) != 32 OR length(`h_sha256`) != 64 OR length(`h_raw`) != 16", true, "After")
 @tests("SELECT 1 FROM {{ this }} WHERE toTypeName(`h_cast`) NOT LIKE '%FixedString(32)%' OR toTypeName(`h_colon`) NOT LIKE '%FixedString(32)%' OR toTypeName(`h_city`) NOT LIKE '%UInt64%'", true, "After")
 @tests("SELECT 1 FROM {{ this }} WHERE `h_raw` != MD5(concat(ifNull(toString(`a`), 'null'), '||', ifNull(toString(`b`), 'null')))", true, "After")
+@querySettings("max_memory_usage = 30000000000")
 SELECT
     `a`                                                     AS `a` @inHash("H", 1),
     `b`                                                     AS `b` @inHash("H", 2),
