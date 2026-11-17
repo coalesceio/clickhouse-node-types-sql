@@ -506,8 +506,13 @@ macroString: |-
       - "Warning: @ttl on a Dimension" (isDimension): a rule can delete current members and the zero
         key record (SYSTEM_CREATE_DATE 1970-01-01). Not shown when every rule uses the
         @isSystemEndDate column (current rows and the zero record have the high end date).
+      - "Invalid configuration: @ttl on a new column without @defaultValue" (blockNewColumn: Dimension
+        and Fact), failing, on a redeploy of a table: a column the rules use is added by this deploy,
+        is not null (@notNull) and has no @defaultValue. The existing rows get the type's default
+        (1970-01-01) in it, and Modify TTL deletes them during the deploy — on a Dimension its whole
+        SCD Type 2 history. Fix: @defaultValue("now()") on the column, or add the rule in a later deploy.
   ===========================================================================#}
-  {%- macro validate_ttl(isDimension=false) -%}
+  {%- macro validate_ttl(isDimension=false, blockNewColumn=false) -%}
       {%- set rules = nsNodeVariables.desiredTtl -%}
       {%- if rules and columns is defined and columns -%}
           {#- Column names found in the rules: separators become spaces, then match " name " #}
@@ -527,6 +532,22 @@ macroString: |-
                   {%- set nsTtl.bad = nsTtl.bad + [col.name ~ ' (' ~ col.dataType ~ ')'] -%}
               {%- endif -%}
           {%- endfor -%}
+          {#- New not-null columns without a default that the rules use (redeploy of a table only) #}
+          {%- set nsNew = namespace(cols=[]) -%}
+          {%- if blockNewColumn and currentState is defined and currentState and nsNodeVariables.currentMatType == 'table' -%}
+              {%- set curIds = currentState.columns | default([], true) | map(attribute='id') | list -%}
+              {%- for col in columns if (' ' ~ col.name ~ ' ') in nsPad.text and col.id not in curIds
+                                        and col.nullable == false and not col.defaultValue -%}
+                  {%- set nsNew.cols = nsNew.cols + [col.name] -%}
+              {%- endfor -%}
+          {%- endif -%}
+          {%- if nsNew.cols %}
+          {{ test_stage('Invalid configuration: @ttl on a new column without @defaultValue', false) }}
+          -- {{ node.name }}: @ttl uses {{ nsNew.cols | join(', ') }}, added by this deploy as not null (@notNull) without a @defaultValue.
+          -- The rows already in the table would get 1970-01-01 in it, and Modify TTL would delete them all during this deploy{{ ' — the whole SCD Type 2 history of this Dimension' if isDimension else '' }}.
+          -- Fix: add @defaultValue("now()") to {{ nsNew.cols | join(', ') }} (the existing rows get the deploy time), or add the @ttl rule in a later deploy, after the column is filled.
+          {{ fail_sql(true, 'Invalid configuration: @ttl on a new column without @defaultValue') }}
+          {%- endif %}
           {%- if nsTtl.bad %}
           {{ test_stage('Warning: @ttl on a column that is not a date', true) }}
           -- {{ node.name }}: @ttl uses {{ nsTtl.bad | join(', ') }}. A TTL rule must give a Date, Date32, DateTime or DateTime64.

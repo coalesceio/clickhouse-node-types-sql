@@ -109,6 +109,7 @@ metadata:
                 • On redeploy, changes are applied in place: Modify TTL (MODIFY TTL with every rule) or Remove TTL. A new or changed rule is applied to the existing data during the deploy, so the rows it expires are deleted then. To skip that, set materialize_ttl_after_modify = 0 on the ClickHouse user or settings profile that deploys — it is a query setting, so settings and querySettings do not reach the deploy's ALTER (see documentation).
                 • Renaming a column the TTL uses: ClickHouse renames it inside the TTL too. Change the name in ttl in the same deploy.
                 • Removing a column the TTL uses: change or remove ttl in the same deploy — the TTL is changed before the column is dropped. With ttl unchanged, ClickHouse rejects the drop and the deploy fails.
+                • ⚠️ A new @notNull column used in ttl: without @defaultValue (e.g. @defaultValue("now()")) the existing rows get 1970-01-01 in it and the TTL deletes them all during the deploy; the next run reloads the table.
               isRequired: false
               parameters:
                 - name: rule

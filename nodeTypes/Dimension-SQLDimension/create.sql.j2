@@ -41,8 +41,9 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {# Validate the Dimension's annotations (hard fail: CREATE does not fail a test stage on row count) #}
         {{ validate_dimension_requirements(true) }}
 
-        {# Non-failing TTL warnings: a rule on a column that is not a date type; on a Dimension, rules that can delete current rows or the zero key record #}
-        {{ validate_ttl(true) }}
+        {# TTL checks: failing when a new not-null column without @defaultValue is used (existing rows would be deleted);
+           non-failing warnings for a rule on a column that is not a date type; on a Dimension, rules that can delete current rows or the zero key record #}
+        {{ validate_ttl(true, true) }}
 
         {# Drop the current object if it was another type (a table rename/move is cloned to the new path) #}
         {{ object_drop_sql() }}
