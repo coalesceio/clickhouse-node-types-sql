@@ -1569,7 +1569,24 @@ SETTINGS allow_nullable_key = 1
 | Dimension, Fact | **Invalid configuration: @ttl on a new column without @defaultValue** stops the deploy before anything is changed |
 | Work | Not checked: the rows are deleted, and the next run reloads the table |
 
-Fix: add `@defaultValue("now()")` to the new column, so the existing rows get the deploy time (**Materialize Column Default** runs before **Modify TTL**), or add the `@ttl` rule in a later deploy, after the column has been filled. A first deploy is never affected: the table has no rows yet.
+Fix: add `@defaultValue("now()")` to the new column, so the existing rows get the deploy time (**Materialize Column Default** runs before **Modify TTL**). A first deploy is never affected: the table has no rows yet.
+
+**⚠️ Other ways existing rows get 1970-01-01 — not checked by the package.** ClickHouse allows each of these; the package leaves them to you. In every case **Modify TTL** (or a later merge) deletes those rows:
+
+| How it happens | What the rows hold | Avoid it |
+|---|---|---|
+| The column is added **without `@defaultValue` in one deploy**, and `@ttl` is added in a later one | 1970-01-01 in every row the loads did not rewrite in between: on Fact / Dimension the unchanged rows, on an SCD Type 2 Dimension **all its history**. Only a Work with `truncateInsert` rewrites every row. | Give the column a `@defaultValue` when you add it |
+| The new column is **Nullable** and the rule is ``assumeNotNull(`col`)`` or ``ifNull(`col`, toDateTime(0))`` | NULL in the existing rows, which the rule turns into 1970-01-01 | ``ifNull(`col`, toDateTime('2106-01-01 00:00:00'))`` keeps them; or give the column a `@defaultValue` |
+| A **`@defaultValue` that gives the epoch** (e.g. `toDateTime(0)`) | 1970-01-01 | Use `now()` or a real date |
+| A Nullable column made **`@notNull` with an epoch `@defaultValue`** | Its NULLs become 1970-01-01 | Same |
+| **NULLs loaded** into a `@notNull` TTL column | 1970-01-01 (ClickHouse's `insert_null_as_default`), on every load | Make sure the source has a date, or use a Nullable column with ``ifNull(`col`, <far future>)`` |
+
+Before adding or changing `@ttl` on a table that holds data, check what it would delete:
+
+```sql
+SELECT count() FROM <table> WHERE toDate(`<col>`) = toDate(0)                  -- rows holding 1970-01-01
+SELECT count() FROM <table> WHERE `<col>` + INTERVAL 1 YEAR <= now()             -- rows the rule expires now
+```
 
 **Dimension:** a TTL deletes every row whose rule has expired, including **current** members and the zero key record:
 
