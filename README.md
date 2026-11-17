@@ -1519,7 +1519,7 @@ The table's `PARTITION BY` key. Each argument is one term — a column or an exp
 | `ttl_only_drop_parts` | With `1`, TTL drops a part only when every row in it has expired, instead of rewriting it. | Much cheaper TTL when `@partitionBy` matches the TTL period (e.g. monthly partitions, monthly TTL). |
 | `allow_nullable_key` | Lets `Nullable` columns be key terms. | Added automatically when the table has a key (see above). |
 
-Only table (MergeTree) settings belong here. A query setting such as `materialize_ttl_after_modify` is accepted in the first `CREATE TABLE` but not stored with the table, and on a redeploy **Modify Settings** fails with *Unknown setting*. Query settings go in [`@querySettings`](#querysettings).
+Only **table settings** belong here — ClickHouse's MergeTree-family settings, which apply to MergeTree and ReplacingMergeTree tables alike. A **query setting** such as `materialize_ttl_after_modify` is accepted in the first `CREATE TABLE` but not stored with the table, and on a redeploy **Modify Settings** fails with *Unknown setting*. Query settings go in [`@querySettings`](#querysettings).
 
 ##### `@ttl`
 
