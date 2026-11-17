@@ -2,7 +2,8 @@
 @nodeType("SQLDimension")
 @zeroKey("00000000-0000-0000-0000-000000000000", "'UNKNOWN'")
 @optimize
-@tests("SELECT 1 WHERE (SELECT count() FROM system.tables WHERE concat(char(96), database, char(96), char(46), char(96), name, char(96)) = '{{ this }}' AND position(engine_full, 'TTL') > 0) > 0", true, "After")
+@ttl("`SYSTEM_END_DATE` + INTERVAL 1 YEAR")
+@tests("SELECT 1 WHERE (SELECT count() FROM system.tables WHERE concat(char(96), database, char(96), char(46), char(96), name, char(96)) = '{{ this }}' AND position(engine_full, 'TTL') > 0) = 0", true, "After")
 @tests("SELECT 1 WHERE (SELECT count() FROM {{ this }} FINAL WHERE `SYSTEM_CURRENT_FLAG` = 'Y') < 7", true, "After")
 SELECT
     generateUUIDv4()  AS `TT_DIM2_KEY` @id("a70000") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),

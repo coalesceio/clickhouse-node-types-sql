@@ -142,7 +142,8 @@ metadata:
                 • Expired rows are removed at ClickHouse's background merges, so they can still be read for a while (merge_with_ttl_timeout in settings sets how often).
                 • TO DISK / TO VOLUME are not available on ClickHouse Cloud.
                 • On redeploy, changes are applied in place: Modify TTL (MODIFY TTL with every rule) or Remove TTL. A new or changed rule is applied to the existing data during the deploy, so the rows it expires are deleted then. To skip that, set materialize_ttl_after_modify = 0 on the ClickHouse user or settings profile that deploys — it is a query setting, so settings and querySettings do not reach the deploy's ALTER (see documentation).
-                • A renamed column is renamed inside the TTL by ClickHouse. A column the TTL uses cannot be dropped: change the rule in the same deploy.
+                • Renaming a column the TTL uses: ClickHouse renames it inside the TTL too. Change the name in ttl in the same deploy.
+                • Removing a column the TTL uses: change or remove ttl in the same deploy — the TTL is changed before the column is dropped. With ttl unchanged, ClickHouse rejects the drop and the deploy fails.
               isRequired: false
               parameters:
                 - name: rule
