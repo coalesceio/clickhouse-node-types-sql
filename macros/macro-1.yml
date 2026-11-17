@@ -184,6 +184,9 @@ macroString: |-
       {{- collect_key_terms(config.settings, nsDesiredSettings) -}}
       {%- set nsNodeVariables.desiredPartitionBy = nsDesiredPartition.items -%}
       {%- set nsNodeVariables.desiredSettings = nsDesiredSettings.items -%}
+      {%- set nsDesiredTtl = namespace(items=[]) -%}
+      {{- collect_key_terms(config.ttl, nsDesiredTtl) -}}
+      {%- set nsNodeVariables.desiredTtl = nsDesiredTtl.items -%}
     {%- endif -%}
     {%- if currentState is defined and currentState -%}
       {%- set nsCurrentOrder = namespace(items=[]) -%}
@@ -198,6 +201,9 @@ macroString: |-
       {{- collect_key_terms(currentState.config.settings, nsCurrentSettings) -}}
       {%- set nsNodeVariables.currentPartitionBy = nsCurrentPartition.items -%}
       {%- set nsNodeVariables.currentSettings = nsCurrentSettings.items -%}
+      {%- set nsCurrentTtl = namespace(items=[]) -%}
+      {{- collect_key_terms(currentState.config.ttl, nsCurrentTtl) -}}
+      {%- set nsNodeVariables.currentTtl = nsCurrentTtl.items -%}
     {%- endif -%}
 
     {#- Redeploy: did the sort key change (ignoring spaces, backticks and case)? #}
@@ -221,6 +227,7 @@ macroString: |-
       desired/currentPrimaryKey             PRIMARY KEY terms from @primaryKey
       desired/currentPartitionBy            PARTITION BY terms from @partitionBy
       desired/currentSettings               "name = value" table settings from @settings
+      desired/currentTtl                    TTL rules from @ttl, one per argument, as written
       desired/currentEngine                 Dimension / Fact ENGINE clause, '' when none is written
                                             (set by set_table_engine(); always '' on a Work node)
       desired/currentEngineReplacing        the engine is a ReplacingMergeTree: the load only inserts and
@@ -249,6 +256,8 @@ macroString: |-
                                       currentPartitionBy = [],
                                       desiredSettings = [],
                                       currentSettings = [],
+                                      desiredTtl = [],
+                                      currentTtl = [],
                                       desiredEngine = "",
                                       currentEngine = "",
                                       desiredEngineReplacing = false,
@@ -483,6 +492,71 @@ macroString: |-
           -- Clean Up Previous Data matches business keys with IN; with transform_null_in = 0 a NULL business key never matches, so older copies of rows with a NULL key ({{ nullableKeys | join(', ') }}) are not removed and can appear more than once.
           -- Fix: mark the business key columns @notNull, or remove transform_null_in from the {{ nsQs.origin }}.
           SELECT 1
+          {%- endif %}
+      {%- endif %}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    validate_ttl(isDimension): non-failing warnings about @ttl on a table, shown on create and redeploy:
+      - "Warning: @ttl on a column that is not a date": a column named in the rules (with or without
+        backticks) whose type, without Nullable / LowCardinality, is not Date, Date32, DateTime or
+        DateTime64. A rule can convert such a column itself (toDateTime(`col`)), so this only warns.
+        ClickHouse accepts an ALTER that retypes a column a TTL uses, and every insert then fails.
+        A Nullable date column is not warned about: ClickHouse rejects it with its own error.
+      - "Warning: @ttl on a Dimension" (isDimension): a rule can delete current members and the zero
+        key record (SYSTEM_CREATE_DATE 1970-01-01). Not shown when every rule uses the
+        @isSystemEndDate column (current rows and the zero record have the high end date).
+  ===========================================================================#}
+  {%- macro validate_ttl(isDimension=false) -%}
+      {%- set rules = nsNodeVariables.desiredTtl -%}
+      {%- if rules and columns is defined and columns -%}
+          {#- Column names found in the rules: separators become spaces, then match " name " #}
+          {%- set nsPad = namespace(text=' ' ~ (rules | join(' ')) ~ ' ') -%}
+          {%- for ch in ['`', '(', ')', ',', '+', '-', '*', '/', '=', '<', '>', '!', "'", '\n', '\t'] -%}
+              {%- set nsPad.text = nsPad.text | replace(ch, ' ') -%}
+          {%- endfor -%}
+          {%- set nsTtl = namespace(bad=[]) -%}
+          {%- for col in columns if (' ' ~ col.name ~ ' ') in nsPad.text -%}
+              {%- set nsType = namespace(dt=(col.dataType | default('', true) | lower | replace(' ', ''))) -%}
+              {%- for wrapper in ['lowcardinality(', 'nullable(', 'lowcardinality(', 'nullable('] -%}
+                  {%- if nsType.dt.startswith(wrapper) and nsType.dt.endswith(')') -%}
+                      {%- set nsType.dt = nsType.dt[wrapper | length:-1] -%}
+                  {%- endif -%}
+              {%- endfor -%}
+              {%- if nsType.dt.split('(')[0] not in ['date', 'date32', 'datetime', 'datetime64'] -%}
+                  {%- set nsTtl.bad = nsTtl.bad + [col.name ~ ' (' ~ col.dataType ~ ')'] -%}
+              {%- endif -%}
+          {%- endfor -%}
+          {%- if nsTtl.bad %}
+          {{ test_stage('Warning: @ttl on a column that is not a date', true) }}
+          -- {{ node.name }}: @ttl uses {{ nsTtl.bad | join(', ') }}. A TTL rule must give a Date, Date32, DateTime or DateTime64.
+          -- ClickHouse can reject the table; a column retyped on redeploy is accepted by the ALTER, and then every insert into the table fails.
+          -- Ignore this warning when the rule converts the column to a date itself (e.g. toDateTime(`col`)).
+          -- Fix: use a date column in @ttl, or keep the column a date type.
+          SELECT 1
+          {%- endif %}
+          {%- if isDimension -%}
+              {%- set endCols = columns | selectattr('isSystemEndDate') | list -%}
+              {%- set createCols = columns | selectattr('isSystemCreateDate') | list -%}
+              {%- set nsEnd = namespace(all=(endCols | length > 0)) -%}
+              {%- for r in rules if not (endCols and endCols[0].name in r) -%}
+                  {%- set nsEnd.all = false -%}
+              {%- endfor -%}
+              {%- if not nsEnd.all %}
+          {{ test_stage('Warning: @ttl on a Dimension', true) }}
+          -- {{ node.name }}: a TTL deletes every row whose rule has expired, including current dimension members and the zero key record.
+          --   A rule on the update or create date deletes a current member that has not changed for that long: facts that point at its surrogate key lose their match, and the next load inserts it again as a new member with a new key.
+          --   The zero key record's create date is 1970-01-01, so a rule on it deletes the zero record at once (the next run inserts it again).
+          {%- if endCols %}
+          -- SCD Type 2: expire old versions only, with the end date (current rows and the zero record carry the high end date). The column must be @notNull:
+          --    @ttl("`{{ endCols[0].name }}` + INTERVAL 1 YEAR")
+          {%- endif %}
+          {%- if createCols %}
+          -- Any other rule: keep the zero key record with
+          --    @ttl("<rule> DELETE WHERE `{{ createCols[0].name }}` != {{ ch_zero_record_date(createCols[0]) }}")
+          {%- endif %}
+          SELECT 1
+              {%- endif %}
           {%- endif %}
       {%- endif %}
   {%- endmacro -%}
@@ -1937,6 +2011,33 @@ macroString: |-
           {{ stage('Reset Settings') }}
           ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
           RESET SETTING {{ nsMap.reset | join(', ') }}
+          {%- set nsNodeVariables.metaDataChanged = true -%}
+      {%- endif %}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    alter_ttl_sql(): "Modify TTL" — MODIFY TTL with every @ttl rule when the rules changed (ClickHouse
+    replaces the whole TTL; with its default materialize_ttl_after_modify = 1 the rows the new rules
+    expire are removed during this ALTER), or "Remove TTL" — REMOVE TTL when @ttl was removed (rows
+    already removed do not come back). Rules are compared ignoring spaces and backticks.
+    Called after Add / Rename Column (a rule can use a new or renamed column; ClickHouse renames a
+    column inside the TTL itself) and before Drop Column (ClickHouse cannot drop a column the TTL uses).
+  ===========================================================================#}
+  {%- macro alter_ttl_sql() -%}
+      {%- set curNorm = nsNodeVariables.currentTtl | join(',') | replace(' ', '') | replace('`', '') -%}
+      {%- set desNorm = nsNodeVariables.desiredTtl | join(',') | replace(' ', '') | replace('`', '') -%}
+      {%- if curNorm != desNorm %}
+          {%- if nsNodeVariables.desiredTtl %}
+          {{ stage('Modify TTL') }}
+          ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
+          MODIFY TTL {{ nsNodeVariables.desiredTtl | join(', ') }}
+          SETTINGS alter_sync = 2
+          {%- else %}
+          {{ stage('Remove TTL') }}
+          ALTER TABLE {{ nsNodeVariables.alterObjectNameFullPath }}
+          REMOVE TTL
+          SETTINGS alter_sync = 2
+          {%- endif %}
           {%- set nsNodeVariables.metaDataChanged = true -%}
       {%- endif %}
   {%- endmacro -%}
