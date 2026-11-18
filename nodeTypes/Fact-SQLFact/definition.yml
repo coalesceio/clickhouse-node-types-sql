@@ -26,7 +26,7 @@ metadata:
 
         - groupName: Create Options
           description: >-
-            How the table or view is created: materialization, engine, sort and partition keys, and table settings.
+            Whether the node is created as a table or a view. Choose this first: the Table Specific and View Specific groups below apply only to their own materialization.
           items:
 
             - name: materializationType
@@ -43,6 +43,11 @@ metadata:
                     - table
                     - view
 
+        - groupName: Table Specific Options
+          description: >-
+            Tables only: how the table is stored (engine, sort and partition keys, and table settings). Ignored when the node is a view.
+          items:
+
             - name: engine
               description: |-
                 • The table's ENGINE: MergeTree or ReplacingMergeTree only, written without arguments. The name is not case-sensitive (replacingmergetree works), and MergeTree() is the same as MergeTree. Any other engine (SummingMergeTree, Log, ...) or arguments stop the deploy and the run (Invalid configuration: engine).
@@ -55,7 +60,6 @@ metadata:
                   • Until a merge, a plain SELECT can return the replaced copies as well — query with FINAL (SELECT ... FROM <table> FINAL, or SETTINGS final = 1). With the readWithFinal runtime parameter true, the load and the column tests end with SETTINGS final = 1; with it false they read the table as stored, so set final = 1 on the ClickHouse user. A "Note: Query with FINAL" deploy stage reminds whoever deploys.
                 • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 — the load inserts and then DELETEs the replaced copies (Clean Up Previous Data). orderBy / primaryKey can be set.
                 • Write ReplacingMergeTree without arguments: the load sets the version argument and ORDER BY itself.
-                • Ignored on views.
                 • ⚠️ Changing engine on redeploy recreates the table — existing data is lost.
               isRequired: false
               parameters:
@@ -74,7 +78,7 @@ metadata:
                   Ex. partitionBy("toYYYYMM(`order_Date`)")
                   Ex. partitionBy("toYYYYMM(`order_Date`)", "`region`")
                 • Keep it coarse (e.g. one partition per month): each partition is stored separately, and too many partitions slow inserts down and eventually make them fail.
-                • Without partitionBy the table is not partitioned. Ignored on views.
+                • Without partitionBy the table is not partitioned.
                 • ⚠️ Changing partitionBy (or renaming / retyping a column used in it) on redeploy recreates the table — existing data is lost.
               isRequired: false
               parameters:
@@ -89,7 +93,7 @@ metadata:
                   Ex. orderBy("`n_Nationkey`")
                   Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)")
                 • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 only (engine("MergeTree") or a plain-insert Fact). ⛔ Not accepted on a ReplacingMergeTree — its ORDER BY is built from the business key (allColumnMatch: its match columns), and the deploy and the run stop if orderBy is set.
-                • Without orderBy (and primaryKey) a MergeTree table uses ORDER BY tuple(). Ignored on views.
+                • Without orderBy (and primaryKey) a MergeTree table uses ORDER BY tuple().
                 • ⚠️ On redeploy, removing trailing terms or adding new columns (without a default) is altered in place when primaryKey is set; any other orderBy change (or renaming / retyping a column used in it) recreates the table — existing data is lost.
               isRequired: false
               parameters:
@@ -105,7 +109,7 @@ metadata:
                   Ex. orderBy("`n_Nationkey`", "`n_Name`", "toYYYYMM(`last_Modified`)") primaryKey("`n_Nationkey`", "`n_Name`")
                 • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 only, as orderBy. ⛔ Not accepted on a ReplacingMergeTree.
                 • Without orderBy, the primary key is also the sort key: primaryKey("`n_Nationkey`") → ORDER BY (`n_Nationkey`).
-                • When it is the same as orderBy, it is not written separately. Ignored on views.
+                • When it is the same as orderBy, it is not written separately.
                 • ⚠️ Changing primaryKey (or renaming / retyping a column used in it) on redeploy recreates the table — existing data is lost.
               isRequired: false
               parameters:
@@ -121,7 +125,6 @@ metadata:
                   Ex. settings("index_granularity = 8192")
                   Ex. settings("index_granularity = 8192", "min_bytes_for_wide_part = 0")
                 • allow_nullable_key = 1 is added automatically when the table has an orderBy, primaryKey or partitionBy, so nullable columns can be key terms — set it here to override it.
-                • Ignored on views.
                 • On redeploy, changes are applied in place with MODIFY SETTING / RESET SETTING.
               isRequired: false
               parameters:
@@ -404,32 +407,28 @@ metadata:
 
         - groupName: Data Quality Tests
           description: >-
-            Column-level data quality tests. Each runs after the load and continues the run on failure.
+            🚦 Column-level data quality tests. Each runs after the load and continues the run on failure.
           items:
 
             - name: not_null
               description: |-
-               🚦 Column-level data quality test.
                 • Fails on rows where the column is 𝗡𝗨𝗟𝗟.
                 • Presence enables the test — remove the annotation to turn it off.
                 • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
 
             - name: uniqueness
               description: |- 
-               🚦 Column-level data quality test.
                 • Fails when a value appears on more than one row.
                 • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
 
             - name: empty
               description: |-
-               🚦 Column-level data quality test.
                 • Fails on rows where the column trims to the empty string;
                 • 𝗡𝗨𝗟𝗟 values pass this test and are instead caught by not_null.
                 • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
 
             - name: accepted_values
               description: |-
-               🚦 Column-level data quality test.
                 • Fails on rows whose value is outside the allow list.
                 • Repeatable — every occurrence on the column is merged into one list. Each call takes a comma-separated list or any number of separate arguments; every argument is itself comma-splittable.
                     accepted_values("0, 1, 2")
@@ -448,7 +447,6 @@ metadata:
 
             - name: rejected_values
               description: |-
-               🚦 Column-level data quality test.
                 • Fails on rows whose value is in the deny list.
                 • Repeatable — every occurrence on the column is merged into one list. Each call takes a comma-separated list or any number of separate arguments; every argument is itself comma-splittable.
                     rejected_values("0, 1, 2")
@@ -467,7 +465,6 @@ metadata:
 
             - name: min_max
               description: |-
-               🚦 Column-level data quality test.
                 • Fails on rows outside the inclusive range. NULL values pass.
                 • Applies to numeric and temporal(date/time related) columns only.
                 • Each bound is pasted into the SQL verbatim, so write it as a valid SQL value for the column's data type —
@@ -489,7 +486,6 @@ metadata:
 
             - name: min_value
               description: |-
-               🚦 Column-level data quality test.
                 • Fails on rows below the bound. NULL values pass.
                 • Applies to numeric and temporal(date/time related) columns only.
                 • Pasted into the SQL verbatim — see min_max.
@@ -503,7 +499,6 @@ metadata:
 
             - name: max_value
               description: |-
-               🚦 Column-level data quality test.
                 • Fails on rows above the bound. NULL values pass.
                 • Applies to numeric and temporal(date/time related) columns only.
                 • Pasted into the SQL verbatim — see min_max.
@@ -517,7 +512,6 @@ metadata:
 
             - name: freshness
               description: |-
-               🚦 Column-level data quality test.
                 • Checks that the data is fresh — fails when the column's value is older than the given interval, or when the table has no rows at all. 
                 • Runs 𝗔𝗳𝘁𝗲𝗿 the load and continues the run on failure.
                 𝗡𝗼𝘁𝗲: on a DATE column the value is truncated to midnight.
@@ -536,7 +530,6 @@ metadata:
 
             - name: relative_time
               description: |-
-               🚦 Column-level data quality test.
                 • Compares this column against another date/time column on the same node using the given operator.
                 • E.g. @relative_time("<=", "END_DATE") fails any row where this column's value is not less than or equal to END_DATE.
                 • A row with either side 𝗡𝗨𝗟𝗟 is left out of the check and passes.

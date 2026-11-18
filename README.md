@@ -1501,6 +1501,17 @@ The table's `PARTITION BY` key. Each argument is one term — a column or an exp
 @settings("index_granularity = 8192", "min_bytes_for_wide_part = 0")
 ```
 
+**Commonly used table settings:**
+
+| Setting | What it does in ClickHouse | Why use it |
+|---|---|---|
+| `index_granularity` | Rows per index mark (default 8192). | Smaller values make point lookups read less; larger values keep the index small on very large tables. |
+| `index_granularity_bytes` | Size limit of one index granule (default 10 MB). | Keeps granules small when rows are wide. |
+| `min_bytes_for_wide_part` / `min_rows_for_wide_part` | Below this size a part is stored compact (one file); above it wide (one file per column). | `min_bytes_for_wide_part = 0` stores every part wide, so reading a few columns of a wide table is faster. |
+| `allow_nullable_key` | Lets `Nullable` columns be key terms. | Added automatically when the table has a key (see above). |
+
+Only **table settings** belong here — ClickHouse's MergeTree-family settings, which apply to MergeTree and ReplacingMergeTree tables alike. A **query setting** (such as `max_threads`) is not stored with the table: ClickHouse can accept it in the first `CREATE TABLE`, and a redeploy's **Modify Settings** then fails with *Unknown setting*. Query settings go in [`@querySettings`](#querysettings).
+
 ##### `@querySettings`
 
 `@querySettings(setting, ...)`
@@ -1526,6 +1537,21 @@ SETTINGS max_memory_usage = 20000000000, max_bytes_before_external_group_by = 10
 ```
 
 (`final = 1` and `join_use_nulls = 1` only when `readWithFinal` / `joinUseNulls` are `true`.)
+
+**Common query settings:**
+
+| Setting | What it does in ClickHouse | Why use it |
+|---|---|---|
+| `max_memory_usage` | Maximum memory one query may use, in bytes; above it the query fails. | Keep a large load within the memory the service has. |
+| `max_bytes_before_external_group_by` | Above this many bytes, `GROUP BY` spills to disk instead of failing. | Large aggregations that do not fit in memory. |
+| `max_bytes_before_external_sort` | Above this many bytes, `ORDER BY` spills to disk. | Large sorts (window functions, `ORDER BY`) that do not fit in memory. |
+| `max_threads` | Threads used to run the query. | Fewer to leave room for other workloads; more to speed up a large load. |
+| `max_insert_threads` | Threads used to write an `INSERT … SELECT`. | Faster writes for large loads. |
+| `max_block_size` | Rows per block read and processed. | Smaller blocks lower memory per thread on wide rows. |
+| `max_execution_time` | Maximum seconds a query may run before it is stopped. | Stop a runaway load. |
+| `join_algorithm` | How joins are run: `hash`, `parallel_hash`, `grace_hash`, `partial_merge`, `auto`, ... | `grace_hash` / `partial_merge` let joins larger than memory complete. |
+| `transform_null_in` | With `1`, `NULL` matches `NULL` in `IN`. | Used by Clean Up Previous Data (default `1`) — see above. |
+| `final`, `join_use_nulls` | — | Not here: ignored with a warning. Use `readWithFinal` / `@final` and `joinUseNulls` / `@joinUseNulls`. |
 
 ##### `@engine`
 
