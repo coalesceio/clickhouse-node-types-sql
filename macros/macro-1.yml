@@ -838,6 +838,23 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
+    column_test_settings(): the SETTINGS clause that ends each column test (@not_null, @uniqueness, ...):
+      - the node's query settings (query_settings(): @querySettings, else the querySettings runtime
+        parameter — a view takes @querySettings only, as its SELECT does);
+      - final = 1 when the target is a ReplacingMergeTree and readWithFinal is true (as
+        target_final_setting()), so replaced copies are not counted.
+    Node-level @tests are the user's own SQL and run as written (add SETTINGS to the test to set any).
+  ===========================================================================#}
+  {%- macro column_test_settings() -%}
+      {%- set nsQs = namespace(items=[], ignored=[], origin='') -%}
+      {{- query_settings(config, nsQs, nsNodeVariables.desiredMatType != 'view') -}}
+      {%- set items = nsQs.items + (['final = 1'] if (nsNodeVariables.desiredEngineReplacing and nsReadWithFinal.value) else []) -%}
+      {%- if items %}
+      SETTINGS {{ items | join(', ') }}
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
     view_final_setting(state): the SETTINGS clause for a view's SELECT. A view is created at deploy and
     takes its settings from the node only — never from the runtime parameters (readWithFinal,
     joinUseNulls, querySettings), which belong to runs:
@@ -2143,12 +2160,13 @@ macroString: |-
 
       {%- if get_boolean_config("disableTests") != "true" -%}
           {%- if runOrder == "After" -%}
+              {#- Each column test ends with the node's query settings, plus final = 1 on a ReplacingMergeTree
+                  when readWithFinal is true (it can still hold replaced copies until a background merge) —
+                  see column_test_settings() #}
+              {%- set targetSettings = column_test_settings() -%}
               {%- for col in columns -%}
                   {%- set colName = '`' + col.name + '`' -%}
-                  {#- A ReplacingMergeTree can still hold replaced copies until a background merge: the tests
-                      end with SETTINGS final = 1 when readWithFinal is true (target_final_setting()) #}
                   {%- set target = ref(node.location.name, node.name) -%}
-                  {%- set targetSettings = target_final_setting() -%}
                   {%- if col.not_null is defined -%}
                       {{ test_stage(col.name + ': not_null', columnContinueOnFailure) }}
                       SELECT {{ colName }}

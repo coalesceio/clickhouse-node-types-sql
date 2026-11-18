@@ -1,6 +1,6 @@
 @id("7e700000-0000-4000-8000-000000000010")
 @nodeType("SQLFact")
-@description("Annotation retention test: clone and swap keep every annotation and the data")
+@description("Annotation retention test v2 (clone and swap)")
 @engine("MergeTree")
 @mergeStrategy("lastModified")
 @writeMode("append")

@@ -1522,7 +1522,8 @@ Only **table settings** belong here — ClickHouse's MergeTree-family settings, 
 @querySettings("max_memory_usage = 20000000000", "max_bytes_before_external_group_by = 10000000000", "max_threads = 8", "max_block_size = 65536")
 ```
 
-* **Where they apply:** the load `INSERT` (Work, Dimension and Fact, including the change detection), the **Clean Up Previous Data** step, and the view definition. Not applied to `@tests`, `@preSQL` / `@postSQL`, or Preview.
+* **Where they apply:** the load `INSERT` (Work, Dimension and Fact, including the change detection), the **Clean Up Previous Data** step, the view definition, and the **column tests** (`@not_null`, `@uniqueness`, …). Not applied to node-level `@tests`, `@preSQL` / `@postSQL`, or Preview.
+* **Column tests** read the whole target table (e.g. `@uniqueness` is a `GROUP BY` over every row), so they get the same memory and spill-to-disk settings as the load: `@querySettings`, then the `querySettings` runtime parameter for every setting the node does not name (a view: `@querySettings` only). On a ReplacingMergeTree they also get `final = 1` when `readWithFinal` is `true`, so replaced copies are not counted. A `SETTINGS` clause at the end of the node's SQL is **not** applied to them: it belongs to that `SELECT`, so it sets the load only. Put a setting in `@querySettings` when the column tests need it too.
 * **Merged with the environment's, per setting:** a setting named in `@querySettings` overrides the same setting in the [`querySettings`](#runtime-parameters) runtime parameter; every other runtime setting still applies to the table (so an environment-wide memory limit stays in force). Views use only `@querySettings`. A `SETTINGS` clause at the end of the node's SQL overrides both.
 * **`final` and `join_use_nulls` are ignored here**, with a **Warning: final / join_use_nulls in querySettings** stage. They change the data, not only how it is computed, so they have their own parameters: [`readWithFinal`](#runtime-parameters) / [`@final`](#final) and [`joinUseNulls`](#runtime-parameters) / [`@joinUseNulls`](#joinusenulls).
 * **Changing it:** edit `@querySettings`, deploy, then run. A table's next load uses the new values after the deploy (a metadata update); a view is recreated with them. Changing a setting in the `querySettings` runtime parameter has no effect on a node whose `@querySettings` names it.
@@ -2013,6 +2014,7 @@ Key annotation terms (`@orderBy`, `@primaryKey`, `@partitionBy`) are written int
 
 * A column test checks **every row of the target**, not only the rows just loaded. On an SCD Type 2 Dimension this includes the expired versions and the zero key record, so `@uniqueness` on a business key fails as soon as one key has a second version. Test only the current rows with a node-level test instead, e.g. `@tests("SELECT `k` FROM {{ this }} WHERE `SYSTEM_CURRENT_FLAG` = 'Y' GROUP BY `k` HAVING count() > 1", false)`.
 * A failing column test never stops the run. To stop the run on a failure, write the check as a node-level [`@tests`](#tests) with `continueOnFailure` = `false`.
+* Each column test ends with the node's query settings (`@querySettings`, then the `querySettings` runtime parameter; a view: `@querySettings` only) and, on a ReplacingMergeTree with `readWithFinal` = `true`, `final = 1`. A `SETTINGS` clause at the end of the node's SQL applies to the load only — see [`@querySettings`](#querysettings).
 
 ---
 
