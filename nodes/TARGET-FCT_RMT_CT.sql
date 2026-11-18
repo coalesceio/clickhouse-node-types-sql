@@ -1,7 +1,6 @@
 @id("d17d1069-1964-4b4e-acd5-98f1026471b2")
 @nodeType("SQLFact")
 @mergeStrategy("lastModified")
-@ttl("ifNull(`last_Modified`, toDateTime64('2106-01-01 00:00:00', 3)) + INTERVAL 1 YEAR")
 SELECT
     "n_Nationkey"                        AS "n_Nationkey"        @id("64aab4") @isBusinessKey,
     "n_Name"                             AS "n_Name"             @id("af8b9f"),

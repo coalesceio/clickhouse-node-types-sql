@@ -41,10 +41,6 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {# Validate the Dimension's annotations (hard fail: CREATE does not fail a test stage on row count) #}
         {{ validate_dimension_requirements(true) }}
 
-        {# TTL checks: failing when a new not-null column without @defaultValue is used (existing rows would be deleted);
-           non-failing warnings for a rule on a column that is not a date type; on a Dimension, rules that can delete current rows or the zero key record #}
-        {{ validate_ttl(true, true) }}
-
         {# Drop the current object if it was another type (a table rename/move is cloned to the new path) #}
         {{ object_drop_sql() }}
 
@@ -93,9 +89,6 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             {%- endif %}
             {%- else %}
             ORDER BY tuple()
-            {%- endif %}
-            {%- if nsNodeVariables.desiredTtl %}
-            TTL {{ nsNodeVariables.desiredTtl | join(', ') }}
             {%- endif %}
             {%- if nsSettings.items %}
             SETTINGS {{ nsSettings.items | join(', ') }}
@@ -169,10 +162,6 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 
                     {# Modify Order By (trailing terms removed): its own ALTER, before Drop Column #}
                     {{ alter_order_by_sql() }}
-
-                    {# Modify TTL / Remove TTL: after Add / Rename Column (a rule can use a new or renamed column),
-                       before Drop Column (ClickHouse cannot drop a column the TTL still uses) #}
-                    {{ alter_ttl_sql() }}
 
                     {# Drop Column #}
                     {{ alter_drop_columns_sql() }}

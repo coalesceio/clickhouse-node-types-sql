@@ -104,7 +104,6 @@ A side-by-side view of which annotations each node type supports, so it's easy t
 | `@primaryKey` | ✅ | ✅ | ✅ |
 | `@partitionBy` | ✅ | ✅ | ✅ |
 | `@settings` | ✅ | ✅ | ✅ |
-| `@ttl` | ✅ | ✅ | ✅ |
 | `@querySettings` | ✅ | ✅ | ✅ |
 | `@engine` | ➖ | ✅ | ✅ |
 | `@final` | view only | view only | view only |
@@ -175,7 +174,6 @@ The Work Node type has three configuration groups:
 | [`@primaryKey(term, ...)`](#primarykey) | The table's `PRIMARY KEY` — the leading terms of `@orderBy`. |
 | [`@partitionBy(term, ...)`](#partitionby) | The table's `PARTITION BY` key. |
 | [`@settings(setting, ...)`](#settings) | Table settings: the table's MergeTree `SETTINGS`, written in `CREATE TABLE`. |
-| [`@ttl(rule, ...)`](#ttl) | The table's `TTL`: rows are deleted (or recompressed) when they reach a given age. |
 | [`@querySettings(setting, ...)`](#querysettings) | Query settings for the node's load or view (memory, threads, spill to disk). |
 | [`@final`](#final) | Views only: the view reads its sources with `FINAL` (`SETTINGS final = 1`). |
 | [`@joinUseNulls`](#joinusenulls) | Views only: the view's unmatched `LEFT JOIN` columns are `NULL` (`SETTINGS join_use_nulls = 1`), whatever the runtime parameter. |
@@ -229,7 +227,7 @@ After the Work Node has been deployed for the first time into a target Environme
 
 #### Altering the Work Tables
 
-Changes to columns, the table description, `@settings`, `@ttl`, an `@orderBy` change ClickHouse can alter in place, or the table name or location alter the Work Table, whether made individually or all together. The changes are made on an internal clone of the table, so a failure leaves the live table untouched.
+Changes to columns, the table description, `@settings`, an `@orderBy` change ClickHouse can alter in place, or the table name or location alter the Work Table, whether made individually or all together. The changes are made on an internal clone of the table, so a failure leaves the live table untouched.
 
 The following stages are executed, in this order (each one only when needed):
 
@@ -241,8 +239,6 @@ The following stages are executed, in this order (each one only when needed):
 | **Materialize Column Default** | `MATERIALIZE COLUMN` for each new column with a `@defaultValue`, so existing rows get the value written once (`SETTINGS mutations_sync = 2`) |
 | **Rename Column** | Renames a column whose `@id` is unchanged, one stage per column |
 | **Modify Order By** | `MODIFY ORDER BY` when trailing `@orderBy` terms were removed (before **Drop Column**: ClickHouse cannot drop a column in the same `ALTER` that takes it out of the sort key) |
-| **Modify TTL** | `MODIFY TTL` with every `@ttl` rule, when the rules changed. The new rules are applied to the existing data during the deploy — see [`@ttl`](#ttl) |
-| **Remove TTL** | `REMOVE TTL` when `@ttl` was removed |
 | **Drop Column** | Drops removed columns |
 | **Modify Settings** | `MODIFY SETTING` for each `@settings` value added or changed |
 | **Reset Settings** | `RESET SETTING` for each `@settings` value removed |
@@ -354,7 +350,6 @@ The Dimension Node type has three configuration groups:
 | [`@primaryKey(term, ...)`](#primarykey) | The table's `PRIMARY KEY` — the leading terms of `@orderBy`. |
 | [`@partitionBy(term, ...)`](#partitionby) | The table's `PARTITION BY` key. |
 | [`@settings(setting, ...)`](#settings) | Table settings: the table's MergeTree `SETTINGS`, written in `CREATE TABLE`. |
-| [`@ttl(rule, ...)`](#ttl) | The table's `TTL`: rows are deleted (or recompressed) when they reach a given age. |
 | [`@querySettings(setting, ...)`](#querysettings) | Query settings for the node's load or view (memory, threads, spill to disk). |
 | [`@final`](#final) | Views only: the view reads its sources with `FINAL` (`SETTINGS final = 1`). |
 | [`@joinUseNulls`](#joinusenulls) | Views only: the view's unmatched `LEFT JOIN` columns are `NULL` (`SETTINGS join_use_nulls = 1`), whatever the runtime parameter. |
@@ -748,7 +743,6 @@ The Fact Node type has three configuration groups:
 | [`@primaryKey(term, ...)`](#primarykey) | The table's `PRIMARY KEY` — the leading terms of `@orderBy`. |
 | [`@partitionBy(term, ...)`](#partitionby) | The table's `PARTITION BY` key. |
 | [`@settings(setting, ...)`](#settings) | Table settings: the table's MergeTree `SETTINGS`, written in `CREATE TABLE`. |
-| [`@ttl(rule, ...)`](#ttl) | The table's `TTL`: rows are deleted (or recompressed) when they reach a given age. |
 | [`@querySettings(setting, ...)`](#querysettings) | Query settings for the node's load or view (memory, threads, spill to disk). |
 | [`@final`](#final) | Views only: the view reads its sources with `FINAL` (`SETTINGS final = 1`). |
 | [`@joinUseNulls`](#joinusenulls) | Views only: the view's unmatched `LEFT JOIN` columns are `NULL` (`SETTINGS join_use_nulls = 1`), whatever the runtime parameter. |
@@ -1195,7 +1189,6 @@ On redeploy:
 | `@primaryKey` unchanged, trailing `@orderBy` terms removed | Altered in place (**Modify Order By**) |
 | `@primaryKey` unchanged, new columns (without a `@defaultValue`) added at the end of `@orderBy` | Altered in place (**Add Column** with `MODIFY ORDER BY`) |
 | `@settings` changed | Altered in place (**Modify Settings** / **Reset Settings**) |
-| `@ttl` added, changed or removed | Altered in place (**Modify TTL** / **Remove TTL**) — see [`@ttl`](#ttl) |
 | A column dropped after it is removed from `@orderBy` | Altered in place (**Modify Order By** runs before **Drop Column**) |
 
 Terms are compared ignoring spaces, backticks and case.
@@ -1515,89 +1508,9 @@ The table's `PARTITION BY` key. Each argument is one term — a column or an exp
 | `index_granularity` | Rows per index mark (default 8192). | Smaller values make point lookups read less; larger values keep the index small on very large tables. |
 | `index_granularity_bytes` | Size limit of one index granule (default 10 MB). | Keeps granules small when rows are wide. |
 | `min_bytes_for_wide_part` / `min_rows_for_wide_part` | Below this size a part is stored compact (one file); above it wide (one file per column). | `min_bytes_for_wide_part = 0` stores every part wide, so reading a few columns of a wide table is faster. |
-| `merge_with_ttl_timeout` | Minimum seconds between merges that delete rows by TTL (default 14400, 4 hours). | Expired [`@ttl`](#ttl) rows disappear sooner. |
-| `ttl_only_drop_parts` | With `1`, TTL drops a part only when every row in it has expired, instead of rewriting it. | Much cheaper TTL when `@partitionBy` matches the TTL period (e.g. monthly partitions, monthly TTL). |
 | `allow_nullable_key` | Lets `Nullable` columns be key terms. | Added automatically when the table has a key (see above). |
 
-Only **table settings** belong here — ClickHouse's MergeTree-family settings, which apply to MergeTree and ReplacingMergeTree tables alike. A **query setting** such as `materialize_ttl_after_modify` is accepted in the first `CREATE TABLE` but not stored with the table, and on a redeploy **Modify Settings** fails with *Unknown setting*. Query settings go in [`@querySettings`](#querysettings).
-
-##### `@ttl`
-
-`@ttl(rule, ...)`
-
-**Table TTL** — rows are deleted, or recompressed, when they reach a given age. Each argument is one rule, written as ClickHouse takes it; several rules are written together in `CREATE TABLE`, after the keys and before `SETTINGS`.
-
-```sql
-@ttl("`order_Date` + INTERVAL 1 YEAR")
-@ttl("`order_Date` + INTERVAL 1 YEAR DELETE WHERE `status` = 'closed'", "`order_Date` + INTERVAL 30 DAY RECOMPRESS CODEC(ZSTD(9))")
-```
-
-```sql
-CREATE OR REPLACE TABLE ...
-ENGINE = ...
-ORDER BY (`k`)
-TTL `order_Date` + INTERVAL 1 YEAR
-SETTINGS allow_nullable_key = 1
-```
-
-* **The rule must give a `Date`, `Date32`, `DateTime` or `DateTime64`**, ideally from a column marked `@notNull`:
-  * A `Nullable` column is rejected by ClickHouse (*TTL expression result column should have Date, Date32, DateTime or DateTime64 type, but has Nullable(...)*), and so is `toDateTime(<nullable column>)`. The package does not change this; ClickHouse's error stops the deploy.
-  * To use a nullable column, wrap it: `ifNull(`col`, toDateTime('2106-01-01 00:00:00'))` keeps rows with no date. `ifNull(`col`, toDateTime(0))` and `assumeNotNull(`col`)` delete them (a NULL becomes 1970-01-01).
-  * A rule on a column of another type shows a non-failing **Warning: @ttl on a column that is not a date** stage, on create and redeploy. Ignore it when the rule converts the column itself (e.g. `toDateTime(`s`)`). ClickHouse accepts an `ALTER` that retypes a column a TTL uses (e.g. to `String`), and then every insert into the table fails.
-* **NULLs loaded into a `@notNull` TTL column** are stored as 1970-01-01 (ClickHouse's `insert_null_as_default`, see [NULLs in non-nullable columns](#nulls-in-non-nullable-columns)), so those rows are deleted at the next merge.
-* **Expired rows are removed at background merges**, not at once, so they can still be read for a while. `merge_with_ttl_timeout` in [`@settings`](#settings) sets how often; `@optimize` merges right after the load.
-* `DELETE` (the default), `DELETE WHERE`, `RECOMPRESS CODEC(...)` and `GROUP BY` work. `TO DISK` / `TO VOLUME` are not available on ClickHouse Cloud (*No such volume*).
-* Works on MergeTree and ReplacingMergeTree. Ignored on views.
-
-**On redeploy** (on the internal clone, like every alter):
-
-| Change | Stage | What happens |
-|---|---|---|
-| `@ttl` added or changed | **Modify TTL** | `MODIFY TTL` with every rule (ClickHouse replaces the whole TTL). The rules are applied to the existing data **during the deploy**: the rows they expire are deleted then. |
-| `@ttl` removed | **Remove TTL** | `REMOVE TTL`. Rows already deleted do not come back. |
-| A column the TTL uses is renamed | **Rename Column**, then **Modify TTL** | ClickHouse renames the column inside the TTL too. Change the name in `@ttl` in the same deploy. |
-| A column the TTL uses is removed | **Modify TTL** / **Remove TTL**, then **Drop Column** | Change or remove `@ttl` in the same deploy. With `@ttl` unchanged, ClickHouse rejects the drop (*Missing columns*) and the deploy fails. |
-| A **new** column is added and used in `@ttl` | **Add Column**, (**Materialize Column Default**), **Modify TTL** | See below. |
-
-* Rules are compared ignoring spaces and backticks.
-* **Applying a new rule to the existing data** is ClickHouse's default (`materialize_ttl_after_modify = 1`) and keeps the table consistent with its current rules. On a large table it makes the deploy take longer. To skip it (old rows then expire only at later merges), set `materialize_ttl_after_modify = 0` on the **ClickHouse user or settings profile that deploys**. It is a query setting: in [`@settings`](#settings) it is not stored and fails a later **Modify Settings**, and [`@querySettings`](#querysettings) applies to the loads, not to the deploy's `ALTER` — see [Common query settings](#querysettings).
-
-**⚠️ A new TTL column without `@defaultValue` deletes every existing row.** When a redeploy adds a `@notNull` column and `@ttl` uses it, the existing rows get the type's default, 1970-01-01, in the new column, and **Modify TTL** deletes them all during the deploy.
-
-| Node | Result |
-|---|---|
-| Dimension, Fact | **Invalid configuration: @ttl on a new column without @defaultValue** stops the deploy before anything is changed |
-| Work | Not checked: the rows are deleted, and the next run reloads the table |
-
-Fix: add `@defaultValue("now()")` to the new column, so the existing rows get the deploy time (**Materialize Column Default** runs before **Modify TTL**). A first deploy is never affected: the table has no rows yet.
-
-**⚠️ Other ways existing rows get 1970-01-01 — not checked by the package.** ClickHouse allows each of these; the package leaves them to you. In every case **Modify TTL** (or a later merge) deletes those rows:
-
-| How it happens | What the rows hold | Avoid it |
-|---|---|---|
-| The column is added **without `@defaultValue` in one deploy**, and `@ttl` is added in a later one | 1970-01-01 in every row the loads did not rewrite in between: on Fact / Dimension the unchanged rows, on an SCD Type 2 Dimension **all its history**. Only a Work with `truncateInsert` rewrites every row. | Give the column a `@defaultValue` when you add it |
-| The new column is **Nullable** and the rule is ``assumeNotNull(`col`)`` or ``ifNull(`col`, toDateTime(0))`` | NULL in the existing rows, which the rule turns into 1970-01-01 | ``ifNull(`col`, toDateTime('2106-01-01 00:00:00'))`` keeps them; or give the column a `@defaultValue` |
-| A **`@defaultValue` that gives the epoch** (e.g. `toDateTime(0)`) | 1970-01-01 | Use `now()` or a real date |
-| A Nullable column made **`@notNull` with an epoch `@defaultValue`** | Its NULLs become 1970-01-01 | Same |
-| **NULLs loaded** into a `@notNull` TTL column | 1970-01-01 (ClickHouse's `insert_null_as_default`), on every load | Make sure the source has a date, or use a Nullable column with ``ifNull(`col`, <far future>)`` |
-
-Before adding or changing `@ttl` on a table that holds data, check what it would delete:
-
-```sql
-SELECT count() FROM <table> WHERE toDate(`<col>`) = toDate(0)                  -- rows holding 1970-01-01
-SELECT count() FROM <table> WHERE `<col>` + INTERVAL 1 YEAR <= now()             -- rows the rule expires now
-```
-
-**Dimension:** a TTL deletes every row whose rule has expired, including **current** members and the zero key record:
-
-| Rule | Deletes |
-|---|---|
-| `` `SYSTEM_UPDATE_DATE` + INTERVAL 1 YEAR `` | Old versions, **current members that have not changed for a year**, and the zero key record |
-| `` `SYSTEM_CREATE_DATE` + INTERVAL 1 YEAR `` | The same; the zero key record at once (its create date is 1970-01-01) |
-| `` `SYSTEM_END_DATE` + INTERVAL 1 YEAR `` (SCD Type 2, `@notNull`) | **Only expired versions**: current rows and the zero key record carry the high end date |
-| `` <rule> DELETE WHERE `SYSTEM_CREATE_DATE` != toDateTime64(0, 6) `` | What the rule deletes, except the zero key record |
-
-A deleted current member loses its surrogate key: facts that point at it no longer match, and the next load inserts it again as a new member with a new key. A deleted zero key record is inserted again by the next run. A non-failing **Warning: @ttl on a Dimension** stage explains this and suggests both rules with the node's column names; it is not shown when every rule uses the `@isSystemEndDate` column.
+Only **table settings** belong here — ClickHouse's MergeTree-family settings, which apply to MergeTree and ReplacingMergeTree tables alike. A **query setting** (such as `max_threads`) is not stored with the table: ClickHouse can accept it in the first `CREATE TABLE`, and a redeploy's **Modify Settings** then fails with *Unknown setting*. Query settings go in [`@querySettings`](#querysettings).
 
 ##### `@querySettings`
 
@@ -1638,7 +1551,6 @@ SETTINGS max_memory_usage = 20000000000, max_bytes_before_external_group_by = 10
 | `max_execution_time` | Maximum seconds a query may run before it is stopped. | Stop a runaway load. |
 | `join_algorithm` | How joins are run: `hash`, `parallel_hash`, `grace_hash`, `partial_merge`, `auto`, ... | `grace_hash` / `partial_merge` let joins larger than memory complete. |
 | `transform_null_in` | With `1`, `NULL` matches `NULL` in `IN`. | Used by Clean Up Previous Data (default `1`) — see above. |
-| `materialize_ttl_after_modify` | With `0`, `MODIFY TTL` does not apply the new rules to the existing data; old rows expire only at later merges. | Shorter deploys when [`@ttl`](#ttl) changes on a large table. **Set it on the ClickHouse user or settings profile that deploys**: `@querySettings` applies to the loads, not to the deploy's `ALTER`, and `@settings` cannot hold it. |
 | `final`, `join_use_nulls` | — | Not here: ignored with a warning. Use `readWithFinal` / `@final` and `joinUseNulls` / `@joinUseNulls`. |
 
 ##### `@engine`
