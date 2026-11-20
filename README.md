@@ -75,10 +75,12 @@ When the environment already has parameters, add `"readWithFinal": true` to the 
 **Recommended when any table is a ReplacingMergeTree.** `readWithFinal` only covers the package's own SQL. Everyone else who queries the tables — BI tools, analysts, exports — sees the unmerged copies unless they read with `FINAL`. Set it once on their ClickHouse user or settings profile:
 
 ```sql
-ALTER USER <user> SETTINGS final = 1;
+ALTER USER <user> MODIFY SETTINGS final = 1;
 -- or for every user on a profile:
-ALTER SETTINGS PROFILE <profile> SETTINGS final = 1;
+ALTER SETTINGS PROFILE <profile> MODIFY SETTINGS final = 1;
 ```
+
+⚠️ Write `MODIFY SETTINGS`, not `SETTINGS`: `ALTER USER <user> SETTINGS ...` replaces all of the user's settings and removes its settings profiles.
 
 Other ways to get clean output (views with `@final`, `@optimize`, MergeTree) are listed in [Querying a ReplacingMergeTree](#querying-a-replacingmergetree).
 
@@ -187,7 +189,7 @@ The Work Node type has three configuration groups:
 
 | **Annotation** | **Summary** |
 |---|---|
-| `@notNull` ***(reserved)*** | Creates the column with its plain type instead of `Nullable(<type>)` — see [Column Types](#column-types).<br/>Example: `@notNull` |
+| `@notNull` ***(reserved)*** | Creates the column with its plain type instead of `Nullable(<type>)`. Without it the column is not necessarily `Nullable`: its nullability is inferred from the upstream column and the SQL — see [Column Types](#column-types).<br/>Example: `@notNull` |
 | `@description(<text>)` ***(reserved)*** | Adds the column `COMMENT`.<br/>Example: `@description("timestamp column")` |
 | [`@defaultValue(<value>)`](#defaultvalue) ***(reserved)*** | Adds a `DEFAULT` expression. |
 | [`@inHash("<hashName>", <hashOrder>)`](#inhash) **¹** ***(repeatable)*** | Marks a column as an input to a generated hash key. |
@@ -370,7 +372,7 @@ The Dimension Node type has three configuration groups:
 | **Annotation** | **Summary** |
 |---|---|
 | [`@id("<value>")`](#id-column) | Stable column ID for lineage tracking. |
-| `@notNull` ***(reserved)*** | Creates the column with its plain type instead of `Nullable(<type>)` — see [Column Types](#column-types).<br/>Example: `@notNull` |
+| `@notNull` ***(reserved)*** | Creates the column with its plain type instead of `Nullable(<type>)`. Without it the column is not necessarily `Nullable`: its nullability is inferred from the upstream column and the SQL — see [Column Types](#column-types).<br/>Example: `@notNull` |
 | `@description(<text>)` ***(reserved)*** | Adds the column `COMMENT`.<br/>Example: `@description("timestamp column")` |
 | [`@defaultValue(<value>)`](#defaultvalue) ***(reserved)*** | Adds a `DEFAULT` expression. On the surrogate key it is the value new rows get. |
 | [`@inHash("<hashName>", <hashOrder>)`](#inhash) **¹** ***(repeatable)*** | Marks a column as an input to a generated hash key. |
@@ -760,7 +762,7 @@ The Fact Node type has three configuration groups:
 | **Annotation** | **Summary** |
 |---|---|
 | [`@id("<value>")`](#id-column) | Stable column ID for lineage tracking. |
-| `@notNull` ***(reserved)*** | Creates the column with its plain type instead of `Nullable(<type>)` — see [Column Types](#column-types).<br/>Example: `@notNull` |
+| `@notNull` ***(reserved)*** | Creates the column with its plain type instead of `Nullable(<type>)`. Without it the column is not necessarily `Nullable`: its nullability is inferred from the upstream column and the SQL — see [Column Types](#column-types).<br/>Example: `@notNull` |
 | `@description(<text>)` ***(reserved)*** | Adds the column `COMMENT`.<br/>Example: `@description("timestamp column")` |
 | [`@defaultValue(<value>)`](#defaultvalue) ***(reserved)*** | Adds a `DEFAULT` expression. |
 | [`@inHash("<hashName>", <hashOrder>)`](#inhash) **¹** ***(repeatable)*** | Marks a column as an input to a generated hash key. |
@@ -1012,7 +1014,7 @@ Example (Environment → Parameters):
 | `true` (or `1`) — recommended | `SETTINGS join_use_nulls = 1` | `NULL` |
 | `false` (or `0`), or not set | Nothing | As configured in ClickHouse (server, profile, user or session). ClickHouse's default: the type's default value — `''`, `0`, nil UUID (`NULL` if the joined column is `Nullable`) |
 
-**How it affects your data** — a customer whose region is missing from the lookup:
+**How it affects your data** — what the `SELECT` returns for a customer whose region is missing from the lookup (what the table stores is below):
 
 ```sql
 SELECT c.customer_id,
@@ -1031,11 +1033,19 @@ LEFT JOIN regions r ON r.region_id = c.region_id
 * Change detection, SCD Type 2 versioning and the clean-up work the same with either value — only the columns your SQL takes from a join are affected.
 * A node can still set its own value in its SQL (`SETTINGS join_use_nulls = 0`); it takes priority for that node — see [Where Query Settings Go](#where-query-settings-go).
 * With `false`, keep `join_use_nulls` the same on the ClickHouse users of every environment, so they all load the same data.
-* **Keep joined columns nullable.** A `NULL` can only be stored in a `Nullable` column: in a column marked `@notNull`, ClickHouse stores the type's default value instead (`''`, `0`, nil UUID), without an error. So don't add `@notNull` to a column taken directly from a `LEFT JOIN` — or give it a fallback first:
+* **What the table stores for a joined column.** Coalesce infers a column's nullability from its upstream column: a column taken from the right side of a `LEFT JOIN` is created not null when its upstream column is not null — as ClickHouse's default `join_use_nulls = 0` returns it — and `Nullable` when its upstream column is `Nullable`. A `NULL` can only be stored in a `Nullable` column: in a not-null column ClickHouse stores the column's `DEFAULT` instead (its [`@defaultValue`](#defaultvalue), else the type's default `''`, `0`, nil UUID), without an error. For a row without a match:
 
-  ```sql
-  coalesce(`r`.`region_name`, 'UNKNOWN') AS `region_name` @notNull
-  ```
+  | Column in the node | `joinUseNulls = true` | `false` (ClickHouse default) |
+  |---|---|---|
+  | `` `r`.`region_name` `` (not null) | `''` | `''` |
+  | `` `r`.`region_name` `` `@defaultValue("'UNKNOWN'")` | `UNKNOWN` | `''`: the join returns `''`, not `NULL`, so the default is not used |
+  | ``CAST(`r`.`region_name` AS Nullable(String))`` | `NULL` | `''` |
+  | ``coalesce(`r`.`region_name`, 'UNKNOWN')`` | `UNKNOWN` | `''` |
+
+  To store `NULL`, `CAST` the column to `Nullable(<type>)` and set `joinUseNulls` to `true`. `@defaultValue` and `coalesce()` on a joined column also need `joinUseNulls = true`.
+* **Changing `joinUseNulls` on an existing environment.** The next load can see the joined columns of rows without a match as changed, once: a `Nullable` column (`''` ↔ `NULL`), a column with `@defaultValue` (`''` ↔ the default) and a `coalesce()` column (`''` ↔ the fallback). An SCD Type 2 Dimension adds one version for each such row; SCD Type 1 and Fact update it. The loads after that see no change. A not-null column without `@defaultValue` stores `''` / `0` either way and is not affected.
+* **A business key taken from the right side of a `LEFT JOIN`.** The rows without a match all get the same key value (`''` / `0`, or `NULL` in a `Nullable` column), so a Dimension or Fact treats them as one business key and keeps one row for it. Take the key from the left side of the join when each source row should keep its own row.
+* **A deployed `Nullable` column that becomes not null.** A redeploy that makes the column not null (its upstream column is now not null, or `@notNull` is added) fails with *Cannot convert column ... from nullable type ... to non-nullable type ... Please specify `DEFAULT` expression* unless the column has a `@defaultValue`, which then fills its `NULL`s. See [Column Type Changes](#column-type-changes).
 * Not applied to node-level `@tests`, `@preSQL` / `@postSQL`, queries outside Coalesce, or Preview (which uses the ClickHouse user's settings).
 * An invalid value stops the deploy and the run with **Invalid configuration: joinUseNulls**.
 * This is a query setting: `@settings("join_use_nulls = 1")` holds table settings for `CREATE TABLE` and does not affect loads.
@@ -1122,16 +1132,18 @@ Each column is created with the type Coalesce infers for it, with its nullabilit
 
 | **Column** | **Created as** |
 |---|---|
-| Default (Coalesce infers SQL node columns as nullable) | `Nullable(<type>)` |
+| Default: nullability inferred by Coalesce from the source columns and the SQL | `Nullable(<type>)` when the value can be NULL (e.g. a `Nullable` source column), otherwise `<type>` |
 | Marked `@notNull` | `<type>` |
 | `@isSurrogateKey` (Dimension) | Same rule, and `@notNull` is required: without it the **Missing Required System Columns** check stops the deploy and the run |
 | `@isSystemUpdateDate` on a ReplacingMergeTree (the engine's version argument) | Same rule: `<type>` only with `@notNull`. ClickHouse rejects a `Nullable` version argument, so mark it `@notNull` |
 | `LowCardinality(<type>)`, nullable | `LowCardinality(Nullable(<type>))` |
 | `Array`, `Map`, `Tuple`, `Nested`, `JSON` / `Object`, `Dynamic`, `Variant`, `AggregateFunction`, `SimpleAggregateFunction`, geo types (`Point`, `Ring`, `LineString`, `MultiLineString`, `Polygon`, `MultiPolygon`, `Geometry`) | `<type>` — ClickHouse cannot make these `Nullable` |
 
-The same type is used by the `CREATE`, **Add Column**, **Alter Column** and the view's column list, so they always agree. See [Array and Map Columns](#known-limitations) and [`Variant` Columns](#known-limitations) for the related limitations.
+**A column without `@notNull` is not necessarily `Nullable`.** Its nullability comes from the upstream node's column properties and the SQL: a column read from a not-null upstream column, or a literal such as `'Y'` or `CAST(1 AS UInt32)`, is created not null; a column read from a `Nullable` upstream column is created `Nullable`. A column taken from the right side of a `LEFT JOIN` follows its upstream column in the same way. `@notNull` only forces not null; to force `Nullable`, `CAST` the value to `Nullable(<type>)` in the SELECT.
 
-`TIMESTAMP` is an alias of `DateTime` in ClickHouse: whole seconds, up to `2106-02-07 06:28:15`. Use `DateTime64(<precision>)` for sub-second values or later dates.
+The same type is used by the `CREATE`, **Add Column**, **Alter Column** and the view's column list, so they always agree. See [`Variant` Columns](#known-limitations) for the related limitation.
+
+`TIMESTAMP` is an alias of `DateTime` in ClickHouse: whole seconds, up to `2106-02-07 06:28:15`. Use `DateTime64(<precision>)` for sub-second values or later dates. Coalesce types a column written as `CAST(... AS TIMESTAMP)` as `DateTime64(6)`, so the examples' `CAST(CURRENT_TIMESTAMP AS TIMESTAMP)` system columns are created as `DateTime64(6)`.
 
 #### NULLs in non-nullable columns
 
@@ -1143,10 +1155,10 @@ To make such an insert fail instead, set:
 SETTINGS insert_null_as_default = 0
 ```
 
-The run templates do not add this setting to their `INSERT` statements, so it has to be set at the user (or settings profile) level for the user Coalesce connects as, for example:
+The package does not add it by default. Set it for one node with `@querySettings("insert_null_as_default = 0")`, for every table load with the `querySettings` runtime parameter (both are added to the load's `INSERT`), or for everything the Coalesce user runs:
 
 ```sql
-ALTER USER <coalesce_user> SETTINGS insert_null_as_default = 0;
+ALTER USER <coalesce_user> MODIFY SETTINGS insert_null_as_default = 0;
 ```
 
 ClickHouse writes an `INSERT ... SELECT` in blocks, so an insert that fails part way can leave earlier blocks in the table. A `@not_null` column test only runs after the load; to catch NULLs before anything is written, add a node-level `@tests(..., "Before")` that reads the source.
@@ -1193,12 +1205,12 @@ On redeploy:
 
 Terms are compared ignoring spaces, backticks and case.
 
-On a Dimension or Fact ReplacingMergeTree, `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it, so marking another column `@isBusinessKey` (or removing one), adding / removing `@isSystemVersion`, or adding / removing `@zeroKey` on a Dimension, changes `ORDER BY` and recreates the table. ⚠️ The existing data is lost; the next run reloads the table from the source, so an SCD Type 2 Dimension loses its history.
+On a Dimension or Fact ReplacingMergeTree, `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it, so marking another column `@isBusinessKey` (or removing one), or adding / removing `@isSystemVersion` changes `ORDER BY` and recreates the table. ⚠️ The existing data is lost; the next run reloads the table from the source, so an SCD Type 2 Dimension loses its history.
 
 A recreate always runs a non-failing **Warning: Table Recreated (`<reason>`)** stage first. Its comment repeats the reason and, when the sort key changed, shows it as `ORDER BY (<old>) -> (<new>)`, e.g.:
 
 ```sql
--- DIM_CUSTOMER cannot be altered in place (ReplacingMergeTree key changed: @isBusinessKey, SYSTEM_VERSION or @zeroKey): ...
+-- DIM_CUSTOMER cannot be altered in place (ReplacingMergeTree key changed: @isBusinessKey or SYSTEM_VERSION): ...
 -- ORDER BY (`c_custkey`, `SYSTEM_VERSION`) -> (`c_custkey`, `c_name`, `SYSTEM_VERSION`)
 -- The table is recreated with CREATE OR REPLACE. Its existing data is lost; it stays empty until the next run reloads it.
 ```
@@ -1264,9 +1276,9 @@ Options 1–4 decide how a ReplacingMergeTree is **read**; options 5–6 decide 
 > **Recommended:** set `final = 1` on the ClickHouse user (or settings profile) that BI tools, analysts and downstream jobs connect with:
 >
 > ```sql
-> ALTER USER <user> SETTINGS final = 1;
+> ALTER USER <user> MODIFY SETTINGS final = 1;
 > -- or, for every user on a profile:
-> ALTER SETTINGS PROFILE <profile> SETTINGS final = 1;
+> ALTER SETTINGS PROFILE <profile> MODIFY SETTINGS final = 1;
 > ```
 >
 > Every query from that user then reads each ReplacingMergeTree with `FINAL` — one row per key, the latest values — without anyone having to remember it. `final` cannot be set on the table itself; it is a query, user or profile setting. Without it, every reader must add `FINAL` themselves, or the results include the replaced rows.
@@ -1333,7 +1345,7 @@ A plain-insert Fact stays MergeTree whatever the package `engine` (see [`@engine
 
 A Fact with no `@isBusinessKey` column and no `@mergeStrategy` is loaded as a plain insert: it replaces no rows, nothing is cleaned up, and a package `engine` parameter of `ReplacingMergeTree` does not apply to it — it stays MergeTree (a ReplacingMergeTree would collapse identical rows). An `allColumnMatch` Fact only inserts rows that don't exist yet, so nothing is cleaned up either; it does take a `ReplacingMergeTree` engine, ordered by its match columns — see [Fact All Column Match](#fact-all-column-match).
 
-* The ReplacingMergeTree and the clean-up tell the copies apart only by `SYSTEM_UPDATE_DATE`, so they need that column. On a ReplacingMergeTree it is the engine's version argument: required, and it must be marked `@notNull`. Like every column it is `Nullable(...)` without `@notNull`, and ClickHouse does not accept a `Nullable` version argument:
+* The ReplacingMergeTree and the clean-up tell the copies apart only by `SYSTEM_UPDATE_DATE`, so they need that column. On a ReplacingMergeTree it is the engine's version argument: required, and it must be marked `@notNull`. Without `@notNull` its nullability is inferred (see [Column Types](#column-types)), and if it comes out `Nullable`, ClickHouse does not accept it as the version argument:
 
   ```sql
   CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
@@ -1385,7 +1397,7 @@ To decide which row wins, or to stop the run instead, de-duplicate or check the 
 
 ClickHouse has no identity columns. The surrogate key is a plain column, and the Dimension load gives a **new row or a new SCD Type 2 version** its key from the column's `@defaultValue`. Rows that are re-inserted by the load (an expired version, an in-place update) keep the key they already have.
 
-The `@isSurrogateKey` column **requires `@notNull`**, because every row must have a key. The package does not force the type to not null: the column follows `@notNull` like every other column, so its nullability in the node's mapping matches the table. Without `@notNull` the **Missing Required System Columns** check stops the deploy and the run. This applies to Dimensions only: Facts have no surrogate key.
+The `@isSurrogateKey` column **requires `@notNull`**, because every row must have a key. The column follows `@notNull` like every other column, so its nullability in the node's mapping matches the table. Without `@notNull` the **Missing Required System Columns** check stops the deploy and the run. This applies to Dimensions only: Facts have no surrogate key.
 
 The recommended key is a UUID, which is what a new Dimension's generated SELECT uses:
 
@@ -1565,7 +1577,7 @@ The table's `ENGINE`: **`MergeTree` or `ReplacingMergeTree` only**, written with
   2. The package parameter `engine`, set once for every Dimension and Fact in the package — e.g. `ReplacingMergeTree`, so it does not have to be written on each node. A `ReplacingMergeTree` value is not applied to a plain-insert Fact (it would collapse identical rows) — that Fact goes on to step 3. An `allColumnMatch` Fact takes it, ordered by its match columns.
   3. The built-in default: **MergeTree**. No `ENGINE` is written, as when ClickHouse itself is given none (Cloud creates `SharedMergeTree`).
 * **`readWithFinal` parameter:** `true` makes downstream nodes read their upstream ReplacingMergeTree with `FINAL` — see [Reading an Upstream ReplacingMergeTree](#reading-an-upstream-replacingmergetree-readwithfinal).
-* **`ReplacingMergeTree`:** the load only inserts and ClickHouse keeps the latest copy of each row — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). The `@isSystemUpdateDate` column is added as the version argument and must be marked `@notNull`. `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it; `@orderBy` / `@primaryKey` are not accepted. Readers need `FINAL` — see [Querying a ReplacingMergeTree](#querying-a-replacingmergetree). The table `COMMENT` is the node description only; nothing is added for the engine.
+* **`ReplacingMergeTree`:** the load only inserts and ClickHouse keeps the latest copy of each row — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). The `@isSystemUpdateDate` column is added as the version argument and must be marked `@notNull`. `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it; `@orderBy` / `@primaryKey` are not accepted. Readers need `FINAL` — see [Querying a ReplacingMergeTree](#querying-a-replacingmergetree). The table `COMMENT` is the node description.
 * **`MergeTree` (the default):** the load inserts and then deletes the replaced copies in **Clean Up Previous Data**. `@orderBy` / `@primaryKey` can be set. No `ENGINE` and `@engine("MergeTree")` are the same engine: switching between them does not recreate the table.
 * **Write `ReplacingMergeTree` without arguments.** The loads set the version argument and `ORDER BY` themselves, so an engine with its own arguments, such as ``@engine("ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)")`` or the same value in the package `engine` parameter, stops the deploy and the run.
 * **Invalid configuration: engine** stops the deploy and the run for any engine other than `MergeTree` / `ReplacingMergeTree`, for an engine written with arguments, and for a ReplacingMergeTree with `@orderBy` / `@primaryKey`, or without a business key or `@isSystemUpdateDate` column (except `allColumnMatch`, which needs neither).
@@ -1584,7 +1596,7 @@ On the first deployment, a Dimension with `@engine("ReplacingMergeTree")` (or no
 CREATE OR REPLACE TABLE `<DB>`.`DIM_CUSTOMER`
 (
     ...
-    `SYSTEM_UPDATE_DATE` DateTime
+    `SYSTEM_UPDATE_DATE` DateTime64(6)
 )
 ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)
 ORDER BY (`c_custkey`, `SYSTEM_VERSION`)
@@ -1650,7 +1662,7 @@ The view's `SELECT` ends with `SETTINGS join_use_nulls = 1`, fixed when the view
 Adds an **Optimize Table** stage after the load and before **Post-SQL**, that runs `OPTIMIZE TABLE <table> FINAL`. ClickHouse merges the table's parts on every load instead of waiting for a background merge, so `@postSQL` and the **After** tests see the merged table.
 
 * **ReplacingMergeTree:** after the merge the table keeps only the latest row per `ORDER BY` key, so a plain `SELECT` returns what a `SELECT … FINAL` returns. The exception is a row whose `@partitionBy` value changed: merges never cross partitions, so its old copy stays in the old partition (`FINAL` still hides it).
-* **MergeTree:** the replaced copies are already removed by **Clean Up Previous Data**; `@optimize` only merges the parts.
+* **MergeTree:** not needed for correct data — the replaced copies are already removed by **Clean Up Previous Data**. `@optimize` still runs and only merges the parts (and frees the space of deleted rows); a passing **Info: @optimize on a MergeTree** stage says so at deploy and on every run.
 * Rewrites the whole table on every run — use it on small or medium tables, or where readers must not need `FINAL`.
 * **On a view** `@optimize` does nothing: a non-failing **Warning: @optimize on a view** stage is shown at deploy and on every run.
 * Adding or removing it on redeploy only updates the node metadata.
@@ -1779,7 +1791,7 @@ Stable column ID for lineage tracking.
 |---|---|
 | **value** | Six hexadecimal digits, unique within the node, e.g. `110e75`. |
 
-* **Dimension / Fact:** required on every column — the SQL editor generates a fresh `@id("<value>")` for each column it creates, and the **Missing Column IDs** check flags any column that is missing one. This is deliberate: the `@id` keeps a column's identity separate from its name, so a rename is an in-place `RENAME COLUMN` rather than a drop and re-add.
+* **Dimension / Fact:** required on every column — the SQL editor generates a fresh `@id("<value>")` for each column it creates, and the **Missing Column IDs** check flags any column that is missing one. The `@id` keeps a column's identity separate from its name, so a rename is an in-place `RENAME COLUMN` rather than a drop and re-add.
 * **Work:** optional. Without it Coalesce uses the column's name as its id, so a rename drops the column and adds a new one.
 * Not for manual editing — value is a stable identifier generated once at creation time.
 * **Column added later:** make sure it gets its own `@id` too. If you're editing by hand, add a new, unique 6-hex-digit `@id("<value>")` along with the column; an agent can generate one for you. Don't reuse a value already on the node — a repeated value fails the **Duplicate Column IDs** check.
@@ -1805,9 +1817,24 @@ Adds a `DEFAULT` expression to the column.
 * number: `@defaultValue("<num>")`
 * string: `@defaultValue("'<string>'")`
 * expression: `@defaultValue("generateUUIDv4()")`, `@defaultValue("now()")`
+* another column of the node: ``@defaultValue("`<col_name>`")``, or an expression on it, e.g. ``@defaultValue("concat('default from ', `<col_name>`)")``
+* **Literal text vs column:** single quotes make it text, backticks (or no quotes) make it a column. With a column named `probe_stage`:
+
+  | Annotation | Written to the `CREATE` | A NULL is stored as |
+  |---|---|---|
+  | `@defaultValue("'probe_stage'")` | `DEFAULT 'probe_stage'` | the text `probe_stage` |
+  | ``@defaultValue("`probe_stage`")`` | ``DEFAULT `probe_stage` `` | the value of the row's `probe_stage` column |
+  | `@defaultValue("probe_stage")` | `DEFAULT probe_stage` | the value of the row's `probe_stage` column |
+
+  Use the node's own column name (the alias after `AS`), not the source's. Double quotes inside (`"probe_stage"`) are also an identifier in ClickHouse, not text.
 * A column added on redeploy with a `@defaultValue` is materialized for the existing rows (**Materialize Column Default**), so a non-deterministic default such as `generateUUIDv4()` or `now64()` is written once instead of being recomputed on every read.
 * Changing or removing it on redeploy runs **Alter Column** (`MODIFY COLUMN ... DEFAULT` / `REMOVE DEFAULT`).
 * On a Dimension surrogate key it is the value new rows and new versions get — see [Surrogate Keys](#surrogate-keys-dimension).
+* **A NULL in a column without `Nullable`** (e.g. `@notNull`, or an unmatched `LEFT JOIN` with `joinUseNulls`) is stored as this default — or, without one, as the type's default (`''`, `0`, nil UUID). Change detection (Dimension, and Fact `changeTracking`) compares a NULL source value the same way, so it is not seen as a change on every run.
+  * ⚠️ **Not supported in change detection:** a default that refers to a column (e.g. ``@defaultValue("concat('x', `c_name`)")``) or changes on every call (`now()`, `generateUUIDv4()`, `rand()`). Such a column is compared as stored, so a NULL source value is seen as a change on every run (a new SCD Type 2 version each time). Use a constant default, or keep the column `Nullable`.
+  * Changing the default later (e.g. `"20"` → `"30"`) makes each row stored with the old default count as changed once, on the next run.
+* **The default is converted to the column's type**, as ClickHouse's `DEFAULT` does — `'2100-12-31'` on a `Date`, `0` on a `String`, `0.5` on a `Decimal` — and change detection compares the converted value.
+* ⚠️ **A value outside the type's range is changed without an error.** `Date` holds 1970-01-01 to 2149-06-06, so `@defaultValue("'2299-12-31'")` on a `Date` column stores `2149-06-06`; `-1` on a `UInt32` stores `4294967295`. Use `Date32` or `DateTime64` for far-future dates (both go up to 2299-12-31), and a signed type for negative values. The same applies to any value loaded into the column, not only the default: different out-of-range dates all become `2149-06-06`, so as a business key they count as one key, and SQL that filters on the original value (`WHERE end_date = '2299-12-31'`) finds no rows. When the value a load compares is not converted the same way as the stored one, change detection sees the row as changed on every load, which duplicates rows (a new SCD Type 2 version each time) — keep the column's type and its values in the same range.
 * **Note:** Ignored on Views.
 
 **Example:**
@@ -1816,6 +1843,7 @@ Adds a `DEFAULT` expression to the column.
 @defaultValue("20")
 @defaultValue("'NA'")
 @defaultValue("generateUUIDv4()")
+@defaultValue("`o_custkey` * 10")
 ```
 
 ##### `@inHash`
@@ -1991,7 +2019,7 @@ To use double-quoted identifiers instead, double each inner quote — `""` insid
 @preSQL(' SELECT 1 FROM {{ this }} GROUP BY "n_Name" HAVING count() > 1 ')
 ```
 
-A backslash (`\"`) does not escape a quote inside an annotation string and fails with a syntax error.
+A backslash also works: `\"` inside the annotation string becomes `"` in the SQL.
 
 Key annotation terms (`@orderBy`, `@primaryKey`, `@partitionBy`) are written into the `CREATE` as given, so a term must use the column's exact name.
 
@@ -2039,7 +2067,7 @@ Key annotation terms (`@orderBy`, `@primaryKey`, `@partitionBy`) are written int
 
 - **Nested Subqueries:** Subqueries within SELECT, FROM, or WHERE clauses, enabling granular filtering and lookups that don't require separate nodes.
 
-- **Common Table Expressions (CTEs)**: Standard `WITH` clauses to break down multi-step transformation logic into readable, modular blocks. Coalesce tracks lineage through each CTE and back to the source tables. A Dimension or Fact load continues the node's own `WITH` clause with its internal CTEs, so the node's CTE names must not clash with `SOURCE_DATA`, `TARGET_CURRENT`, `CHANGE_DETECTION` or `MERGE_ROWS`.
+- **Common Table Expressions (CTEs)**: Standard `WITH` clauses to break down multi-step transformation logic into readable, modular blocks. Coalesce infers the types of a CTE's columns when the final `SELECT` names them without a table alias (`` `o_custkey` ``, not `` `oc`.`o_custkey` ``) and lists them instead of `SELECT *`. A CTE column written with an alias gets no type: `coa validate` warns *columns with an UNKNOWN data type* and the create fails with *Unknown data type family: UNKNOWN* — `CAST` it to a type in that case. A Dimension or Fact load continues the node's own `WITH` clause with its internal CTEs, so the node's CTE names must not clash with `SOURCE_DATA`, `TARGET_CURRENT`, `CHANGE_DETECTION` or `MERGE_ROWS`.
 
 - **ClickHouse de-duplication clauses:** `QUALIFY` and `LIMIT n BY` are supported in the node's SELECT — see [Unique Business Keys](#unique-business-keys-fact-and-dimension).
 
@@ -2082,7 +2110,7 @@ They are stored as the column's default (`0`, `''`, ...) instead of failing, unl
 The load only inserts; the older copy of a changed row stays in the table until ClickHouse merges the parts in the background. A plain `SELECT` can return both copies until then — query with `FINAL`. With `@engine("MergeTree")` the copies are deleted in **Clean Up Previous Data** instead, and a changed key can have two rows between the two stages (or after a failed clean-up, until the next run). See [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact).
 
 * **Changing the Package `engine` Parameter**:  
-Changing the parameter does not recreate tables already deployed. Coalesce renders a node's deployed state and its new state with the same, current parameter and macro values — the value a table was deployed with is not kept — so a redeploy sees the same engine on both sides and only updates metadata — the `@isSystemUpdateDate` column has the same type under both engines, since `@notNull` alone decides its nullability. The tables keep their old engine while their loads follow the new one, and the loaded data no longer matches what the node expects:
+Changing the parameter does not recreate tables already deployed. Coalesce renders a node's deployed state and its new state with the same, current parameter and macro values — the value a table was deployed with is not kept — so a redeploy sees the same engine on both sides and only updates metadata. The tables keep their old engine while their loads follow the new one, and the loaded data no longer matches what the node expects:
   * **MergeTree table, package changed to `ReplacingMergeTree`:** the load only inserts and skips the clean-up `DELETE`, and a MergeTree never removes the older copies itself, so a changed key keeps every copy for good. `SETTINGS final = 1` does not help: ClickHouse ignores it on a MergeTree.
   * **ReplacingMergeTree table, package changed to `MergeTree`:** the load reads its own target without `FINAL`, so it can compare against an older copy that is not merged yet and insert rows that did not change. The clean-up `DELETE` then runs on the ReplacingMergeTree as an extra mutation. The **Note: Query with FINAL** stage still describes the old engine.
   * Downstream nodes read whatever the table holds, so the extra copies reach them too, unless `readWithFinal` or a user-level `final = 1` applies `FINAL` to a table that is still a ReplacingMergeTree.
@@ -2100,7 +2128,7 @@ Switching the value on tables that already hold data changes the unmatched join 
 The default system column expression `CAST(CURRENT_TIMESTAMP AS TIMESTAMP)` gives a `DateTime` column, which stores whole seconds. The ReplacingMergeTree and the clean-up tell a row's copies apart by `SYSTEM_UPDATE_DATE`, so if two loads change the same key within one second both copies have the same value: a ReplacingMergeTree keeps the one inserted last, the clean-up keeps both. Use a `DateTime64` type for `SYSTEM_UPDATE_DATE` (e.g. `CAST(now64(6) AS DateTime64(6))`) if a node can run more than once a second.
 
 * **Duplicate Business Keys**:  
-Duplicates in the source are not rejected: both copies are inserted and kept. De-duplicate upstream — see [Unique Business Keys](#unique-business-keys-fact-and-dimension).
+Duplicates in the source are not rejected: the load keeps one row per business key (under `lastModified` the one with the newest `@lastModifiedTracking` value; otherwise which row is kept is not defined) and drops the rest without an error. De-duplicate upstream — see [Unique Business Keys](#unique-business-keys-fact-and-dimension).
 
 * **NULL Business Keys**:  
 A NULL business key is matched like a value (`isNotDistinctFrom`: NULL matches NULL), as it is in a ReplacingMergeTree's `ORDER BY`. All source rows with a NULL key are therefore **one key**: one of them is loaded and then updated like any other key, on both engines. If a NULL key should not be a member at all, filter or default NULL keys upstream, e.g. `WHERE <business key> IS NOT NULL` or `coalesce(<business key>, '<placeholder>')`, or check it with a `Before` test — see [Duplicate or NULL Business Key Check](#duplicate-or-null-business-key-check).
@@ -2124,20 +2152,10 @@ Coalesce does not infer the `Variant` data type correctly when it reads a SQL no
   String data type family mustn't have more than one argument - size in characters
   ```
 
-  The node types do not try to repair the inferred type. Until Coalesce infers `Variant` correctly, convert the column in the `SELECT` to a type Coalesce understands, for example ``toString(`c_Variant`) AS `c_Variant` ``, or leave the column out of the node.
-
-* **Array and Map Columns Show as Changed on Every Deploy**:  
-Coalesce marks every column of a SQL node as nullable. ClickHouse cannot make `Array` or `Map` columns `Nullable`, so the node types create them as plain `Array(...)` / `Map(...)`, and after a deploy the deployed state records those columns as not nullable. The next plan compares the workspace (`nullable: true`) with the deployed state (`nullable: false`), so it lists the node as changed on every deploy, for example:
-
-  ```
-  columns > c_array > nullable : false → true
-  columns > c_map   > nullable : false → true
-  ```
-
-  The redeploy finds nothing to alter in ClickHouse and runs only **Metadata Update-Default**, so the table is not affected. Until Coalesce stops marking these columns as nullable, add `@notNull` to `Array` and `Map` columns so the workspace matches the deployed state.
+  Until Coalesce infers `Variant` correctly, convert the column in the `SELECT` to a type Coalesce understands, for example ``toString(`c_Variant`) AS `c_Variant` ``, or leave the column out of the node.
 
 * **`@isSystemUpdateDate` Without `@notNull` on a ReplacingMergeTree**:  
-A ReplacingMergeTree uses the `@isSystemUpdateDate` column (`SYSTEM_UPDATE_DATE`) as its version argument — ``ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)``. Like every column it is `Nullable(...)` unless it is marked `@notNull`, and ClickHouse does not accept a `Nullable` version argument. The deploy and the run show a passing **Warning: @isSystemUpdateDate without @notNull** stage, the flow continues, and ClickHouse's error stops the create:
+A ReplacingMergeTree uses the `@isSystemUpdateDate` column (`SYSTEM_UPDATE_DATE`) as its version argument — ``ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)``. Unless it is marked `@notNull`, its nullability is inferred (see [Column Types](#column-types)), and ClickHouse does not accept a `Nullable` version argument. The deploy and the run show a passing **Warning: @isSystemUpdateDate without @notNull** stage, the flow continues, and ClickHouse's error stops the create:
 
   ```
   The column SYSTEM_UPDATE_DATE cannot be used as a version column for storage ReplacingMergeTree because it is of type Nullable(DateTime64(6)) (must be of an integer type or of type Date/DateTime/DateTime64).
@@ -2174,6 +2192,8 @@ Values are split on every comma, trimmed, and re-joined with `", "`. A string wr
 ### Usage Examples
 
 Common ways to use the SQL nodes. The SQL patterns under Work Examples (CTEs, window functions, DISTINCT) work the same way in a Dimension or Fact node.
+
+The Dimension and Fact examples are MergeTree tables (the package `engine` parameter not set). With `engine = "ReplacingMergeTree"`, remove `@orderBy` / `@primaryKey` from them: a ReplacingMergeTree is ordered by its business key, and `@orderBy` stops the deploy and the run (**Invalid configuration: engine**). Mark the `@isSystemUpdateDate` column `@notNull` as well — it is the engine's version argument.
 
 **Work Examples**
 * [Sample Node with Annotations](#sample-node-with-annotations)
@@ -2212,9 +2232,9 @@ Common ways to use the SQL nodes. The SQL patterns under Work Examples (CTEs, wi
 ##### Sample Node with Annotations
 
 ```sql
-@orderBy("intHash32(`n_Nationkey`)", "`n_Name`", "toYYYYMM(`last_Modified`)")
+@orderBy("intHash32(`n_Nationkey`)", "`n_Name`", "toYYYYMM(`L_M_1`)")
 @primaryKey("intHash32(`n_Nationkey`)", "`n_Name`")
-@partitionBy("toYYYYMM(`last_Modified`)")
+@partitionBy("toYYYYMM(`L_M_1`)")
 @writeMode("append")
 @tests("SELECT 1 FROM {{ this }} GROUP BY `n_Nationkey` HAVING count() > 1")  -- runs After the load (default), continueOnFailure=true (default)
 @tests("SELECT 1 FROM {{ ref('SRC', 'Nation_Test') }} WHERE `n_Regionkey` IS NULL", true, "Before")  -- runs Before the load, continueOnFailure=true
@@ -2231,6 +2251,7 @@ SELECT
     {{ get_hash('GH_COL1') }}          AS `GH_COL1`        @description("Hash Column")
 FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`
 ```
+* Key terms name the node's own columns (`L_M_1`), not the source's (`last_Modified`).
 
 ##### Sample Node with DISTINCT
 
@@ -2274,15 +2295,16 @@ WITH `order_counts` AS (
     GROUP BY `o_custkey`
 )
 SELECT
-    `oc`.`o_custkey`                 AS `o_custkey`,
-    `oc`.`order_count`               AS `order_count`,
-    `oc`.`total_price`               AS `total_price`
-FROM `order_counts` `oc`
+    `o_custkey`                      AS `o_custkey`,
+    `order_count`                    AS `order_count`,
+    `total_price`                    AS `total_price`
+FROM `order_counts`
 ```
+* Name the CTE's columns without a table alias in the final `SELECT`, so Coalesce can infer their types — see [Notes & Supported SQL Functionality](#notes--supported-sql-functionality).
 
 ##### Multi-CTE Transformation with Window Functions
 
-Complex transformations that would otherwise require multiple nodes can be written as a single SQL statement. Coalesce tracks lineage through each CTE and down to the source tables.
+Complex transformations that would otherwise require multiple nodes can be written as a single SQL statement. The final `SELECT` names the CTE's columns without a table alias, so Coalesce can infer their types.
 
 ```sql
 WITH `ordered_orders` AS (
@@ -2305,26 +2327,32 @@ WITH `ordered_orders` AS (
 )
 -- Final Select: add metadata and return the results
 SELECT
-    `f`.`o_custkey`                  AS `o_custkey`,
-    `f`.`first_order_id`             AS `first_order_id`,
-    `f`.`first_purchase_date`        AS `first_purchase_date`,
-    `f`.`first_order_value`          AS `first_order_value`,
-    `f`.`o_orderstatus`              AS `o_orderstatus`       @notNull,
+    `o_custkey`                      AS `o_custkey`,
+    `first_order_id`                 AS `first_order_id`,
+    `first_purchase_date`            AS `first_purchase_date`,
+    `first_order_value`              AS `first_order_value`,
+    `o_orderstatus`                  AS `o_orderstatus`       @notNull,
     now()                            AS `refreshed_at`,
     'Initial Customer Purchase'      AS `record_type`
-FROM `first_orders` `f`
+FROM `first_orders`
 ```
 
 ##### CTE for Multi-Source Combine
 
 ```sql
 WITH `all_nations` AS (
-    SELECT * FROM {{ ref('SRC', 'Nation_Copy1') }}
+    SELECT `n_Nationkey`, `n_Name`, `n_Regionkey`, `last_Modified` FROM {{ ref('SRC', 'Nation_Copy1') }}
     UNION ALL
-    SELECT * FROM {{ ref('SRC', 'Nation_Copy2') }}
+    SELECT `n_Nationkey`, `n_Name`, `n_Regionkey`, `last_Modified` FROM {{ ref('SRC', 'Nation_Copy2') }}
 )
-SELECT * FROM `all_nations`
+SELECT
+    `n_Nationkey`                    AS `n_Nationkey`,
+    `n_Name`                         AS `n_Name`,
+    `n_Regionkey`                    AS `n_Regionkey`,
+    `last_Modified`                  AS `last_Modified`
+FROM `all_nations`
 ```
+* List the columns: `SELECT *` from a CTE gives Coalesce no columns, and the create fails. `SELECT *` directly from a `ref()` works.
 
 ##### Work View
 
@@ -2343,6 +2371,96 @@ FROM {{ ref('TARGET', 'FCT_ORDER_LINE') }} `f`
 INNER JOIN {{ ref('TARGET', 'DIM_CUSTOMER') }} `dc` ON `dc`.`customer_key` = `f`.`customer_key`
 GROUP BY `dc`.`region_name`, `dc`.`c_mktsegment`, toStartOfMonth(`f`.`o_orderdate`)
 ```
+
+##### ClickHouse SQL Patterns
+
+ClickHouse has no `PIVOT`, `UNPIVOT` or `MATCH_RECOGNIZE`; a Work node does the same with ClickHouse functions. The sources in these examples are `sales` (`region`, `product`, `sale_date`, `amount`), `events` (`user_id`, `ts`, `event_type`) and `prices` (`product`, `valid_from`, `price`).
+
+Some ClickHouse functions return a type Coalesce cannot work out, so `coa validate` warns *UNKNOWN data type* and the create fails. `CAST` those columns, as the examples below do. This applies to `sumMap`, tuple elements (`` `kv`.1 ``), `sequenceMatch`, `sequenceCount`, `windowFunnel`, `dateName`, `toLastDayOfMonth`, `JSONExtract(..., '<type>')` and `JSONHas`.
+
+**Pivot** — one column per value with `sumIf`:
+
+```sql
+SELECT
+    `s`.`region`                              AS `region`,
+    toStartOfMonth(`s`.`sale_date`)           AS `sale_month`,
+    sumIf(`s`.`amount`, `s`.`product` = 'A')  AS `amount_a`,
+    sumIf(`s`.`amount`, `s`.`product` = 'B')  AS `amount_b`,
+    sumIf(`s`.`amount`, `s`.`product` = 'C')  AS `amount_c`
+FROM {{ ref('SRC', 'sales') }} `s`
+GROUP BY `s`.`region`, toStartOfMonth(`s`.`sale_date`)
+```
+
+**Unpivot** — columns back to rows with `ARRAY JOIN` (reading the pivot node above):
+
+```sql
+SELECT
+    `p`.`region`                    AS `region`,
+    `p`.`sale_month`                AS `sale_month`,
+    CAST(`kv`.1 AS String)          AS `product`,
+    CAST(`kv`.2 AS Decimal(38, 2))  AS `amount`
+FROM {{ ref('TARGET', 'SALES_PIVOT') }} `p`
+ARRAY JOIN [('A', `p`.`amount_a`), ('B', `p`.`amount_b`), ('C', `p`.`amount_c`)] AS `kv`
+```
+
+**Pattern matching** (instead of `MATCH_RECOGNIZE`) — `sequenceMatch` checks for a sequence of events per group, and `windowFunnel` returns how many steps of a funnel each group reached within a time window (in seconds):
+
+```sql
+SELECT
+    `e`.`user_id`  AS `user_id`,
+    CAST(sequenceMatch('(?1)(?t<=3600)(?2)')(`e`.`ts`, `e`.`event_type` = 'view', `e`.`event_type` = 'purchase') AS UInt8) AS `view_then_purchase_1h`,
+    CAST(windowFunnel(3600)(`e`.`ts`, `e`.`event_type` = 'view', `e`.`event_type` = 'cart', `e`.`event_type` = 'purchase') AS UInt8) AS `funnel_step`
+FROM {{ ref('SRC', 'events') }} `e`
+GROUP BY `e`.`user_id`
+```
+
+**ASOF JOIN** — for each sale, the latest price that was valid on the sale date. The `ON` clause needs at least one equality and exactly one `>=`, `>`, `<=` or `<` condition; `ASOF LEFT JOIN` keeps sales with no earlier price.
+
+```sql
+SELECT
+    `s`.`product`     AS `product`,
+    `s`.`sale_date`   AS `sale_date`,
+    `s`.`amount`      AS `amount`,
+    `p`.`price`       AS `price_at_sale`,
+    `p`.`valid_from`  AS `price_valid_from`
+FROM {{ ref('SRC', 'sales') }} `s`
+ASOF LEFT JOIN {{ ref('SRC', 'prices') }} `p`
+  ON `p`.`product` = `s`.`product` AND toDateTime(`s`.`sale_date`) >= `p`.`valid_from`
+```
+
+**Date dimension** — one row per day from `numbers()`, no source needed:
+
+```sql
+@orderBy("`date_key`")
+WITH `d` AS (
+    SELECT toDate('2020-01-01') + number AS `dt` FROM numbers(4018)
+)
+SELECT
+    toUInt32(toYYYYMMDD(`dt`))                AS `date_key` @notNull @uniqueness,
+    CAST(`dt` AS Date)                        AS `full_date`,
+    toYear(`dt`)                              AS `year`,
+    toQuarter(`dt`)                           AS `quarter`,
+    toMonth(`dt`)                             AS `month`,
+    monthName(`dt`)                           AS `month_name`,
+    toISOWeek(`dt`)                           AS `iso_week`,
+    CAST(dateName('weekday', `dt`) AS String) AS `day_name`,
+    toDayOfWeek(`dt`) IN (6, 7)               AS `is_weekend`,
+    CAST(toLastDayOfMonth(`dt`) AS Date)      AS `month_end`
+FROM `d`
+```
+
+**UNION, INTERSECT and EXCEPT:**
+
+* Write `UNION ALL` or `UNION DISTINCT`. A plain `UNION` fails with *Expected ALL or DISTINCT* when the `union_default_mode` setting is empty, which is the ClickHouse Cloud default. To use plain `UNION`, add `@querySettings("union_default_mode = 'DISTINCT'")`.
+* A plain `INTERSECT` or `EXCEPT` keeps duplicate rows in ClickHouse (it works as `ALL`). Write `INTERSECT DISTINCT` or `EXCEPT DISTINCT` for the standard SQL result.
+
+```sql
+SELECT `user_id` AS `user_id` FROM {{ ref('SRC', 'events') }} WHERE `event_type` = 'view'
+INTERSECT DISTINCT
+SELECT `user_id` FROM {{ ref('SRC', 'events') }} WHERE `event_type` = 'purchase'
+```
+
+Other patterns that work in a Work node: `WITH RECURSIVE`, `GROUP BY ROLLUP` and `GROUPING SETS` (the subtotal rows show `''` or `0`, not NULL, unless `group_by_use_nulls = 1`), `LEFT SEMI JOIN` / `LEFT ANTI JOIN`, `ORDER BY ... WITH FILL` to add missing dates, and window functions for running totals and sessions.
 
 #### Data Quality Test Examples
 
@@ -2630,14 +2748,14 @@ SELECT
 FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`
 ```
 
-On the first deployment this creates (`<DB>` is the database the node's storage location is mapped to; the column types are the ones Coalesce infers):
+On the first deployment this creates (`<DB>` is the database the node's storage location is mapped to; the column types are the ones Coalesce infers from `Nation_Test`, whose columns are `UInt32`, `FixedString(25)` and `DateTime64(3)`, none of them `Nullable`):
 
 ```sql
 CREATE OR REPLACE TABLE `<DB>`.`WRK_NATION`
 (
-    `n_Nationkey` Int32,
-    `n_Name` Nullable(String) COMMENT 'Nation name',
-    `last_Modified` Nullable(DateTime)
+    `n_Nationkey` UInt32,
+    `n_Name` FixedString(25) COMMENT 'Nation name',
+    `last_Modified` DateTime64(3)
 )
 PARTITION BY toYYYYMM(`last_Modified`)
 ORDER BY (`n_Nationkey`, `n_Name`)
@@ -2647,7 +2765,7 @@ COMMENT 'Nation work table'
 ```
 
 * No `ENGINE` is written; ClickHouse Cloud creates a `SharedMergeTree` table.
-* `allow_nullable_key = 1` is added because the table has sort and partition keys, which here use `Nullable` columns (`n_Name`, `last_Modified`).
+* `allow_nullable_key = 1` is added because the table has sort and partition keys, so a `Nullable` column could be used in them; it is added whether or not the key columns are `Nullable`.
 * On a later deployment, adding a new column at the end of `@orderBy` or removing `` `n_Name` `` from it is altered in place; changing `@primaryKey` or `@partitionBy` recreates the table empty — see [Sort Key and Partition Key Changes](#sort-key-and-partition-key-changes).
 
 ---

@@ -349,12 +349,47 @@ macroString: |-
   {%- endmacro -%}
 
   {#===========================================================================
-    safe_compare(src_expr, tgt_expr, data_type): NULL-safe "values differ" condition
+    safe_compare(src_expr, tgt_expr, col): NULL-safe "values differ" condition for change detection
     (ClickHouse's isDistinctFrom: NULL vs value differs, NULL vs NULL does not).
-    data_type is unused, kept so callers don't change.
+    A column created without Nullable cannot hold NULL: ClickHouse stores a NULL from the SELECT as
+    the column's DEFAULT (@defaultValue), else the type's default ('', 0, nil UUID, ...)
+    (insert_null_as_default = 1). The source value is compared the same way, so a NULL source value
+    (e.g. an unmatched LEFT JOIN with joinUseNulls) is not seen as a change on every run:
+      - Nullable column, or a type ClickHouse cannot make Nullable (Array, Map, Tuple, ...):
+        isDistinctFrom(src, tgt), as stored;
+      - @defaultValue: isDistinctFrom(ifNull(src, CAST(<@defaultValue>, '<type>')), tgt) — cast as DEFAULT
+        casts it: a default of another type ('2100-12-31' on a Date, 0 on a String) would otherwise make
+        ifNull return a Variant that isDistinctFrom rejects, and -1 on a UInt32 is stored as 4294967295;
+      - no @defaultValue: isDistinctFrom(ifNull(src, defaultValueOfTypeName('<type>')), tgt).
+    A @defaultValue that refers to a column (a quoted identifier, or any of the node's column names,
+    quoted or not) or changes on every call (now(), generateUUIDv4(), rand(), ...) has no value to
+    compare with, so the column is compared as stored (not supported, see the README).
   ===========================================================================#}
-  {%- macro safe_compare(src_expr, tgt_expr, data_type) -%}
+  {%- macro safe_compare(src_expr, tgt_expr, col) -%}
+      {%- set colType = ch_column_type(col) | trim -%}
+      {%- set family = colType.split('(')[0] | trim | lower -%}
+      {%- set isNullable = (colType | lower).startswith('nullable(') or (colType | lower).startswith('lowcardinality(nullable(') -%}
+      {%- set dv = (col.defaultValue | default('', true) | string | trim) if col.defaultValue else '' -%}
+      {%- set nsDv = namespace(simple=true) -%}
+      {%- if '`' in dv or '"' in dv -%}
+          {%- set nsDv.simple = false -%}
+      {%- endif -%}
+      {%- for other in columns | default([], true) if other.name and (other.name | lower) in (dv | lower) -%}
+          {%- set nsDv.simple = false -%}
+      {%- endfor -%}
+      {%- for fn in ['now(', 'now64(', 'today(', 'yesterday(', 'generateuuid', 'rand', 'randomstring', 'randomprintableascii', 'randomfixedstring', 'serveruuid', 'currentuser(', 'nowinblock('] if fn in (dv | lower) -%}
+          {%- set nsDv.simple = false -%}
+      {%- endfor -%}
+      {%- if isNullable or family in ['array', 'map', 'tuple', 'nested', 'json', 'object', 'dynamic', 'variant',
+                                       'aggregatefunction', 'simpleaggregatefunction',
+                                       'point', 'ring', 'linestring', 'multilinestring', 'polygon', 'multipolygon', 'geometry']
+            or (dv and not nsDv.simple) -%}
       isDistinctFrom({{ src_expr }}, {{ tgt_expr }})
+      {%- elif dv -%}
+      isDistinctFrom(ifNull({{ src_expr }}, CAST({{ dv }}, '{{ ch_string(colType) }}')), {{ tgt_expr }})
+      {%- else -%}
+      isDistinctFrom(ifNull({{ src_expr }}, defaultValueOfTypeName('{{ ch_string(colType) }}')), {{ tgt_expr }})
+      {%- endif -%}
   {%- endmacro -%}
 
   {#===========================================================================
@@ -409,6 +444,8 @@ macroString: |-
     Also a non-failing "Warning: @final on a table": @final only changes a view's definition;
     a table's load follows the readWithFinal runtime parameter.
     And a non-failing "Warning: @optimize on a view": a view has no parts to merge.
+    And a passing "Info: @optimize on a MergeTree": not needed for correct data there (the clean-up DELETE already
+    removes replaced rows); the OPTIMIZE still runs, it only merges parts.
   ===========================================================================#}
   {%- macro validate_materialization_type(allowedTypes=['table', 'view']) -%}
       {%- if nsNodeVariables.desiredMatType not in allowedTypes %}
@@ -442,6 +479,13 @@ macroString: |-
           {{ test_stage('Warning: @optimize on a view', true) }}
           -- @optimize applies to tables only (OPTIMIZE TABLE ... FINAL after the load). The view {{ node.name }} stores no data, so nothing is optimized.
           -- Fix: remove @optimize, or set @materializationType("table").
+          SELECT 1
+      {%- endif %}
+      {%- if nsNodeVariables.desiredMatType == 'table' and not nsNodeVariables.desiredEngineReplacing and config is defined and config.optimize is defined %}
+          {{ test_stage('Info: @optimize on a MergeTree', true) }}
+          -- {{ node.name }} is a MergeTree: Clean Up Previous Data already deletes the rows each load replaces, so a plain SELECT is correct without @optimize.
+          -- @optimize still runs OPTIMIZE TABLE ... FINAL after every load: it only merges the table's parts (and frees the space of deleted rows), rewriting the whole table each time.
+          -- Keep it if you want that merge (e.g. many small loads); otherwise remove @optimize.
           SELECT 1
       {%- endif %}
       {{ validate_query_settings() }}

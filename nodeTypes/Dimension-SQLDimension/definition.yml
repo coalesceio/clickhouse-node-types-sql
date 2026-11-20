@@ -259,6 +259,7 @@ metadata:
                   Ex. @optimize
                 • On a ReplacingMergeTree the table then keeps only the latest row per ORDER BY key, so a plain SELECT matches a SELECT with FINAL — except a row whose @partitionBy value changed: merges never cross partitions, so its old copy stays (FINAL still hides it).
                 • Rewrites the whole table on every run — use it on small or medium tables, or when reads must not need FINAL.
+                • On a MergeTree it is not needed for correct data (Clean Up Previous Data already deletes the replaced rows): it still runs and only merges parts, and a passing "Info: @optimize on a MergeTree" stage says so.
                 • On a view it does nothing: a non-failing "Warning: @optimize on a view" stage is shown.
               isRequired: false
 
