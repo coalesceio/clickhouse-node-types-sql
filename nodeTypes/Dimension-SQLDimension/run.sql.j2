@@ -11,7 +11,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
     ClickHouse has no MERGE, so each load only INSERTs the row set the MERGE would have applied. An "update"
     re-inserts the same key with a newer SYSTEM_UPDATE_DATE (SCD2 expiry re-inserts the old version with
     SYSTEM_CURRENT_FLAG = 'N').
-    - ReplacingMergeTree (@engine or the package engine parameter): per ORDER BY key (business key + SYSTEM_VERSION + surrogate key)
+    - ReplacingMergeTree (@engine or the package engine parameter): per ORDER BY key (business key + SYSTEM_VERSION)
       the row with the latest SYSTEM_UPDATE_DATE replaces the others at a background merge. Nothing is deleted;
       until the merge a plain SELECT can see the replaced copies, so the load and the column tests read with
       FINAL through SETTINGS final = 1 when readWithFinal is true.
@@ -299,7 +299,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                         WHEN (
                             {%- for col in columns if col.isChangeTracking %}
                             {%- if not loop.first %} OR {%- endif %}
-                            {{ safe_compare('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`TGT_' ~ col.name ~ '`', col.dataType) }}
+                            {{ safe_compare('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`TGT_' ~ col.name ~ '`', col) }}
                             {%- endfor %}
                         ) THEN 'CHANGED'
                         {%- set nonType2AttrCount = columns | rejectattr("isBusinessKey") | rejectattr("isSurrogateKey") | rejectattr("isSystemVersion") | rejectattr("isSystemCurrentFlag") | rejectattr("isSystemCreateDate") | rejectattr("isSystemUpdateDate") | rejectattr("isSystemEndDate") | rejectattr("isChangeTracking") | list | length %}
@@ -309,7 +309,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                         WHEN (
                             {%- for col in columns if not (col.isBusinessKey or col.isSurrogateKey or col.isSystemVersion or col.isSystemCurrentFlag or col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemEndDate or col.isChangeTracking) %}
                             {%- if not loop.first %} OR {%- endif %}
-                            {{ safe_compare('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`TGT_' ~ col.name ~ '`', col.dataType) }}
+                            {{ safe_compare('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`TGT_' ~ col.name ~ '`', col) }}
                             {%- endfor %}
                         ) THEN 'UPDATE_NON_TYPE2'
                         {%- endif %}
@@ -320,7 +320,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 LEFT JOIN `TARGET_CURRENT` ON
                 {%- for col in columns if col.isBusinessKey %}
                     {%- if not loop.first %} AND {%- endif %}
-                    {{ safe_equals('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`' ~ col.name ~ '`', col.dataType) }}
+                    {{ safe_equals('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`' ~ col.name ~ '`', col) }}
                 {%- endfor %}
             ),
 
@@ -506,7 +506,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                         WHEN (
                             {%- for col in scd1AttrCols %}
                             {%- if not loop.first %} OR {%- endif %}
-                            {{ safe_compare('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`TGT_' ~ col.name ~ '`', col.dataType) }}
+                            {{ safe_compare('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`TGT_' ~ col.name ~ '`', col) }}
                             {%- endfor %}
                         ) THEN 'CHANGED'
                         {%- else %}
@@ -519,7 +519,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                 LEFT JOIN `TARGET_CURRENT` ON
                 {%- for col in columns if col.isBusinessKey %}
                     {%- if not loop.first %} AND {%- endif %}
-                    {{ safe_equals('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`' ~ col.name ~ '`', col.dataType) }}
+                    {{ safe_equals('`SOURCE_DATA`.`' ~ col.name ~ '`', '`TARGET_CURRENT`.`' ~ col.name ~ '`', col) }}
                 {%- endfor %}
             )
             /* Final SCD1 row set: NEW rows are inserted; CHANGED rows are re-inserted with a newer

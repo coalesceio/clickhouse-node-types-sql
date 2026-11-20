@@ -1,0 +1,18 @@
+fileVersion: 1
+id: "28"
+name: SQL_CTE_Patterns
+steps:
+  - 0001c744-86cf-5a2c-98bd-feb04351c5e5
+  - 2e627deb-058c-5c90-aa09-268728942651
+  - 4f06555c-8721-594d-b366-a6e895aea5ed
+  - 544557a5-2620-5f21-9239-ecc9b90d4901
+  - 61d8c251-df3d-5768-88b7-6fe0bf598382
+  - 73991a85-efb3-5f67-bf02-7b291fca86ac
+  - 7cf6adfe-d397-5088-8ff3-affbcbc95c03
+  - 8347b990-b83f-59db-9301-17be545772a2
+  - bed74ef6-2f92-58f9-853c-827a53b2cef8
+  - cfd53ffa-0d1e-51f9-9820-e780ceeb6b1d
+  - d3e76803-8eae-5591-9b06-bda64a198800
+  - e4c8383d-912e-5cd2-ba03-a9f0382383c0
+  - f6f331af-ce16-579f-a050-a68f06cbc36d
+type: Subgraph

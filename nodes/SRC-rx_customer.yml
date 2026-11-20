@@ -1,0 +1,268 @@
+fileVersion: 1
+id: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+name: rx_customer
+operation:
+  database: ""
+  deployEnabled: true
+  description: ""
+  locationName: SRC
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 2ab43c8c-81a7-4f87-8306-a0d999779607
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: customer_id
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 38e6e992-a564-4bc3-809f-acd29848343b
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: name
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 0ce4cf38-d747-4e35-88cf-6c48722d95b7
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: segment
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: cbe6f54c-f8d0-4c29-8e8f-6bb0ffb4acc7
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: status
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: fdfa5e64-e3bf-4f2c-8323-c7774c4ad95b
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: Decimal(12, 2)
+        defaultValue: ""
+        description: ""
+        name: balance
+        nativeType: Decimal(12, 2)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 02e331d4-8ba2-48d6-ae17-6474cdde4818
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: Float64
+        defaultValue: ""
+        description: ""
+        name: discount
+        nativeType: Float64
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 5bca76eb-4a44-443e-b011-cf3ddf37bf27
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: Bool
+        defaultValue: ""
+        description: ""
+        name: is_active
+        nativeType: Bool
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 6cb0f47f-3635-4928-aaf4-30f55ad0ad9a
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: Date
+        defaultValue: ""
+        description: ""
+        name: signup_date
+        nativeType: Date
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 4f206a7a-1e89-4f93-8568-1d2ce6acf424
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: DateTime
+        defaultValue: ""
+        description: ""
+        name: created_at
+        nativeType: DateTime
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 03132a5f-004a-4a74-99c0-7f46a14f38db
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: DateTime
+        defaultValue: ""
+        description: ""
+        name: updated_at
+        nativeType: DateTime
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 8da891aa-de9a-42cc-befb-0eeaacd43cba
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: c_custkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 733c83d9-dcae-4a67-bc1c-ffb4f51a6555
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: c_name
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 9330b6f7-18fa-4166-aa79-f3a1a2617510
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: c_address
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 40798658-c065-4dca-b913-73a23a709ef5
+          stepCounter: 56ab9926-651e-4f45-80e0-69f29dfb4fdc
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: c_mktsegment
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: rx_customer
+  schema: WORKSPACE_TANVI_SOURCE
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node

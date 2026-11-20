@@ -1,0 +1,70 @@
+fileVersion: 1
+id: 3370d749-1a53-4370-a228-7dd9be26a2e8
+name: rx_partsupp
+operation:
+  database: ""
+  deployEnabled: true
+  description: ""
+  locationName: SRC
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 95ceb0ee-1ad8-4c0c-a8ee-ac8f278987c4
+          stepCounter: 3370d749-1a53-4370-a228-7dd9be26a2e8
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: ps_partkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 08a62af5-f608-4787-a405-6fec931ef5c7
+          stepCounter: 3370d749-1a53-4370-a228-7dd9be26a2e8
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: ps_suppkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: ca5508d6-a0de-4fb2-8cd0-f41036869c51
+          stepCounter: 3370d749-1a53-4370-a228-7dd9be26a2e8
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: ps_availqty
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: rx_partsupp
+  schema: WORKSPACE_TANVI_SOURCE
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node

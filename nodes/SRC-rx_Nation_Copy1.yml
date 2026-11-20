@@ -1,0 +1,106 @@
+fileVersion: 1
+id: e7b78cb5-069f-4bfe-837e-9498df77cb5c
+name: rx_Nation_Copy1
+operation:
+  database: ""
+  deployEnabled: true
+  description: ""
+  locationName: SRC
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 4233b50d-8073-42db-83db-b983aa3d0fab
+          stepCounter: e7b78cb5-069f-4bfe-837e-9498df77cb5c
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: n_Nationkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 9af9dd9c-42fd-488f-92ce-7272f480f11f
+          stepCounter: e7b78cb5-069f-4bfe-837e-9498df77cb5c
+        config: {}
+        dataType: FixedString(25)
+        defaultValue: ""
+        description: ""
+        name: n_Name
+        nativeType: FixedString(25)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 3259703c-f614-4396-9421-391ceb0a440d
+          stepCounter: e7b78cb5-069f-4bfe-837e-9498df77cb5c
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: n_Regionkey
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 5fde1957-8de9-4e5c-ae6e-7465f92e1dd8
+          stepCounter: e7b78cb5-069f-4bfe-837e-9498df77cb5c
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: n_Comment
+        nativeType: Nullable(String)
+        nullable: true
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: fbfe917e-6899-41d4-b559-c53be34169bb
+          stepCounter: e7b78cb5-069f-4bfe-837e-9498df77cb5c
+        config: {}
+        dataType: DateTime64(3)
+        defaultValue: ""
+        description: ""
+        name: last_Modified
+        nativeType: DateTime64(3)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: rx_Nation_Copy1
+  schema: WORKSPACE_TANVI_SOURCE
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node
