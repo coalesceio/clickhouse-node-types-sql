@@ -1,0 +1,9 @@
+fileVersion: 1
+id: "33"
+name: Work_SCD_Patterns
+steps:
+  - db6554d9-7c3a-5ea1-ab22-cb6a2f06689b
+  - 5556325a-b631-585b-b253-5ae6675e13ad
+  - e6b05513-7cb1-5b23-ad30-32a763fa2975
+  - 04958109-c544-5035-a1aa-3669515757eb
+type: Subgraph

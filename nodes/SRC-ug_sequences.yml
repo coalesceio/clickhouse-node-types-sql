@@ -1,0 +1,124 @@
+fileVersion: 1
+id: ba5c1a0a-0e06-4a98-939f-6f661eaaa7ea
+name: ug_sequences
+operation:
+  database: ""
+  deployEnabled: true
+  description: ""
+  locationName: SRC
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 42280482-3f85-4d41-bf98-fd424b5e9de8
+          stepCounter: ba5c1a0a-0e06-4a98-939f-6f661eaaa7ea
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: id
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 99ab382a-5de0-4a0f-b4c5-cea7ea4d8828
+          stepCounter: ba5c1a0a-0e06-4a98-939f-6f661eaaa7ea
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: name
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: f3419991-3026-4785-b8fb-01994feed513
+          stepCounter: ba5c1a0a-0e06-4a98-939f-6f661eaaa7ea
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: channel
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 0947302c-68d1-4b72-aec1-72ef0ca54bb8
+          stepCounter: ba5c1a0a-0e06-4a98-939f-6f661eaaa7ea
+        config: {}
+        dataType: DateTime64(6)
+        defaultValue: ""
+        description: ""
+        name: updated_at
+        nativeType: DateTime64(6)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: f9944325-1a45-4cc8-8959-60d6d2c4c7e4
+          stepCounter: ba5c1a0a-0e06-4a98-939f-6f661eaaa7ea
+        config: {}
+        dataType: UInt8
+        defaultValue: ""
+        description: ""
+        name: _peerdb_is_deleted
+        nativeType: UInt8
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: f233fb2a-d8d0-46dc-8d77-f311f803ce05
+          stepCounter: ba5c1a0a-0e06-4a98-939f-6f661eaaa7ea
+        config: {}
+        dataType: Int64
+        defaultValue: ""
+        description: ""
+        name: _peerdb_version
+        nativeType: Int64
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: ug_sequences
+  schema: WORKSPACE_TANVI_SOURCE
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node

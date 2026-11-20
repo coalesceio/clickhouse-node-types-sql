@@ -1,0 +1,142 @@
+fileVersion: 1
+id: 044df95b-d6d1-4482-8af5-29604cc8f716
+name: ug_contacts
+operation:
+  database: ""
+  deployEnabled: true
+  description: ""
+  locationName: SRC
+  metadata:
+    columns:
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 5878d074-7ae6-424c-bc1f-a7496217b2e1
+          stepCounter: 044df95b-d6d1-4482-8af5-29604cc8f716
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: id
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 79744fbe-a28b-463f-a841-eec2db1028ee
+          stepCounter: 044df95b-d6d1-4482-8af5-29604cc8f716
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: email
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 509c71d4-e373-46d0-9192-05e913272934
+          stepCounter: 044df95b-d6d1-4482-8af5-29604cc8f716
+        config: {}
+        dataType: UInt32
+        defaultValue: ""
+        description: ""
+        name: owner_id
+        nativeType: UInt32
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 0fcd360d-a04f-44d9-91a0-aa7cacc65bfb
+          stepCounter: 044df95b-d6d1-4482-8af5-29604cc8f716
+        config: {}
+        dataType: String
+        defaultValue: ""
+        description: ""
+        name: status
+        nativeType: String
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 84add4e5-ff89-48fa-9aaa-6f746a1eb67f
+          stepCounter: 044df95b-d6d1-4482-8af5-29604cc8f716
+        config: {}
+        dataType: DateTime64(6)
+        defaultValue: ""
+        description: ""
+        name: updated_at
+        nativeType: DateTime64(6)
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: 4f8f0d7f-0705-4328-bf85-1d6754ba2b13
+          stepCounter: 044df95b-d6d1-4482-8af5-29604cc8f716
+        config: {}
+        dataType: UInt8
+        defaultValue: ""
+        description: ""
+        name: _peerdb_is_deleted
+        nativeType: UInt8
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+      - acceptedValues:
+          strictMatch: true
+          values: []
+        appliedColumnTests: {}
+        columnReference:
+          columnCounter: c09a05a8-d2aa-4047-a2f9-b483c16c020a
+          stepCounter: 044df95b-d6d1-4482-8af5-29604cc8f716
+        config: {}
+        dataType: Int64
+        defaultValue: ""
+        description: ""
+        name: _peerdb_version
+        nativeType: Int64
+        nullable: false
+        sourceColumnReferences:
+          - columnReferences: []
+            transform: ""
+        transform: ""
+  name: ug_contacts
+  schema: WORKSPACE_TANVI_SOURCE
+  sqlType: Source
+  type: sourceInput
+  version: 1
+type: Node
