@@ -1,6 +1,6 @@
 # SQL-First NodeTypes for ClickHouse
 
-The [SQL-first nodes](https://docs.coalesce.io/docs/build-your-pipeline/v2-node-types) is a transformation tool within Coalesce that lets developers write custom, hand-coded SQL instead of using the standard graphical column-mapping interface. It is ideal for complex transformations, advanced window functions, or multi-step logic that is difficult to represent with the standard UI, and ships with a built-in library of column- and node-level data quality tests. While it provides maximum flexibility, it shifts the responsibility of column definition and logic maintenance to the SQL author.
+The [SQL-first nodes](https://docs.coalesce.io/docs/build-your-pipeline/v2-node-types) are a transformation tool within Coalesce that let developers write custom, hand-coded SQL instead of using the standard graphical column-mapping interface. It is ideal for complex transformations, advanced window functions, or multi-step logic that is difficult to represent with the standard UI, and ships with a built-in library of column- and node-level data quality tests. While it provides maximum flexibility, it shifts the responsibility of column definition and logic maintenance to the SQL author.
 
 # Coalesce Base Node Types - SQL Package (ClickHouse)
 
@@ -1901,10 +1901,15 @@ Using hash macro (algo=SHA256, delimiter='~')
 <col_name> AS <col_name> @inHash("GH_COL", 1),
 {{ get_hash('GH_COL', algo='SHA256', delimiter='~') }} AS `GH_COL`
 ```
-Using a ClickHouse hash function (UInt64 result)
+Using a ClickHouse hash function (`cityHash64`, `xxHash64`, `sipHash64`, ...)
 ```sql
 <col_name> AS <col_name> @inHash("GH_COL", 1),
 {{ get_hash('GH_COL', 'cityHash64') }} AS `GH_COL`
+```
+> **Note:** these functions return a `UInt64`, but Coalesce types every `get_hash` column as `String`, so the example above stores the number as text (e.g. `'7740249813402470115'`). For a numeric column, wrap the call in `toUInt64(...)`:
+```sql
+<col_name> AS <col_name> @inHash("GH_COL", 1),
+toUInt64({{ get_hash('GH_COL', 'cityHash64') }}) AS `GH_COL`
 ```
 Using multiple keys hash macro
 ```sql

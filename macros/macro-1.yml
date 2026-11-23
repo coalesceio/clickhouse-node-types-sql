@@ -361,8 +361,8 @@ macroString: |-
         casts it: a default of another type ('2100-12-31' on a Date, 0 on a String) would otherwise make
         ifNull return a Variant that isDistinctFrom rejects, and -1 on a UInt32 is stored as 4294967295;
       - no @defaultValue: isDistinctFrom(ifNull(src, defaultValueOfTypeName('<type>')), tgt).
-    A @defaultValue that refers to a column (a quoted identifier, or any of the node's column names,
-    quoted or not) or changes on every call (now(), generateUUIDv4(), rand(), ...) has no value to
+    A @defaultValue that refers to a column (a quoted identifier, or any of the node's column names
+    as a whole word outside a '...' literal) or changes on every call (now(), generateUUIDv4(), rand(), ...) has no value to
     compare with, so the column is compared as stored (not supported, see the README).
   ===========================================================================#}
   {%- macro safe_compare(src_expr, tgt_expr, col) -%}
@@ -371,13 +371,27 @@ macroString: |-
       {%- set isNullable = (colType | lower).startswith('nullable(') or (colType | lower).startswith('lowcardinality(nullable(') -%}
       {%- set dv = (col.defaultValue | default('', true) | string | trim) if col.defaultValue else '' -%}
       {%- set nsDv = namespace(simple=true) -%}
-      {%- if '`' in dv or '"' in dv -%}
+      {#- Only the text outside '...' literals can name a column or call a function: 'UNKNOWN' must
+          not match a column `k`, nor 'brand' the function rand. Whole identifiers are compared. #}
+      {%- set nsCode = namespace(text='') -%}
+      {%- for part in (dv | lower).split("'")[::2] -%}
+          {%- set nsCode.text = nsCode.text ~ ' ' ~ part -%}
+      {%- endfor -%}
+      {%- if '`' in nsCode.text or '"' in nsCode.text -%}
           {%- set nsDv.simple = false -%}
       {%- endif -%}
-      {%- for other in columns | default([], true) if other.name and (other.name | lower) in (dv | lower) -%}
+      {%- set nsTok = namespace(text=nsCode.text) -%}
+      {%- for ch in ['(', ')', ',', '+', '-', '*', '/', '%', '|', '=', '<', '>', '!', '.', ':', '[', ']', '{', '}', '?', ';', '\t', '\n'] -%}
+          {%- set nsTok.text = nsTok.text | replace(ch, ' ') -%}
+      {%- endfor -%}
+      {%- set tokens = nsTok.text.split() -%}
+      {%- for other in columns | default([], true) if other.name and (other.name | lower) in tokens -%}
           {%- set nsDv.simple = false -%}
       {%- endfor -%}
-      {%- for fn in ['now(', 'now64(', 'today(', 'yesterday(', 'generateuuid', 'rand', 'randomstring', 'randomprintableascii', 'randomfixedstring', 'serveruuid', 'currentuser(', 'nowinblock('] if fn in (dv | lower) -%}
+      {%- for tok in tokens if tok in ['now', 'now64', 'today', 'yesterday', 'currentuser', 'nowinblock', 'nowinblock64']
+                                or tok.startswith('generateuuid') or tok.startswith('generateulid')
+                                or tok.startswith('generatesnowflakeid') or tok.startswith('rand')
+                                or tok.startswith('serveruuid') -%}
           {%- set nsDv.simple = false -%}
       {%- endfor -%}
       {%- if isNullable or family in ['array', 'map', 'tuple', 'nested', 'json', 'object', 'dynamic', 'variant',
