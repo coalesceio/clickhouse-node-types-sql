@@ -602,7 +602,7 @@ The load writes fixed values into the system columns. The expression the SELECT 
 | `@isSystemCurrentFlag` | `'Y'` on the current row; `'N'` on an expired SCD2 row |
 | `@isSystemCreateDate` | The load time on first insert and on each new SCD2 version, then kept |
 | `@isSystemUpdateDate` | The load time whenever the row is inserted, changed, or expired as an old SCD2 version |
-| `@isSystemEndDate` | The [open end date](#scd-type-2-end-date) on the current row; the expiry time (one millisecond before the load time) on an expired SCD2 row |
+| `@isSystemEndDate` | The [open end date](#scd-type-2-end-date) on the current row; the expiry time on an expired SCD2 row: one unit of the column's precision before the load time (1 ms for `DateTime64`, 1 second for `DateTime`, 1 day for `Date`/`Date32`) |
 
 The load time is `now64(6)`, evaluated once per load statement, so every row of one load gets the same value (stored at the column's own precision).
 
@@ -617,7 +617,7 @@ ClickHouse's date types cannot hold a far-future date such as `2999-12-31`, so t
 | `Date32` | `2299-12-31` |
 | `Date` | `2149-06-06` |
 
-An expired version gets the expiry time: one millisecond before the load.
+An expired version gets the expiry time: one unit of the column's precision before the load (1 ms, 1 second or 1 day), so it never equals the next version's start.
 
 The SELECT expression only sets the column's type; the load writes the value. Use `CAST('2299-12-31 23:59:59.999999' AS DateTime64(6))`: `CAST(... AS TIMESTAMP)` is a `DateTime` in ClickHouse (seconds only, ending in 2106), so `CAST('2999-12-31 00:00:00' AS TIMESTAMP)` shows as `2106-02-07 06:28:15` in Preview.
 
