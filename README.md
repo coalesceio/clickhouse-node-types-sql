@@ -1,8 +1,8 @@
 # SQL-First NodeTypes for ClickHouse
 
-The [SQL-first nodes](https://docs.coalesce.io/docs/build-your-pipeline/v2-node-types) are a transformation tool within Coalesce that let developers write custom, hand-coded SQL instead of using the standard graphical column-mapping interface. It is ideal for complex transformations, advanced window functions, or multi-step logic that is difficult to represent with the standard UI, and ships with a built-in library of column- and node-level data quality tests. While it provides maximum flexibility, it shifts the responsibility of column definition and logic maintenance to the SQL author.
+The [SQL-first nodes](https://docs.coalesce.io/docs/build-your-pipeline/v2-node-types) are a transformation tool within Coalesce that let developers write custom, hand-coded SQL instead of using the standard graphical column-mapping interface. They are ideal for complex transformations, advanced window functions, or multi-step logic that is difficult to represent with the standard UI, and ships with a built-in library of column- and node-level data quality tests. While they provide maximum flexibility, they shift the responsibility of column definition and logic maintenance to the SQL author.
 
-# Coalesce Base Node Types - SQL Package (ClickHouse)
+## Coalesce Base Node Types - SQL Package (ClickHouse)
 
 The Coalesce Base Node Types - SQL Package for ClickHouse includes:
 
@@ -13,6 +13,66 @@ The Coalesce Base Node Types - SQL Package for ClickHouse includes:
 Concepts shared across every node type — ClickHouse table defaults, sort and partition keys, column types, data quality tests, known limitations, and usage examples — are documented once in [Common Reference](#common-reference) and linked to from each node type below.
 
 > **After installing:** read [Before You Start](#before-you-start) — set the package `engine` parameter and the `readWithFinal` and `joinUseNulls` runtime parameters before the first deployment.
+
+## Quick Start
+
+1. Install the package, then set the package `engine` parameter and the `readWithFinal` / `joinUseNulls` runtime parameters — see [Before You Start](#before-you-start).
+2. Pick a node type: [Work](#work) for staging and intermediate tables or views, [Dimension](#dimension) for SCD Type 1/2 dimensions, [Fact](#fact) for facts.
+3. Write the SELECT, give every column an `@id`, and add the annotations the node type needs — see the [Node Annotations Matrix](#node-annotations-matrix) and [Column Annotations Matrix](#column-annotations-matrix).
+4. Deploy, then run. Validation problems are reported as named stages in the deploy and run output.
+
+## Contents
+
+* [Before You Start](#before-you-start)
+  * [1. Package parameter `engine` — choose the table engine](#1-package-parameter-engine--choose-the-table-engine)
+  * [2. Runtime parameter `readWithFinal` — set it in every environment](#2-runtime-parameter-readwithfinal--set-it-in-every-environment)
+  * [3. Runtime parameter `joinUseNulls` — set it once, the same in every environment](#3-runtime-parameter-joinusenulls--set-it-once-the-same-in-every-environment)
+  * [4. ClickHouse `final = 1` for the people and tools that read the tables](#4-clickhouse-final--1-for-the-people-and-tools-that-read-the-tables)
+  * [Checklist](#checklist)
+* [Node Type Comparison](#node-type-comparison)
+  * [Node Annotations Matrix](#node-annotations-matrix)
+  * [Column Annotations Matrix](#column-annotations-matrix)
+* [Work](#work)
+  * [Work Node Configuration](#work-node-configuration)
+  * [Work Node Annotations](#work-node-annotations)
+  * [Work Column Annotations](#work-column-annotations)
+  * [Work Deployment](#work-deployment)
+  * [Removing a Work Node](#removing-a-work-node)
+  * [Work Load](#work-load)
+* [Dimension](#dimension)
+  * [Dimension Node Configuration](#dimension-node-configuration)
+  * [Dimension Node Annotations](#dimension-node-annotations)
+  * [Dimension Column Annotations](#dimension-column-annotations)
+  * [Dimension Annotation Details](#dimension-annotation-details)
+  * [Dimension SCD Type & System Column Requirements](#dimension-scd-type--system-column-requirements)
+  * [Dimension Deployment](#dimension-deployment)
+  * [Removing a Dimension Node](#removing-a-dimension-node)
+* [Fact](#fact)
+  * [Fact Node Configuration](#fact-node-configuration)
+  * [Fact Node Annotations](#fact-node-annotations)
+  * [Fact Column Annotations](#fact-column-annotations)
+  * [Fact Annotation Details](#fact-annotation-details)
+  * [Fact Load Behaviour](#fact-load-behaviour)
+  * [Fact Deployment](#fact-deployment)
+  * [Removing a Fact Node](#removing-a-fact-node)
+* [Common Reference](#common-reference)
+  * [ClickHouse Cloud Defaults](#clickhouse-cloud-defaults)
+  * [Package Parameters](#package-parameters)
+  * [Runtime Parameters](#runtime-parameters)
+  * [Column Types](#column-types)
+  * [Column Type Changes](#column-type-changes)
+  * [Sort Key and Partition Key Changes](#sort-key-and-partition-key-changes)
+  * [Storage Location Changes](#storage-location-changes)
+  * [How a Load Replaces Rows (Dimension and Fact)](#how-a-load-replaces-rows-dimension-and-fact)
+  * [Unique Business Keys (Fact and Dimension)](#unique-business-keys-fact-and-dimension)
+  * [Surrogate Keys (Dimension)](#surrogate-keys-dimension)
+  * [Annotation Reference](#annotation-reference)
+  * [Identifier Quoting in Annotations](#identifier-quoting-in-annotations)
+  * [Column-Level Data Quality Tests](#column-level-data-quality-tests)
+  * [Notes & Supported SQL Functionality](#notes--supported-sql-functionality)
+  * [Known Limitations](#known-limitations)
+  * [Usage Examples](#usage-examples)
+  * [Code](#code)
 
 ## Before You Start
 
@@ -408,9 +468,10 @@ Chooses how this dimension decides a row has changed, and therefore which column
 
 | **Value** | **Description** |
 |---|---|
-| `changeTracking` | Compares columns marked `@isChangeTracking` (or, if none are marked, every plain attribute column) to detect a change. SCD Type 2 if any column is marked `@isChangeTracking`, otherwise SCD Type 1. Doesn't use `@lastModifiedTracking` — if present, a warning is raised and it's ignored. |
-| `lastModified` | Compares a single `@lastModifiedTracking` column against the target's stored value. Requires exactly one column marked `@lastModifiedTracking` — a validation check flags it if none (or more than one) is present. SCD Type 1 or 2 comes from that column's own `scdType` parameter. Doesn't use `@isChangeTracking` — if present, a warning is raised and it's ignored. |
+| `changeTracking` | Compares columns marked `@isChangeTracking` (or, if none are marked, every plain attribute column) to detect a change. SCD Type 2 if any column is marked `@isChangeTracking`, otherwise SCD Type 1. |
+| `lastModified` | Compares a single `@lastModifiedTracking` column against the target's stored value. Requires exactly one column marked `@lastModifiedTracking` — a validation check flags it if none (or more than one) is present. SCD Type 1 or 2 comes from that column's own `scdType` parameter. |
 
+* A tracking annotation the strategy does not use (`@lastModifiedTracking` under `changeTracking`, `@isChangeTracking` under `lastModified`) raises a warning and is ignored.
 * *Not specified in the SQL editor → defaults to **changeTracking** - SCD Type 1.*
 * The value is not case-sensitive; any other value is flagged by the **Invalid configuration: mergeStrategy** check and stops the deploy and the run.
 * Every strategy matches on the business key. A key the SELECT/CTE returns more than once is loaded once (`lastModified`: the newest row), and a NULL business key is one key value — see [Unique Business Keys](#unique-business-keys-fact-and-dimension).
@@ -660,7 +721,7 @@ Every run of a Dimension Node of materialization type table runs its configured 
 | **Stage** | **Description** |
 |-----------|----------------|
 | **Pre Load Test `<n>`** | Node-level `@tests(..., "Before")` tests, in the order they appear. |
-| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Missing Business Key \| Invalid configuration: … \| Warning: mergeStrategy \| Missing Required System Columns \| Missing Recommended System Columns \| Surrogate Key Not Set/Using Custom Surrogate Key Logic \| Warning: Zero Key Value Too Long \| Warning: Column @zeroKey without node-level @zeroKey** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, no `@isBusinessKey`, an unrecognised `@mergeStrategy`, a missing or repeated `@lastModifiedTracking` column, a `@lastModifiedTracking` column that cannot detect newer rows, an `scdType` other than 1 or 2, a tracking annotation the strategy ignores (non-failing), a missing system column, a missing `@defaultValue` on the surrogate key, a surrogate key that is only recommended (non-failing), an `@engine` that is not a MergeTree-family engine, `@orderBy` / `@primaryKey` on a ReplacingMergeTree, a ReplacingMergeTree without a business key, `SYSTEM_VERSION` (Dimension) or `@isSystemUpdateDate` column, or a zero key string longer than its `FixedString` column (non-failing)). |
+| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Missing Business Key \| Invalid configuration: … \| Warning: mergeStrategy \| Missing Required System Columns \| Missing Recommended System Columns \| Surrogate Key Not Set/Using Custom Surrogate Key Logic \| Warning: Zero Key Value Too Long \| Warning: Column @zeroKey without node-level @zeroKey** | Validation checks — rendered only when the node's annotations have a problem (listed below the table). |
 | **Check Last Modified Column - NULL Values (`<column>`)** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only when `@writeMode("truncateInsert")` is set — clears the target before the load. |
@@ -671,6 +732,25 @@ Every run of a Dimension Node of materialization type table runs its configured 
 | **Optimize Table** | Executed only when [`@optimize`](#optimize) is set — `OPTIMIZE TABLE … FINAL` merges the table's parts after the load, before Post-SQL. |
 | **Post-SQL `<n>`** | Each `@postSQL` statement, in the order they appear. |
 | **`<column>: <test>` \| Post Load Test `<n>`** | Column-level data quality tests and node-level `@tests(..., "After")` tests, run after the load. |
+
+**Validation checks fire on:**
+
+* the SELECT returns the same column name twice
+* two columns share an `@id` value
+* a column without `@id`
+* no `@isBusinessKey`
+* an unrecognised `@mergeStrategy`
+* a missing or repeated `@lastModifiedTracking` column
+* a `@lastModifiedTracking` column that cannot detect newer rows
+* an `scdType` other than 1 or 2
+* a tracking annotation the strategy ignores (non-failing)
+* a missing system column
+* a missing `@defaultValue` on the surrogate key
+* a surrogate key that is only recommended (non-failing)
+* an `@engine` that is not a MergeTree-family engine
+* `@orderBy` / `@primaryKey` on a ReplacingMergeTree
+* a ReplacingMergeTree without a business key, `SYSTEM_VERSION` (Dimension) or `@isSystemUpdateDate` column
+* a zero key string longer than its `FixedString` column (non-failing)
 
 > **Note:** ClickHouse has no `MERGE` statement; the load stages only insert the new and changed rows, and **Clean Up Previous Data** (MergeTree) or the ReplacingMergeTree removes the older copies — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact).
 
@@ -787,10 +867,12 @@ Chooses how rows are matched against the target, and therefore which column anno
 
 | **Value** | **Description** |
 |---|---|
-| `changeTracking` | SCD Type 1. Compares every plain attribute column against the target; a changed row is re-inserted with the new values and the old copy removed, a new key is inserted. Doesn't use `@lastModifiedTracking` — if present, a warning is raised and it's ignored. |
+| `changeTracking` | SCD Type 1. Compares every plain attribute column against the target; a changed row is re-inserted with the new values and the old copy removed, a new key is inserted. |
 | `lastModified` | SCD Type 1. Compares a single `@lastModifiedTracking` column against the target's stored value; only rows with a newer value are loaded, then as `changeTracking`. Requires exactly one column marked `@lastModifiedTracking` — a validation check flags it if none (or more than one) is present. |
-| `allColumnMatch` | A factless fact: a source row is inserted only if no target row matches it on the **match columns** — the non-system columns that come from the source — and an existing row is never updated or deleted. `@isBusinessKey` isn't needed — if present, a warning is raised and it's ignored. `@lastModifiedTracking` isn't used either — a warning is raised and it's ignored. System columns are optional, are left out of the comparison, and are written exactly as the SELECT/CTE computes them. |
+| `allColumnMatch` | A factless fact: a source row is inserted only if no target row matches it on the **match columns** — the non-system columns that come from the source — and an existing row is never updated or deleted. |
 
+* An annotation the strategy does not use (`@lastModifiedTracking` under `changeTracking`; `@isBusinessKey` or `@lastModifiedTracking` under `allColumnMatch`) raises a warning and is ignored.
+* `allColumnMatch`: system columns are optional, are left out of the comparison, and are written exactly as the SELECT/CTE computes them.
 * *Not specified in the SQL editor → defaults to **changeTracking** - SCD Type 1 when a column is marked `@isBusinessKey`, otherwise the node is loaded as a [plain insert](#fact-load-behaviour).*
 * The value is not case-sensitive; any other value is flagged by the **Invalid configuration: mergeStrategy** check and stops the deploy and the run.
 * When set, `@mergeStrategy` always takes priority: `changeTracking` and `lastModified` match on the business key, so without an `@isBusinessKey` column the **Invalid configuration: No Business Key** check fails and the load stops. `allColumnMatch` needs no `@isBusinessKey`.
@@ -888,7 +970,7 @@ Every run of a Fact Node of materialization type table runs its configured data 
 | **Stage** | **Description** |
 |-----------|----------------|
 | **Pre Load Test `<n>`** | Node-level `@tests(..., "Before")` tests, in the order they appear. |
-| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Invalid configuration: … \| Warning: mergeStrategy \| Warning: No Business Key \| Missing Required System Columns** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, an unrecognised `@mergeStrategy`, an explicit strategy without a business key, a missing or repeated `@lastModifiedTracking` column, a `@lastModifiedTracking` column that cannot detect newer rows, a tracking/key annotation the strategy ignores (non-failing), an `@engine` that is not a MergeTree-family engine, `@orderBy` / `@primaryKey` on a ReplacingMergeTree, a ReplacingMergeTree without a business key, `SYSTEM_VERSION` (Dimension) or `@isSystemUpdateDate` column, or a missing system column). |
+| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Invalid configuration: … \| Warning: mergeStrategy \| Warning: No Business Key \| Missing Required System Columns** | Validation checks — rendered only when the node's annotations have a problem (listed below the table). |
 | **Check Last Modified Column - NULL Values (`<column>`)** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only when `@writeMode("truncateInsert")` is set — clears the target before the load. |
@@ -900,6 +982,21 @@ Every run of a Fact Node of materialization type table runs its configured data 
 | **Optimize Table** | Executed only when [`@optimize`](#optimize) is set — `OPTIMIZE TABLE … FINAL` merges the table's parts after the load, before Post-SQL. |
 | **Post-SQL `<n>`** | Each `@postSQL` statement, in the order they appear. |
 | **`<column>: <test>` \| Post Load Test `<n>`** | Column-level data quality tests and node-level `@tests(..., "After")` tests, run after the load. |
+
+**Validation checks fire on:**
+
+* the SELECT returns the same column name twice
+* two columns share an `@id` value
+* a column without `@id`
+* an unrecognised `@mergeStrategy`
+* an explicit strategy without a business key
+* a missing or repeated `@lastModifiedTracking` column
+* a `@lastModifiedTracking` column that cannot detect newer rows
+* a tracking/key annotation the strategy ignores (non-failing)
+* an `@engine` that is not a MergeTree-family engine
+* `@orderBy` / `@primaryKey` on a ReplacingMergeTree
+* a ReplacingMergeTree without a business key, `SYSTEM_VERSION` (Dimension) or `@isSystemUpdateDate` column
+* a missing system column
 
 #### Fact Redeployment
 
@@ -1877,7 +1974,7 @@ Adds a `DEFAULT` expression to the column.
 | Parameter | Description |
 |-----------|-------------|
 | `hash_name` | Hash name used across columns to identify the columns included in the hash. |
-| `algo` | **(optional)** Hashing function. `MD5`, `SHA1`, `SHA224`, `SHA256`, `SHA384` and `SHA512` (any case) return a lowercase hex `String`. Any other ClickHouse hash function (e.g. `cityHash64`, `xxHash64`, `sipHash64`) is called as written. These return a `UInt64`, but Coalesce types every `get_hash` column as `String`, so the number is stored as its digits (e.g. `'7740249813402470115'`); wrap the call for a numeric column: `toUInt64({{ get_hash('GH', 'cityHash64') }})`. Defaults to `SHA1`. |
+| `algo` | **(optional)** Hashing function. `MD5`, `SHA1`, `SHA224`, `SHA256`, `SHA384` and `SHA512` (any case) return a lowercase hex `String`. Any other ClickHouse hash function (e.g. `cityHash64`, `xxHash64`, `sipHash64`) is called as written and stored as text — see the `cityHash64` example below. Defaults to `SHA1`. |
 | `delimiter` | **(optional)** Delimiter used to separate column values when generating the hash. Defaults to `\|\|` and can be customized; `''` concatenates without one. |
 
 * Each value is converted with `toString()`, and NULL is hashed as the text `'null'`.
