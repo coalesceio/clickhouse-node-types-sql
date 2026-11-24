@@ -389,10 +389,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {%- elif col.isSystemCurrentFlag %}
                     'N'
                     {%- elif col.isSystemEndDate %}
-                    {#- one unit of the column's own precision, typed as in ch_high_date #}
-                    {%- set dt = col.dataType | default('', true) | lower | replace(' ', '') %}
-                    {%- set dt = dt[9:-1] if dt.startswith('nullable(') else dt %}
-                    {{ loadTimestamp }} - {{ 'toIntervalMillisecond(1)' if dt.startswith('datetime64') or not dt.startswith('date') else ('toIntervalSecond(1)' if dt.startswith('datetime') else 'toIntervalDay(1)') }}
+                    {#- one unit of the column's own precision — see ch_expiry_interval() #}
+                    {{ loadTimestamp }} - {{ ch_expiry_interval(col) }}
                     {%- else %}
                     `TGT_{{ col.name }}`
                     {%- endif %}

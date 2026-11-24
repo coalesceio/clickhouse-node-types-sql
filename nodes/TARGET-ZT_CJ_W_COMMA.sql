@@ -1,0 +1,7 @@
+@id("7f3c2a10-0004-4c1e-9a11-0000000000c5")
+@nodeType("SQLWork")
+SELECT
+    `a`.`a_id`                             AS `a_id`   @id("cj0e01"),
+    `a`.`a_name`                           AS `a_name` @id("cj0e02"),
+    `b`.`b_code`                           AS `b_code` @id("cj0e03")
+FROM {{ ref('TARGET', 'ZT_CJ_A') }} `a`, {{ ref('TARGET', 'ZT_CJ_B') }} `b`

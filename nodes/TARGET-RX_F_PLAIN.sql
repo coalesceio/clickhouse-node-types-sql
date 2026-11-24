@@ -6,5 +6,5 @@ SELECT
     `o_orderkey`                             AS `o_orderkey`         @id("1a0001"),
     `o_custkey`                              AS `o_custkey`          @id("1a0002"),
     `o_totalprice`                           AS `o_totalprice`       @id("1a0003"),
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_CREATE_DATE` @id("1a0008") @isSystemCreateDate
+    now64(6)                                 AS `SYSTEM_CREATE_DATE` @id("1a0008") @isSystemCreateDate
 FROM {{ ref('SRC', 'rx_orders') }} `orders`

@@ -7,5 +7,5 @@ SELECT
     `ps_partkey`                             AS `ps_partkey`         @id("1e0001") @notNull,
     `ps_suppkey`                             AS `ps_suppkey`         @id("1e0002") @notNull,
     `ps_availqty`                            AS `ps_availqty`        @id("1e0003"),
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_CREATE_DATE` @id("1e0008") @isSystemCreateDate
+    now64(6)                                 AS `SYSTEM_CREATE_DATE` @id("1e0008") @isSystemCreateDate
 FROM {{ ref('SRC', 'rx_partsupp') }} `partsupp`

@@ -614,7 +614,7 @@ macroString: |-
     source value that increases when the row changes: not a business key, surrogate key or
     system column, a date/time or numeric type, and derived from at least one source column
     (Coalesce's column lineage in sources[0].columns[].sourceColumns; a constant or
-    CURRENT_TIMESTAMP has none). Used by the Dimension and Fact validators under
+    now64() has none). Used by the Dimension and Fact validators under
     @mergeStrategy("lastModified").
   ===========================================================================#}
   {%- macro validate_last_modified_column(hardFail=false) -%}
@@ -706,7 +706,7 @@ macroString: |-
               {%- set nsProblems.items = nsProblems.items + ['A ReplacingMergeTree keeps one row per business key, but no column is marked @isBusinessKey, so every row would be collapsed into one. Mark the business key with @isBusinessKey, or use @engine("MergeTree").'] -%}
           {%- endif -%}
           {%- if not isAllColumnMatch and not nsNodeVariables.desiredVersionColumn -%}
-              {%- set nsProblems.items = nsProblems.items + [{'text': 'A ReplacingMergeTree needs a version argument to keep the latest copy of a row, but no column is marked @isSystemUpdateDate (or the engine names no column of the node). Add the column:', 'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate @notNull'}] -%}
+              {%- set nsProblems.items = nsProblems.items + [{'text': 'A ReplacingMergeTree needs a version argument to keep the latest copy of a row, but no column is marked @isSystemUpdateDate (or the engine names no column of the node). Add the column:', 'example': 'now64(6) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate'}] -%}
           {%- endif -%}
       {%- endif -%}
       {%- if nsProblems.items %}
@@ -726,9 +726,10 @@ macroString: |-
 
   {#===========================================================================
     validate_update_date_not_null(): on a ReplacingMergeTree, a non-failing "Warning: @isSystemUpdateDate
-    without @notNull" when the @isSystemUpdateDate column (the engine's version argument) is not marked @notNull. Like every column it is then
-    Nullable(...) (see ch_column_type()), which ClickHouse rejects for a version argument. The flow
-    continues and ClickHouse's own error stops the CREATE / ALTER.
+    without @notNull" when the @isSystemUpdateDate column (the engine's version argument) is nullable: its
+    nullability is inferred from the SQL (now64(6) is not null; a column read from a Nullable upstream column
+    is Nullable) unless @notNull forces not null. It is then Nullable(...) (see ch_column_type()), which
+    ClickHouse rejects for a version argument. The flow continues and ClickHouse's own error stops the CREATE / ALTER.
   ===========================================================================#}
   {%- macro validate_update_date_not_null() -%}
       {%- set updateDateCol = nsNodeVariables.desiredVersionColumn -%}
@@ -739,9 +740,9 @@ macroString: |-
       {%- if nsNodeVariables.desiredEngineReplacing and updateDateCol and nsUpdateDate.nullable %}
           {{ test_stage('Warning: @isSystemUpdateDate without @notNull', true) }}
           -- `{{ updateDateCol }}` (@isSystemUpdateDate) is the ReplacingMergeTree's version argument: ReplacingMergeTree(`{{ updateDateCol }}`).
-          -- Without @notNull it is Nullable(...), like every column, and ClickHouse rejects a Nullable version argument: the CREATE (or the ALTER on a redeploy) fails with ClickHouse's error.
-          -- Fix: add @notNull to the column's annotations.
-          --    Example: CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `{{ updateDateCol }}` @isSystemUpdateDate @notNull
+          -- The column is Nullable (it is read from a Nullable upstream column), and ClickHouse rejects a Nullable version argument: the CREATE (or the ALTER on a redeploy) fails with ClickHouse's error.
+          -- Fix: add @notNull to the column's annotations, or use now64(6), which is not null.
+          --    Example: now64(6) AS `{{ updateDateCol }}` @isSystemUpdateDate
           SELECT 1
       {%- endif -%}
   {%- endmacro -%}
@@ -1104,7 +1105,7 @@ macroString: |-
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': false,
               'annotation': '@isSurrogateKey',
-              'example': 'generateUUIDv4() AS `' ~ node.name ~ '_KEY` @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")',
+              'example': 'generateUUIDv4() AS `' ~ node.name ~ '_KEY` @isSurrogateKey @defaultValue("generateUUIDv4()")',
               'reason': 'Recommended for SCD Type 2, to give tables a stable per-version join key. Ignore this warning if you are managing your own surrogate key logic (e.g. a sequence NEXTVAL) instead of using @isSurrogateKey.'
           }] -%}
       {%- endif -%}
@@ -1115,7 +1116,7 @@ macroString: |-
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': isUuidKey,
               'annotation': '@defaultValue on ' ~ col.name,
-              'example': 'generateUUIDv4() AS `' ~ col.name ~ '` @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")',
+              'example': 'generateUUIDv4() AS `' ~ col.name ~ '` @isSurrogateKey @defaultValue("generateUUIDv4()")',
               'reason': ('A UUID surrogate key needs @defaultValue("generateUUIDv4()"): new rows and new SCD Type 2 versions take their key from it.'
                          if isUuidKey else
                          'Without @defaultValue, new rows and new SCD Type 2 versions take the value the SELECT computes for ' ~ col.name ~ ', so the SELECT must give every new row a unique key. @defaultValue("generateUUIDv4()") on a UUID column does this for you.')
@@ -1123,14 +1124,14 @@ macroString: |-
       {%- endfor -%}
 
       {# The surrogate key must be NOT NULL. It is not forced in the column type (ch_column_type()), so that the
-         column's nullability in Coalesce matches the table and adding @notNull later is not a column change:
-         a surrogate key without @notNull stops the create and the run. #}
+         column's nullability in Coalesce matches the table: a nullable surrogate key (read from a Nullable upstream
+         column, without @notNull) stops the create and the run. generateUUIDv4() is inferred not null. #}
       {%- for col in columns if col.isSurrogateKey and col.nullable != false -%}
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': true,
               'annotation': '@notNull on ' ~ col.name,
               'example': 'generateUUIDv4() AS `' ~ col.name ~ '` @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")',
-              'reason': 'The surrogate key (@isSurrogateKey) identifies every row and must never be NULL. Without @notNull the column is Nullable, in the table and in the node\'s mapping. Add @notNull to ' ~ col.name ~ '.'
+              'reason': 'The surrogate key (@isSurrogateKey) identifies every row and must never be NULL. The column is Nullable, in the table and in the node\'s mapping. Add @notNull to ' ~ col.name ~ ', or use generateUUIDv4(), which is not null.'
           }] -%}
       {%- endfor -%}
 
@@ -1139,8 +1140,8 @@ macroString: |-
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': true,
               'annotation': '@isSystemCreateDate',
-              'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_CREATE_DATE` @isSystemCreateDate',
-              'reason': 'Required because @mergeStrategy("changeTracking"/"lastModified") does change detection against the existing target row: SYSTEM_CREATE_DATE is carried through unchanged from that row into CHANGE_DETECTION so its original insert timestamp is preserved on every update, and only stamped with CURRENT_TIMESTAMP the one time a business key is first inserted.'
+              'example': 'now64(6) AS `SYSTEM_CREATE_DATE` @isSystemCreateDate',
+              'reason': 'Required because @mergeStrategy("changeTracking"/"lastModified") does change detection against the existing target row: SYSTEM_CREATE_DATE is carried through unchanged from that row into CHANGE_DETECTION so its original insert timestamp is preserved on every update, and only stamped with the load time the one time a business key is first inserted.'
           }] -%}
       {%- endif %}
 
@@ -1151,14 +1152,14 @@ macroString: |-
               {%- set missingSystemColumns.items = missingSystemColumns.items + [{
                   'required': true,
                   'annotation': '@isSystemUpdateDate',
-                  'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate' ~ (' @notNull' if nsNodeVariables.desiredEngineReplacing else ''),
-                  'reason': 'Required because this is an SCD Type 2 dimension: SYSTEM_UPDATE_DATE is carried through from the current target row into CHANGE_DETECTION/MERGE_ROWS so it can be stamped with CURRENT_TIMESTAMP whenever a new or changed version is inserted, marking when that version became active.'
+                  'example': 'now64(6) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate',
+                  'reason': 'Required because this is an SCD Type 2 dimension: SYSTEM_UPDATE_DATE is carried through from the current target row into CHANGE_DETECTION/MERGE_ROWS so it can be stamped with the load time whenever a new or changed version is inserted, marking when that version became active.'
               }] -%}
           {%- else -%}
               {%- set missingSystemColumns.items = missingSystemColumns.items + [{
                   'required': true,
                   'annotation': '@isSystemUpdateDate',
-                  'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate' ~ (' @notNull' if nsNodeVariables.desiredEngineReplacing else ''),
+                  'example': 'now64(6) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate',
                   'reason': 'Required for SCD Type 1: without it there\'s no way to tell when a row\'s attributes were last changed — SYSTEM_CREATE_DATE is set once and never touched again.'
               }] -%}
           {%- endif -%}
@@ -1274,6 +1275,32 @@ macroString: |-
           SELECT 1 AS MESSAGE
           {%- endif -%}
       {%- endif -%}
+
+      {#- The load writes the open end date itself (ch_high_date()): the largest value of the @isSystemEndDate
+          column's type, whatever the SELECT gives. A type that ends before 2299 is reported, so the value is
+          not changed silently. Info only. #}
+      {%- for col in columns if col.isSystemEndDate -%}
+          {%- set dt = col.dataType | default('', true) | lower | replace(' ', '') -%}
+          {%- set dt = dt[9:-1] if dt.startswith('nullable(') else dt -%}
+          {%- if dt.startswith('datetime64') -%}
+              {%- set openEnd = '2262-04-11 23:47:16.854775807' if ch_datetime64_precision(col) | trim == '9' else '' -%}
+          {%- elif dt.startswith('datetime') -%}
+              {%- set openEnd = '2106-02-07 06:28:15' -%}
+          {%- elif dt.startswith('date32') -%}
+              {%- set openEnd = '' -%}
+          {%- elif dt.startswith('date') -%}
+              {%- set openEnd = '2149-06-06' -%}
+          {%- else -%}
+              {%- set openEnd = '' -%}
+          {%- endif -%}
+          {%- if openEnd %}
+          {{ test_stage('Info: Open end date ' ~ openEnd, true) }}
+          -- `{{ col.name }}` (@isSystemEndDate) is {{ col.dataType }}: the latest value it can hold is {{ openEnd }}.
+          -- The current version of each row (and the zero key record) gets {{ openEnd }} as its open end date, not the value in the SELECT.
+          -- For a 2299-12-31 open end date use DateTime64(6): CAST('2299-12-31 23:59:59.999999' AS DateTime64(6)), or Date32: CAST('2299-12-31' AS Date32).
+          SELECT 1 AS MESSAGE
+          {%- endif -%}
+      {%- endfor -%}
   {%- endmacro -%}
 
   {#===========================================================================
@@ -1375,8 +1402,8 @@ macroString: |-
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': true,
               'annotation': '@isSystemCreateDate',
-              'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_CREATE_DATE` @isSystemCreateDate',
-              'reason': 'Required because @mergeStrategy("changeTracking"/"lastModified") does change detection against the existing target row: SYSTEM_CREATE_DATE is carried through unchanged from that row into CHANGE_DETECTION so its original insert timestamp is preserved on every update, and only stamped with CURRENT_TIMESTAMP the one time a business key is first inserted.'
+              'example': 'now64(6) AS `SYSTEM_CREATE_DATE` @isSystemCreateDate',
+              'reason': 'Required because @mergeStrategy("changeTracking"/"lastModified") does change detection against the existing target row: SYSTEM_CREATE_DATE is carried through unchanged from that row into CHANGE_DETECTION so its original insert timestamp is preserved on every update, and only stamped with the load time the one time a business key is first inserted.'
           }] -%}
       {%- endif %}
 
@@ -1385,7 +1412,7 @@ macroString: |-
           {%- set missingSystemColumns.items = missingSystemColumns.items + [{
               'required': true,
               'annotation': '@isSystemUpdateDate',
-              'example': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate' ~ (' @notNull' if nsNodeVariables.desiredEngineReplacing else ''),
+              'example': 'now64(6) AS `SYSTEM_UPDATE_DATE` @isSystemUpdateDate',
               'reason': 'Required for SCD Type 1: without it there\'s no way to tell when a row\'s attributes were last changed — SYSTEM_CREATE_DATE is set once and never touched again.'
           }] -%}
       {%- endif -%}
@@ -1789,14 +1816,15 @@ macroString: |-
   {#===========================================================================
     ch_column_type(col): the column's final ClickHouse type with its nullability folded in —
     used by the CREATE, ADD COLUMN, MODIFY COLUMN and views, so they all agree.
-      - Coalesce infers SQL node columns as nullable and may wrap the type in Nullable(...);
-        a wrapped type counts as nullable unless the column is NOT NULL (@notNull).
+      - Nullability is col.nullable: Coalesce infers it from the SQL (a column read from a Nullable upstream
+        column is nullable; a literal, now64(6) or generateUUIDv4() is not), and @notNull forces not null.
+        A Nullable(...) wrapper in the data type is removed and set again from col.nullable.
       - A surrogate key (@isSurrogateKey) follows the same rule: it must be NOT NULL, but the type is not forced,
         so the column's nullability in Coalesce matches the table. validate_dimension_requirements() stops the
-        create and the run when it has no @notNull.
+        create and the run when it is nullable.
       - A ReplacingMergeTree's version argument (@isSystemUpdateDate) follows the same rule as any
-        column: Nullable unless @notNull. ClickHouse rejects a Nullable version argument, so
-        validate_update_date_not_null() warns first and ClickHouse's error stops the CREATE / ALTER.
+        column. ClickHouse rejects a Nullable version argument, so validate_update_date_not_null()
+        warns first and ClickHouse's error stops the CREATE / ALTER.
       - Types ClickHouse cannot put inside Nullable stay as they are: Array, Map, Tuple,
         Nested, JSON / Object, Dynamic, Variant, (Simple)AggregateFunction and the geo types
         (Point, Ring, LineString, MultiLineString, Polygon, MultiPolygon, Geometry).
@@ -2236,13 +2264,26 @@ macroString: |-
                       SELECT {{ colName }}
                       FROM {{ target }}
                       GROUP BY {{ colName }}
-                      HAVING COUNT(*) > 1{{ targetSettings }}
+                      HAVING count() > 1{{ targetSettings }}
                   {%- endif -%}
                   {%- if col.empty is defined -%}
+                      {#- FixedString pads to its length with zero bytes, so '' is stored as zero bytes and
+                          trimBoth (spaces only) never reaches ''. Strip the zero bytes first on FixedString,
+                          also inside Nullable / LowCardinality. Any non-string type is left to ClickHouse's
+                          own trimBoth error. #}
+                      {%- set nsEmpty = namespace(t=(col.dataType | default('') | string | lower | replace(' ', ''))) -%}
+                      {%- for _ in range(3) -%}
+                          {%- if nsEmpty.t.startswith('nullable(') and nsEmpty.t.endswith(')') -%}
+                              {%- set nsEmpty.t = nsEmpty.t[9:-1] -%}
+                          {%- elif nsEmpty.t.startswith('lowcardinality(') and nsEmpty.t.endswith(')') -%}
+                              {%- set nsEmpty.t = nsEmpty.t[15:-1] -%}
+                          {%- endif -%}
+                      {%- endfor -%}
+                      {%- set emptyExpr = "replaceAll(toString(" ~ colName ~ "), char(0), '')" if nsEmpty.t.startswith('fixedstring(') else colName -%}
                       {{ test_stage(col.name + ': empty', columnContinueOnFailure) }}
                       SELECT {{ colName }}
                       FROM {{ target }}
-                      WHERE {{ colName }} IS NOT NULL AND TRIM({{ colName }}) = ''{{ targetSettings }}
+                      WHERE {{ colName }} IS NOT NULL AND trimBoth({{ emptyExpr }}) = ''{{ targetSettings }}
                   {%- endif -%}
                   {%- set nsAccepted = namespace(values=[]) -%}
                     {%- for v in col.accepted_values | default([]) -%}
@@ -2362,13 +2403,16 @@ macroString: |-
 
   {#===========================================================================
     ch_high_date(col): the open SYSTEM_END_DATE — the largest value the column type can hold.
-    ClickHouse cannot store 2999-12-31: DateTime64 / Date32 end in 2299, DateTime at
-    2106-02-07 06:28:15, Date at 2149-06-06.
+    ClickHouse cannot store 2999-12-31: DateTime64 / Date32 end in 2299, DateTime64(9) at
+    2262-04-11 23:47:16.854775807, DateTime at 2106-02-07 06:28:15, Date at 2149-06-06.
+    validate_dimension_requirements() shows an "Info: Open end date" stage for a type that ends before 2299.
   ===========================================================================#}
   {%- macro ch_high_date(col) -%}
       {%- set dt = col.dataType | default('', true) | lower | replace(' ', '') -%}
       {%- set dt = dt[9:-1] if dt.startswith('nullable(') else dt -%}
-      {%- if dt.startswith('datetime64') -%}
+      {%- if dt.startswith('datetime64') and ch_datetime64_precision(col) | trim == '9' -%}
+          toDateTime64('2262-04-11 23:47:16.854775807', 9, 'UTC')
+      {%- elif dt.startswith('datetime64') -%}
           toDateTime64('2299-12-31 23:59:59.999999', 6)
       {%- elif dt.startswith('datetime') -%}
           toDateTime(4294967295)
@@ -2378,6 +2422,41 @@ macroString: |-
           toDate('2149-06-06')
       {%- else -%}
           '2299-12-31 23:59:59.999999'
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    ch_datetime64_precision(col): the precision of a DateTime64 column (DateTime64(6) -> 6,
+    DateTime64(3, 'UTC') -> 3, DateTime64 -> 3, ClickHouse's default). Empty for any other type.
+  ===========================================================================#}
+  {%- macro ch_datetime64_precision(col) -%}
+      {%- set dt = col.dataType | default('', true) | lower | replace(' ', '') -%}
+      {%- set dt = dt[9:-1] if dt.startswith('nullable(') else dt -%}
+      {%- if dt.startswith('datetime64') -%}
+          {%- set p = dt[11:].split(',')[0].split(')')[0] if dt[10:11] == '(' else '' -%}
+          {{- p if p else '3' -}}
+      {%- endif -%}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    ch_expiry_interval(col): one unit of an @isSystemEndDate column's precision, subtracted from the load
+    time to expire an SCD Type 2 version, so the expired version ends before the next one starts:
+    Date / Date32 -> 1 day, DateTime / DateTime64(0) -> 1 second, DateTime64(1-3) -> 100 / 10 / 1 ms,
+    DateTime64(4-6) -> 100 / 10 / 1 microseconds, DateTime64(7-9) -> 100 / 10 / 1 ns. Any other type -> 1 ms.
+  ===========================================================================#}
+  {%- macro ch_expiry_interval(col) -%}
+      {%- set dt = col.dataType | default('', true) | lower | replace(' ', '') -%}
+      {%- set dt = dt[9:-1] if dt.startswith('nullable(') else dt -%}
+      {%- if dt.startswith('datetime64') -%}
+          {%- set p = ch_datetime64_precision(col) | trim | int -%}
+          {%- if p == 0 -%}toIntervalSecond(1)
+          {%- elif p <= 3 -%}toIntervalMillisecond({{ 10 ** (3 - p) }})
+          {%- elif p <= 6 -%}toIntervalMicrosecond({{ 10 ** (6 - p) }})
+          {%- else -%}toIntervalNanosecond({{ 10 ** (9 - p) }})
+          {%- endif -%}
+      {%- elif dt.startswith('datetime') -%}toIntervalSecond(1)
+      {%- elif dt.startswith('date') -%}toIntervalDay(1)
+      {%- else -%}toIntervalMillisecond(1)
       {%- endif -%}
   {%- endmacro -%}
 

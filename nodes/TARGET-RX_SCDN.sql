@@ -1,7 +1,7 @@
 @id("b3000000-0000-4000-8000-000000000013")
 @nodeType("SQLDimension")
 SELECT
-    generateUUIDv4() AS `k` @id("d0013") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
+    generateUUIDv4() AS `k` @id("d0013") @isSurrogateKey @defaultValue("generateUUIDv4()"),
     `o`.`o_orderkey` AS `o_orderkey` @id("d1013") @isBusinessKey @notNull,
     `o`.`o_totalprice` AS `o_totalprice` @id("d2013") @notNull @isChangeTracking,
     1 AS `SYSTEM_VERSION` @id("d3013") @isSystemVersion @notNull,

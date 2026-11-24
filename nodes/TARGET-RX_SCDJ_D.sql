@@ -1,7 +1,7 @@
 @id("b3000000-0000-4000-8000-000000000011")
 @nodeType("SQLDimension")
 SELECT
-    generateUUIDv4() AS `k` @id("d011") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
+    generateUUIDv4() AS `k` @id("d011") @isSurrogateKey @defaultValue("generateUUIDv4()"),
     `c`.`c_custkey` AS `c_custkey` @id("d111") @isBusinessKey @notNull,
     `o`.`o_comment` AS `o_comment` @notNull @defaultValue("'no match'") @id("d211") @isChangeTracking,
     1 AS `SYSTEM_VERSION` @id("d311") @isSystemVersion @notNull,
