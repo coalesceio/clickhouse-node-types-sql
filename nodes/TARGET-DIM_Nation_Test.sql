@@ -1,16 +1,16 @@
-@id("6542e546-8e2a-4f86-adee-9aa3eae87597")
+@id("d1ae3e99-9e31-46c3-b992-4ba724614854")
 @nodeType("SQLDimension")
-@engine("MergeTree")
+@optimize
 SELECT
-    generateUUIDv4()                                    AS "DIM_Nation_Test_KEY" @id("854077") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
-    "n_Nationkey"                                       AS "n_Nationkey"         @id("454046") @isBusinessKey,
-    "n_Name"                                            AS "n_Name"              @id("a3f1b4"),
-    "n_Regionkey"                                       AS "n_Regionkey"         @id("610cfb"),
-    "n_Comment"                                         AS "n_Comment"           @id("1548cb") ,
-    "last_Modified"                                     AS "last_Modified"       @id("b5d395"),
-    1                                                   AS "SYSTEM_VERSION"      @id("5f5b32") @isSystemVersion,
-    'Y'                                                 AS "SYSTEM_CURRENT_FLAG" @id("fc47ea") @isSystemCurrentFlag,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)                AS "SYSTEM_CREATE_DATE"  @id("32c3da") @isSystemCreateDate,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)                AS "SYSTEM_UPDATE_DATE"  @id("26f9e8") @isSystemUpdateDate @notNull,
-    CAST('2299-12-31 23:59:59.999999' AS DateTime64(6)) AS "SYSTEM_END_DATE"     @id("4a3275") @isSystemEndDate
+    generateUUIDv4()                                    AS "DIM_Nation_Test_KEY" @id("88720f") @isSurrogateKey @defaultValue("generateUUIDv4()"),
+    "n_Nationkey"                                       AS "n_Nationkey"         @id("5550d8") @isBusinessKey,
+    "n_Name"                                            AS "n_Name"              @id("ea220e") @isChangeTracking,
+    "n_Regionkey"                                       AS "n_Regionkey"         @id("4d4c9e"),
+    "n_Comment"                                         AS "n_Comment"           @id("bf5770"),
+    "last_Modified"                                     AS "last_Modified"       @id("7a8c81"),
+    1                                                   AS "SYSTEM_VERSION"      @id("09c9bf") @isSystemVersion,
+    'Y'                                                 AS "SYSTEM_CURRENT_FLAG" @id("78fcc5") @isSystemCurrentFlag,
+    now64(6)                                            AS "SYSTEM_CREATE_DATE"  @id("39a584") @isSystemCreateDate,
+    now64(6)                                            AS "SYSTEM_UPDATE_DATE"  @id("b614c2") @isSystemUpdateDate,
+    CAST('2299-12-31 23:59:59.999999' AS DateTime64(6)) AS "SYSTEM_END_DATE"     @id("d57b28") @isSystemEndDate
 FROM {{ ref('SRC', 'Nation_Test') }} "Nation_Test"
