@@ -2,5 +2,5 @@
 @nodeType("SQLWork")
 SELECT
     CAST(number + 1 AS UInt32)                               AS `region_id` @notNull,
-    CAST(arrayElement(['North', 'South'], number + 1) AS String) AS `region_name` @notNull
+    CAST(arrayElement(['North', 'South'], number + 1) AS Nullable(String)) AS `region_name`
 FROM numbers(2)
