@@ -458,6 +458,7 @@ macroString: |-
     Also a non-failing "Warning: @final on a table": @final only changes a view's definition;
     a table's load follows the readWithFinal runtime parameter.
     And a non-failing "Warning: @optimize on a view": a view has no parts to merge.
+    And a non-failing "Warning: join_use_nulls = 1 with not-Nullable columns" (view_join_nulls_warning()).
     And a passing "Info: @optimize on a MergeTree": not needed for correct data there (the clean-up DELETE already
     removes replaced rows); the OPTIMIZE still runs, it only merges parts.
   ===========================================================================#}
@@ -495,6 +496,7 @@ macroString: |-
           -- Fix: remove @optimize, or set @materializationType("table").
           SELECT 1
       {%- endif %}
+      {{- view_join_nulls_warning() }}
       {%- if nsNodeVariables.desiredMatType == 'table' and not nsNodeVariables.desiredEngineReplacing and config is defined and config.optimize is defined %}
           {{ test_stage('Info: @optimize on a MergeTree', true) }}
           -- {{ node.name }} is a MergeTree: Clean Up Previous Data already deletes the rows each load replaces, so a plain SELECT is correct without @optimize.
@@ -845,17 +847,18 @@ macroString: |-
     subquery): its own SETTINGS then stays with it, and the statement gets its own SETTINGS clause.
     cfg = the config whose @querySettings apply (default: the node's).
     useJoinNulls (a view's @joinUseNulls, see view_final_setting()) replaces the joinUseNulls runtime
-    parameter when given: true -> join_use_nulls = 1, false -> nothing.
+    parameter when given: true -> join_use_nulls = 1, false -> join_use_nulls = 0 when pinJoinNulls
+    (the view has a JOIN, see view_has_join()), else nothing.
     useRuntime = false: the querySettings runtime parameter is not used (a view).
   ===========================================================================#}
-  {%- macro source_final_setting(srcs, useFinal=none, joinAtEnd=true, cfg=none, useJoinNulls=none, useRuntime=true) -%}
+  {%- macro source_final_setting(srcs, useFinal=none, joinAtEnd=true, cfg=none, useJoinNulls=none, useRuntime=true, pinJoinNulls=false) -%}
       {%- set applyFinal = nsReadWithFinal.value if useFinal is none else useFinal -%}
       {%- set nsQs = namespace(items=[], ignored=[], origin='') -%}
       {{- query_settings(config if cfg is none else cfg, nsQs, useRuntime) -}}
       {%- set candidates = nsQs.items
                            + (['final = 1'] if applyFinal else [])
                            + ((['join_use_nulls = 1'] if nsJoinUseNulls.value == '1' else []) if useJoinNulls is none
-                              else (['join_use_nulls = 1'] if useJoinNulls else [])) -%}
+                              else (['join_use_nulls = 1'] if useJoinNulls else (['join_use_nulls = 0'] if pinJoinNulls else []))) -%}
       {%- set srcList = srcs | default([], true) | list -%}
       {%- set lastJoin = (srcList[-1].join | default('', true)) if srcList else '' -%}
       {%- set tailText = ' ' ~ (lastJoin.split(')')[-1] | lower | replace('\n', ' ') | replace('\t', ' ') | replace('\r', ' ')) ~ ' ' -%}
@@ -918,7 +921,9 @@ macroString: |-
     takes its settings from the node only — never from the runtime parameters (readWithFinal,
     joinUseNulls, querySettings), which belong to runs:
       @final (or @final(true))               -> final = 1           (any other value or no @final: nothing)
-      @joinUseNulls (or @joinUseNulls(true)) -> join_use_nulls = 1  (any other value or none: nothing)
+      @joinUseNulls (or @joinUseNulls(true)) -> join_use_nulls = 1  (any other value or none: join_use_nulls = 0
+                                                when the view has a JOIN, ClickHouse's default, so the view
+                                                reads the same whatever the reader's join_use_nulls; else nothing)
       @querySettings                         -> those settings      (none: nothing)
     view_runtime_parameter_note() tells the deployer when a runtime parameter is set but not used.
     @final, @joinUseNulls and @querySettings are part of the definition compared on redeploy, so adding,
@@ -928,7 +933,117 @@ macroString: |-
       {%- set cfg = state.config if (state.config is defined and state.config) else {} -%}
       {%- set useFinal = view_annotation_on(cfg, 'final') == 'true' -%}
       {%- set useJoinNulls = view_annotation_on(cfg, 'joinUseNulls') == 'true' -%}
-      {{- source_final_setting(state.sources, useFinal, cfg=cfg, useJoinNulls=useJoinNulls, useRuntime=false) -}}
+      {%- set pinJoinNulls = view_has_join(state.sources) == 'true' -%}
+      {{- source_final_setting(state.sources, useFinal, cfg=cfg, useJoinNulls=useJoinNulls, useRuntime=false, pinJoinNulls=pinJoinNulls) -}}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    view_has_join(srcs): 'true' when the node's SQL (its CTEs and its FROM / JOIN part) has a JOIN
+    that join_use_nulls applies to, else ''. Comments, 'string literals' and `quoted` / "quoted"
+    identifiers are removed first, so a commented-out JOIN, 'left join' in a string or a column named
+    `join` / JOIN_ID does not count. ARRAY JOIN (and LEFT ARRAY JOIN) is not counted: join_use_nulls
+    does not apply to it.
+    Why it matters: a view stores its column types when it is created, but runs its SELECT with the
+    settings of whoever reads it. Without its own join_use_nulls, a reader with join_use_nulls = 1 (e.g.
+    a downstream load with the joinUseNulls runtime parameter) makes the joined columns Nullable, and
+    ClickHouse rejects the read ("returned Nullable column having not Nullable type"). So a view with a
+    JOIN always writes join_use_nulls (see view_final_setting()).
+  ===========================================================================#}
+  {%- macro view_has_join(srcs) -%}
+      {%- set srcList = srcs | default([], true) | list -%}
+      {%- set nsText = namespace(raw='', noBlock='', noLine=[], plain='') -%}
+      {%- if srcList -%}
+          {%- set nsText.raw = (srcList[0].cteString | default('', true)) ~ '\n' ~ (srcList[0].join | default('', true)) -%}
+      {%- endif -%}
+      {#- /* block comments */ -#}
+      {%- set blockParts = nsText.raw.split('/*') -%}
+      {%- set nsText.noBlock = blockParts[0] -%}
+      {%- for part in blockParts[1:] -%}
+          {%- set nsText.noBlock = nsText.noBlock ~ ' ' ~ (part.split('*/')[1:] | join('*/')) -%}
+      {%- endfor -%}
+      {#- -- line comments -#}
+      {%- for line in nsText.noBlock.split('\n') -%}
+          {%- set nsText.noLine = nsText.noLine + [line.split('--')[0]] -%}
+      {%- endfor -%}
+      {%- set nsText.plain = nsText.noLine | join(' ') -%}
+      {#- 'literals', `identifiers`, "identifiers": keep only the text outside the quotes -#}
+      {%- for quote in ["'", '`', '"'] -%}
+          {%- set nsQ = namespace(kept=[]) -%}
+          {%- for piece in nsText.plain.split(quote) -%}
+              {%- if loop.index0 % 2 == 0 -%}
+                  {%- set nsQ.kept = nsQ.kept + [piece] -%}
+              {%- endif -%}
+          {%- endfor -%}
+          {%- set nsText.plain = nsQ.kept | join(' ') -%}
+      {%- endfor -%}
+      {%- set norm = ' ' ~ (nsText.plain | lower | replace('\r', ' ') | replace('\t', ' ') | replace('(', ' ') | replace(')', ' ') | replace(',', ' ')) ~ ' ' -%}
+      {%- set norm = norm | replace('    ', ' ') | replace('   ', ' ') | replace('  ', ' ') | replace('  ', ' ') -%}
+      {%- set joinCount = (norm.split(' join ') | length) - 1 -%}
+      {%- set arrayJoinCount = (norm.split(' array join ') | length) - 1 -%}
+      {{- 'true' if joinCount > arrayJoinCount else '' -}}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    own_join_use_nulls(srcs): '1' / '0' when the SETTINGS at the very end of the node's SQL sets
+    join_use_nulls (the node's own value, kept by source_final_setting()), else ''.
+  ===========================================================================#}
+  {%- macro own_join_use_nulls(srcs) -%}
+      {%- set srcList = srcs | default([], true) | list -%}
+      {%- set lastJoin = (srcList[-1].join | default('', true)) if srcList else '' -%}
+      {%- set tailText = ' ' ~ (lastJoin.split(')')[-1] | lower | replace('\n', ' ') | replace('\t', ' ') | replace('\r', ' ')) ~ ' ' -%}
+      {%- set nsOwnJun = namespace(value='') -%}
+      {%- if ' settings ' in tailText -%}
+          {%- for part in tailText.split(' settings ')[-1].split(',') if (part.split('=')[0] | trim) == 'join_use_nulls' -%}
+              {%- set nsOwnJun.value = '1' if (part.split('=')[1:] | join('=') | trim | trim('"') | trim("'")) in ['1', 'true'] else '0' -%}
+          {%- endfor -%}
+      {%- endif -%}
+      {{- nsOwnJun.value -}}
+  {%- endmacro -%}
+
+  {#===========================================================================
+    view_join_nulls_warning(): non-failing "Warning: join_use_nulls = 1 with not-Nullable columns" on a
+    view with a JOIN whose SELECT runs with join_use_nulls = 1 (@joinUseNulls, or join_use_nulls = 1 in
+    the node SQL's own SETTINGS). ClickHouse then makes every column from the joined side Nullable, and
+    reading a column the view declares not Nullable fails on every query, whatever the data. The stage
+    lists the columns that are not Nullable but could be (Array, Map, Tuple, geo, JSON, ... cannot be
+    Nullable and are not affected). Non-failing: a listed column can come from the other side of the
+    join, which join_use_nulls does not change. System columns of a Dimension / Fact view are constants,
+    not join columns, and are left out.
+  ===========================================================================#}
+  {%- macro view_join_nulls_warning() -%}
+      {%- if nsNodeVariables.desiredMatType == 'view' and sources is defined and view_has_join(sources) == 'true' -%}
+          {%- set cfg = config if (config is defined and config) else {} -%}
+          {%- set ownValue = own_join_use_nulls(sources) -%}
+          {%- set nsJun = namespace(value=('1' if view_annotation_on(cfg, 'joinUseNulls') == 'true' else '0'), source='@joinUseNulls') -%}
+          {%- if ownValue -%}
+              {%- set nsJun.value = ownValue -%}
+              {%- set nsJun.source = "the node's own SETTINGS" -%}
+          {%- endif -%}
+          {%- if nsJun.value == '1' -%}
+              {%- set nsCols = namespace(names=[]) -%}
+              {%- for col in columns if col.nullable == false
+                      and not (col.isSurrogateKey or col.isSystemVersion or col.isSystemCurrentFlag
+                               or col.isSystemCreateDate or col.isSystemUpdateDate or col.isSystemEndDate) -%}
+                  {%- set colType = ch_column_type(col) | lower -%}
+                  {%- set family = colType.split('(')[0] | trim -%}
+                  {%- if family not in ['nullable', 'array', 'map', 'tuple', 'nested', 'json', 'object', 'dynamic', 'variant',
+                                        'aggregatefunction', 'simpleaggregatefunction',
+                                        'point', 'ring', 'linestring', 'multilinestring', 'polygon', 'multipolygon', 'geometry']
+                         and not colType.startswith('lowcardinality(nullable(') -%}
+                      {%- set nsCols.names = nsCols.names + [col.name ~ ' ' ~ ch_column_type(col)] -%}
+                  {%- endif -%}
+              {%- endfor -%}
+              {%- if nsCols.names %}
+          {{ test_stage('Warning: join_use_nulls = 1 with not-Nullable columns', true) }}
+          -- The view {{ node.name }} has a JOIN and its SELECT runs with join_use_nulls = 1 ({{ nsJun.source }}): ClickHouse makes every column taken from the joined side of a LEFT / RIGHT / FULL JOIN Nullable.
+          -- These columns are not Nullable in the view: {{ nsCols.names | join(', ') }}.
+          -- Reading one of them that comes from the joined side fails on every query, even when every row has a match: "Query from view ... returned Nullable column having not Nullable type".
+          -- A column from the other side of the join (or used in the ON clause) is not affected and can be ignored here.
+          -- Fix: CAST each joined column to Nullable(<type>) in the SELECT, e.g. CAST(`r`.`region_name` AS Nullable(String)), or remove @joinUseNulls.
+          SELECT 1
+              {%- endif -%}
+          {%- endif -%}
+      {%- endif -%}
   {%- endmacro -%}
 
   {#===========================================================================
@@ -956,8 +1071,8 @@ macroString: |-
       {%- if nsReadWithFinal.value and view_annotation_on(cfg, 'final') != 'true' -%}
           {%- set nsNote.lines = nsNote.lines + ['readWithFinal = true: this view does not read with FINAL. Add @final to read its ReplacingMergeTree sources with FINAL.'] -%}
       {%- endif -%}
-      {%- if nsJoinUseNulls.value == '1' and view_annotation_on(cfg, 'joinUseNulls') != 'true' -%}
-          {%- set nsNote.lines = nsNote.lines + ['joinUseNulls = true: this view does not set join_use_nulls = 1 (an unmatched LEFT JOIN column follows the ClickHouse setting of whoever reads it). Add @joinUseNulls for NULL.'] -%}
+      {%- if nsJoinUseNulls.value == '1' and view_annotation_on(cfg, 'joinUseNulls') != 'true' and own_join_use_nulls(sources) != '1' -%}
+          {%- set nsNote.lines = nsNote.lines + ['joinUseNulls = true: this view does not set join_use_nulls = 1' ~ (" (its JOINs run with join_use_nulls = 0, ClickHouse's default: an unmatched column gets its type's default value, '' / 0 / nil UUID)" if view_has_join(sources) == 'true' else '') ~ '. Add @joinUseNulls for NULL.'] -%}
       {%- endif -%}
       {%- if nsRuntimeQuerySettings.items and not (cfg.querySettings is defined and cfg.querySettings) -%}
           {%- set nsNote.lines = nsNote.lines + ['querySettings (' ~ (nsRuntimeQuerySettings.items | join(', ')) ~ '): not applied to this view. Add @querySettings for settings of its own.'] -%}
