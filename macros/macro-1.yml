@@ -15,7 +15,7 @@ macroString: |-
                 deploy and the run of every Dimension / Fact without @engine (Invalid configuration: engine)
                   ""                    not set: the built-in default, MergeTree (default)
   ===========================================================================#}
-  {%- set packageParameter = namespace(engine = "ReplacingMergeTree") -%}
+  {%- set packageParameter = namespace(engine = "") -%}
 
   {#- readWithFinal in effect: the runtime parameter, else false.
       nsReadWithFinal.origin says which ('runtime parameter', 'not set'). #}
@@ -552,9 +552,13 @@ macroString: |-
     names and repeated ids. Used by the Dimension and Fact validators.
   ===========================================================================#}
   {%- macro validate_column_ids(hardFail=false) -%}
-      {# A column without a real @id has id equal to its name. When the SELECT repeats a column name, Coalesce renames the extra copy by appending a number (SYSTEM_CREATE_DATE -> SYSTEM_CREATE_DATE1) and drops its @id, so it lands here too — report that as a duplicate name rather than a missing ID. #}
+      {# A column without a real @id has id equal to its name. When the SELECT repeats a column name, Coalesce renames the extra copy by appending a number (SYSTEM_CREATE_DATE -> SYSTEM_CREATE_DATE1) — report that as a duplicate name rather than a missing ID.
+         The copy keeps its own @id when it has one (the SQL editor gives every column one), so a renamed copy is found by its name instead: <other column><number>, and that alias is not written in the node's SQL (node.override.create.script). A deliberate alias such as REGIONKEY1 is written there, so it is not a duplicate (and is a missing ID when it has no @id). Without the node's SQL only columns without an @id can be told apart, as before. #}
+      {%- set nodeSql = (node.override.create.script | default('', true)) if (node is defined and node.override is defined and node.override and node.override.create is defined and node.override.create) else '' -%}
+      {%- set sqlNorm = ' ' ~ (nodeSql | lower | replace('\r', ' ') | replace('\n', ' ') | replace('\t', ' ')) ~ ' ' -%}
+      {%- set sqlNorm = sqlNorm | replace('    ', ' ') | replace('   ', ' ') | replace('  ', ' ') | replace('  ', ' ') -%}
       {%- set idCheck = namespace(missing=[], duplicates=[]) -%}
-      {%- for col in columns if col.id == col.name -%}
+      {%- for col in columns -%}
           {%- set dup = namespace(of=none) -%}
           {%- for other in columns if other.name != col.name and col.name[:other.name | length] == other.name -%}
               {%- set suffix = col.name[other.name | length:] -%}
@@ -562,9 +566,12 @@ macroString: |-
                   {%- set dup.of = other.name -%}
               {%- endif -%}
           {%- endfor -%}
-          {%- if dup.of is not none -%}
+          {%- set alias = col.name | lower -%}
+          {%- set aliasWritten = (' as `' ~ alias ~ '`') in sqlNorm or (' as "' ~ alias ~ '"') in sqlNorm
+                                 or (' as ' ~ alias ~ ' ') in sqlNorm or (' as ' ~ alias ~ ',') in sqlNorm -%}
+          {%- if dup.of is not none and (not aliasWritten if nodeSql else col.id == col.name) -%}
               {%- set idCheck.duplicates = idCheck.duplicates + [{"of": dup.of, "renamed": col.name}] -%}
-          {%- else -%}
+          {%- elif col.id == col.name -%}
               {%- set idCheck.missing = idCheck.missing + [col.name] -%}
           {%- endif -%}
       {%- endfor -%}
@@ -574,9 +581,11 @@ macroString: |-
           {%- for d in idCheck.duplicates -%}
               {%- set described.items = described.items + ["'" ~ d.of ~ "' (extra copy renamed to " ~ d.renamed ~ ")"] -%}
           {%- endfor -%}
-          {# A deliberate alias like REGIONKEY1 without an @id is indistinguishable from a renamed copy, so the message covers both. #}
+          {# Without the node's SQL, a deliberate alias like REGIONKEY1 without an @id is indistinguishable from a renamed copy, so the message covers both. #}
           {%- set renamed = idCheck.duplicates | map(attribute='renamed') | list -%}
-          {%- if renamed | length > 1 -%}
+          {%- if nodeSql -%}
+              {%- set aliasHint = '' -%}
+          {%- elif renamed | length > 1 -%}
               {%- set aliasHint = "If " ~ (renamed | join(', ')) ~ ' are deliberate aliases rather than copies, add a unique @id("<6 hex digits>") to each of them instead.' -%}
           {%- else -%}
               {%- set aliasHint = "If " ~ renamed[0] ~ ' is a deliberate alias rather than a copy, add a unique @id("<6 hex digits>") to it instead.' -%}
