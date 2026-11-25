@@ -1630,7 +1630,12 @@ The table's `PARTITION BY` key. Each argument is one term — a column or an exp
 | `min_bytes_for_wide_part` / `min_rows_for_wide_part` | Below this size a part is stored compact (one file); above it wide (one file per column). | `min_bytes_for_wide_part = 0` stores every part wide, so reading a few columns of a wide table is faster. |
 | `allow_nullable_key` | Lets `Nullable` columns be key terms. | Added automatically when the table has a key (see above). |
 
-Only **table settings** belong here — ClickHouse's MergeTree-family settings, which apply to MergeTree and ReplacingMergeTree tables alike. A **query setting** (such as `max_threads`) is not stored with the table: ClickHouse can accept it in the first `CREATE TABLE`, and a redeploy's **Modify Settings** then fails with *Unknown setting*. Query settings go in [`@querySettings`](#querysettings).
+Only **table settings** belong here — ClickHouse's MergeTree-family settings, the names listed in `system.merge_tree_settings`, which apply to MergeTree and ReplacingMergeTree tables alike. **Query settings** (the names in `system.settings`, such as `max_threads`, `max_memory_usage` or `join_algorithm`) go in [`@querySettings`](#querysettings). The two are not interchangeable, and the node types do not check which kind a name is:
+
+* **A query setting in `@settings`** is accepted by the first `CREATE TABLE`, but ClickHouse only applies it to that `CREATE` statement: it is not stored with the table and the loads never run with it. Every later redeploy that changes it fails (**Modify Settings**: *Unknown setting*), and so does removing it (**Reset Settings**: *Cannot reset setting … because it doesn't exist for MergeTree engines family*). The node can then only be deployed again after a change that recreates the table — e.g. to `@partitionBy`, `@primaryKey`, or `@orderBy` without `@primaryKey` — which loses its data (see [Sort Key and Partition Key Changes](#sort-key-and-partition-key-changes)), or by removing the node, deploying, and adding it back.
+* **A table setting in `@querySettings`** is added to the load as a query setting, and the load fails: *Setting index_granularity is neither a builtin setting nor …* (`UNKNOWN_SETTING`). Move it to `@settings`.
+
+A few names (e.g. `max_partitions_to_read`, `parts_to_throw_insert`, `async_insert`) exist as both; in `@settings` they are stored with the table.
 
 ##### `@querySettings`
 
@@ -1647,7 +1652,7 @@ Only **table settings** belong here — ClickHouse's MergeTree-family settings, 
 * **Merged with the environment's, per setting:** a setting named in `@querySettings` overrides the same setting in the [`querySettings`](#runtime-parameters) runtime parameter; every other runtime setting still applies to the table (so an environment-wide memory limit stays in force). Views use only `@querySettings`. A `SETTINGS` clause at the end of the node's SQL overrides both.
 * **`final` and `join_use_nulls` are ignored here**, with a **Warning: final / join_use_nulls in querySettings** stage. They change the data, not only how it is computed, so they have their own parameters: [`readWithFinal`](#runtime-parameters) / [`@final`](#final) and [`joinUseNulls`](#runtime-parameters) / [`@joinUseNulls`](#joinusenulls).
 * **Changing it:** edit `@querySettings`, deploy, then run. A table's next load uses the new values after the deploy (a metadata update); a view is recreated with them. Changing a setting in the `querySettings` runtime parameter has no effect on a node whose `@querySettings` names it.
-* Not the same as [`@settings`](#settings), which are table settings stored with the table.
+* Not the same as [`@settings`](#settings), which are table settings stored with the table. Only query settings (the names in `system.settings`) belong here, and only table settings (`system.merge_tree_settings`) in `@settings` — see [`@settings`](#settings) for what happens when they are mixed.
 * **`transform_null_in`:** Clean Up Previous Data (MergeTree Dimension / Fact) runs with `transform_null_in = 1` by default, so rows with a `NULL` business key are cleaned up too. A `transform_null_in` in `@querySettings` / `querySettings` is respected there as well. With `0` and a nullable business key column, a non-failing **Warning: transform_null_in = 0 in querySettings** stage explains that older copies of rows with a `NULL` key are not removed. Mark the business key `@notNull` to avoid it.
 
 The load then ends with:
