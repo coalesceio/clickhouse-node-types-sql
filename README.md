@@ -1136,7 +1136,7 @@ LEFT JOIN regions r ON r.region_id = c.region_id
 | `true` | `NULL` | `UNKNOWN` |
 | `false`, with ClickHouse's default | `''` (empty) | `''` — `coalesce()` only replaces `NULL` |
 
-* Applies to every load. Not views: a view sets `join_use_nulls = 1` only with [`@joinUseNulls`](#joinusenulls). With `readWithFinal`, both are added together: `SETTINGS final = 1, join_use_nulls = 1`.
+* Applies to every load. Not views: a view with a `JOIN` sets `join_use_nulls = 1` with [`@joinUseNulls`](#joinusenulls), else `join_use_nulls = 0`. With `readWithFinal`, both are added together: `SETTINGS final = 1, join_use_nulls = 1`.
 * Change detection, SCD Type 2 versioning and the clean-up work the same with either value — only the columns your SQL takes from a join are affected.
 * A node can still set its own value in its SQL (`SETTINGS join_use_nulls = 0`); it takes priority for that node — see [Where Query Settings Go](#where-query-settings-go).
 * With `false`, keep `join_use_nulls` the same on the ClickHouse users of every environment, so they all load the same data.
@@ -1215,7 +1215,7 @@ SELECT ... FROM a JOIN b ...                                 -- runs with max_th
 
 The package only reads the `SETTINGS` at the very end of the node's SQL, so an inner one gives no warning and is never changed.
 
-**A view keeps its own settings.** The `SETTINGS` stored in a view (its `@querySettings`, `final = 1` from `@final`, `join_use_nulls = 1` from `@joinUseNulls`) win over the settings of the query that reads it. For example, `SELECT * FROM my_view SETTINGS max_threads = 3` still runs the view's `SELECT` with the view's `max_threads`. To change a view's settings, change the node and deploy it, which recreates the view.
+**A view keeps its own settings.** The `SETTINGS` stored in a view (its `@querySettings`, `final = 1` from `@final`, `join_use_nulls = 1` from `@joinUseNulls` or `join_use_nulls = 0` on a view with a `JOIN`) win over the settings of the query that reads it. For example, `SELECT * FROM my_view SETTINGS max_threads = 3` still runs the view's `SELECT` with the view's `max_threads`. To change a view's settings, change the node and deploy it, which recreates the view.
 
 #### Views Use Node Settings Only
 
@@ -1224,14 +1224,14 @@ A view is created at deploy, not at run time, so it takes every setting from its
 | Setting | Table load (every run) | View (fixed when created) |
 |---|---|---|
 | `final` | `readWithFinal` runtime parameter | [`@final`](#final) |
-| `join_use_nulls` | `joinUseNulls` runtime parameter | [`@joinUseNulls`](#joinusenulls) |
+| `join_use_nulls` | `joinUseNulls` runtime parameter | [`@joinUseNulls`](#joinusenulls): `1`; without it `0` when the view has a `JOIN` |
 | Other query settings | [`@querySettings`](#querysettings), else the `querySettings` runtime parameter | [`@querySettings`](#querysettings) |
 
 When a runtime parameter is set that a view does not follow, the view's deploy shows a passing **Info: Runtime parameters not used by views** stage, e.g.:
 
 ```
 -- readWithFinal = true: this view does not read with FINAL. Add @final to read its ReplacingMergeTree sources with FINAL.
--- joinUseNulls = true: this view does not set join_use_nulls = 1 ... Add @joinUseNulls for NULL.
+-- joinUseNulls = true: this view does not set join_use_nulls = 1 (its JOINs run with join_use_nulls = 0, ClickHouse's default: ...). Add @joinUseNulls for NULL.
 ```
 
 ### Column Types
@@ -1745,14 +1745,29 @@ The view's `SELECT` ends with `SETTINGS join_use_nulls = 1`, fixed when the view
 
 | `@joinUseNulls` | The view's `SELECT` | An unmatched join column |
 |---|---|---|
-| Set | Ends with `SETTINGS join_use_nulls = 1` | `NULL` |
-| Not set | Nothing added, whatever `joinUseNulls` is (an **Info** stage says so when it is `true`) | As the ClickHouse user is configured when the view is read (ClickHouse default: the type's default — `''`, `0`, nil UUID) |
+| Set | Ends with `SETTINGS join_use_nulls = 1` | `NULL` — the column must be `Nullable` in the view, see below |
+| Not set, the view has a `JOIN` | Ends with `SETTINGS join_use_nulls = 0`, ClickHouse's default, whatever `joinUseNulls` is (an **Info** stage says so when it is `true`) | The type's default — `''`, `0`, nil UUID |
+| Not set, no `JOIN` | Nothing added | — |
 
 * A view never follows the `joinUseNulls` runtime parameter — see [Views Use Node Settings Only](#views-use-node-settings-only).
-
+* **Why a view with a `JOIN` always sets `join_use_nulls`:** a view keeps the column types it was created with, but runs its `SELECT` with the settings of the query that reads it. Without its own value, a reader with `join_use_nulls = 1` — a downstream Work, Dimension or Fact load with the `joinUseNulls` runtime parameter `true`, or a ClickHouse user with that setting — makes the joined columns `Nullable`, and ClickHouse rejects the read: *Query from view … returned Nullable column having not Nullable type*. With the setting written into the view, every reader gets the same result.
+* A `JOIN` anywhere in the node's SQL counts, in a CTE or subquery too (the view's `SETTINGS` applies to the whole query). A `JOIN` in a comment or a string, a column named like `JOIN_ID`, and `ARRAY JOIN` do not.
 * The view's stored setting wins over the reader's: `SELECT … FROM view SETTINGS join_use_nulls = 0` still returns `NULL`.
+* **The joined columns must be `Nullable` in the view.** With `join_use_nulls = 1` ClickHouse makes every column from the joined side of a `LEFT` / `RIGHT` / `FULL JOIN` `Nullable`, whatever the data. Coalesce types such a column not null when its upstream column is not null, and reading it from the view then fails on every query, even when every row has a match. `CAST` each joined column to `Nullable(<type>)`:
+
+  ```sql
+  @materializationType("view")
+  @joinUseNulls
+  SELECT
+      `c`.`cust_id`                                 AS `cust_id`,
+      CAST(`r`.`region_name` AS Nullable(String))   AS `region_name`
+  FROM {{ ref('TARGET', 'CUSTOMER') }} `c`
+  LEFT JOIN {{ ref('TARGET', 'REGION') }} `r` ON `r`.`region_id` = `c`.`region_id`
+  ```
+
+  A non-failing **Warning: join_use_nulls = 1 with not-Nullable columns** stage, at deploy and on every run, lists the view's columns that are not `Nullable` but could be (`Array`, `Map`, `Tuple`, geo types and `JSON` cannot be `Nullable` and are not affected). A listed column from the other side of the join, or used in the `ON` clause, never becomes `NULL` and can be ignored.
 * Adding or removing `@joinUseNulls` on redeploy recreates the view (**Create View**).
-* If the view's SQL ends with its own `SETTINGS` that sets `join_use_nulls`, that value is kept.
+* If the view's SQL ends with its own `SETTINGS` that sets `join_use_nulls`, that value is kept (the warning above follows it).
 * **On a table** `@joinUseNulls` does nothing: a non-failing **Warning: @joinUseNulls on a table** stage is shown at deploy and on every run, and the load follows the `joinUseNulls` runtime parameter.
 
 **Example:**
@@ -2235,7 +2250,7 @@ Changing the parameter does not recreate tables already deployed. Coalesce rende
   Remove any `@orderBy` / `@primaryKey` from nodes that become a ReplacingMergeTree first — they are not accepted on one. Decide the package `engine` before the first deployment where possible.
 
 * **Changing `joinUseNulls`**:  
-Switching the value on tables that already hold data changes the unmatched join values (e.g. `''` becomes `NULL`), so the next run updates those rows even though the source has not changed — on a Dimension, as new SCD Type 2 versions when the joined column is `@isChangeTracking`. Views are not affected: they use [`@joinUseNulls`](#joinusenulls). Choose the value before the first load and use the same one in every environment.
+Switching the value on tables that already hold data changes the unmatched join values (e.g. `''` becomes `NULL`), so the next run updates those rows even though the source has not changed — on a Dimension, as new SCD Type 2 versions when the joined column is `@isChangeTracking`. Views are not affected: they use [`@joinUseNulls`](#joinusenulls) (without it, `join_use_nulls = 0` in a view with a `JOIN`). Choose the value before the first load and use the same one in every environment.
 
 * **Duplicate Business Keys**:  
 Duplicates in the source are not rejected: the load keeps one row per business key (under `lastModified` the one with the newest `@lastModifiedTracking` value; otherwise which row is kept is not defined) and drops the rest without an error. De-duplicate upstream — see [Unique Business Keys](#unique-business-keys-fact-and-dimension).
