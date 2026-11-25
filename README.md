@@ -315,7 +315,7 @@ The following stages are executed, in this order (each one only when needed):
 | **Rename Table** | Instead of the swap, when the table is renamed or moved: the clone is renamed to the new name/location |
 | **Drop Table** | After a rename, drops the table at the old path |
 
-> **Note:** A column is renamed only when its `@id` stays the same. A Work column has no `@id` unless you add one — Coalesce then uses its name as the id, so renaming it drops the column and adds a new one, which loses its data. Give a Work column a stable `@id("<6 hex digits>")` to rename it safely.
+> **Note:** A column is renamed only when its `@id` stays the same. A Work column has no `@id` unless you add one — Coalesce then uses its name as the id, so renaming it drops the column and adds a new one, which loses its data. The new column is also added at the end of the table, so the table's column order no longer matches the SELECT (loads are not affected: they name every column). Give a Work column a stable `@id("<6 hex digits>")` to rename it safely.
 
 > **Note:** Column type changes are converted by ClickHouse on the clone, and some bad conversions do not fail — see [Column Type Changes](#column-type-changes).
 
