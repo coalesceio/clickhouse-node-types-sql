@@ -1,7 +1,5 @@
 fileVersion: 1
 id: "21"
 name: SETTING_Test
-steps:
-  - af7df6a0-8517-4b28-8c9d-5f97dcb4ed8a
-  - bc08423a-782c-402d-a1dc-795fbaf1acfa
+steps: []
 type: Subgraph

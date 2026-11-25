@@ -1,8 +1,5 @@
 fileVersion: 1
 id: "36"
 name: Fresh_Agent_Build
-steps:
-  - 9d17268a-a95d-4693-adc8-b13172fd61ad
-  - c1dd2611-6df3-4c67-9bdd-a1fb3bdb2e84
-  - 0186f3b2-e64b-4e76-a7bf-b720a8f86d27
+steps: []
 type: Subgraph

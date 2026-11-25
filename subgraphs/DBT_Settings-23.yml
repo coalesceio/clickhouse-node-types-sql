@@ -1,7 +1,5 @@
 fileVersion: 1
 id: "23"
 name: DBT_Settings
-steps:
-  - a2000000-0000-4000-8000-000000000001
-  - a2000000-0000-4000-8000-000000000002
+steps: []
 type: Subgraph

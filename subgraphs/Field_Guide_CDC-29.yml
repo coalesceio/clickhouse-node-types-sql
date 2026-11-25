@@ -1,17 +1,5 @@
 fileVersion: 1
 id: "29"
 name: Field_Guide_CDC
-steps:
-  - 3ab3b7f8-c64d-5fda-a50b-2228807f60b9
-  - 7aac188e-ad66-524d-ad53-73d9fee9c198
-  - b1331342-ed07-5f84-99a2-18754dea6d73
-  - 58105cd2-5e2b-5238-ba50-ee5a909fd92f
-  - 6debd262-63d9-50fb-b142-f603dad31f81
-  - 40a2930b-31b0-5e6c-b7ab-e5634c9d25a0
-  - 9078855f-2c76-5d63-9ef2-8d487aac6232
-  - 9d4db585-e7b9-5760-b24f-9bb0d13063c1
-  - 212f14d4-23f9-5cb4-91f4-7b3e8ad8d68e
-  - e5f264c3-ecb5-57c7-9889-378461011125
-  - fc653b43-1ba1-5c9d-aaac-3c0122e5da50
-  - 88ab0a27-b5ac-5023-9d5e-0069d9997505
+steps: []
 type: Subgraph

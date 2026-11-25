@@ -1,5 +1,5 @@
 fileVersion: 1
-id: "139"
+id: "1003"
 mappingDefinitions:
   SRC:
     database: ""
@@ -7,5 +7,5 @@ mappingDefinitions:
   TARGET:
     database: ""
     schema: WORKSPACE_TANVI_QA
-name: ClickHouse-SQL-Deploy
+name: engine_annotation_addition_testing_Tanvi
 type: Environment
