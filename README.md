@@ -1051,13 +1051,13 @@ Concepts and reusable building blocks that apply across every node type in this 
 
 ### ClickHouse Cloud Defaults
 
-Work tables are always MergeTree (Work has no `@engine`); Dimension and Fact tables take their engine from [`@engine`](#engine) or the package `engine` parameter, by default MergeTree. Tables are created without the clauses ClickHouse Cloud adds by itself:
+Work tables are always MergeTree (Work has no `@engine`); Dimension and Fact tables take their engine from [`@engine`](#engine) or the package `engine` parameter, by default MergeTree. Tables are created without the clauses ClickHouse Cloud adds by itself, except `ORDER BY`:
 
 - No `ENGINE` is written on a Work table, or on a Dimension / Fact that defaults to MergeTree; Cloud creates `ENGINE = SharedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')`. A written `ENGINE = ReplacingMergeTree(...)` becomes `SharedReplacingMergeTree(...)` on Cloud.
-- `ORDER BY tuple()` is not written when the node has no `@orderBy` / `@primaryKey`; Cloud adds it.
+- `ORDER BY tuple()` is written when the node has no `@orderBy` / `@primaryKey`: self-hosted ClickHouse rejects a MergeTree table without an `ORDER BY` (only Cloud adds it by itself, through `create_table_empty_primary_key_by_default`).
 - `SETTINGS index_granularity = 8192` is never written unless `@settings` sets it; Cloud adds it.
 
-These rely on Cloud's `default_table_engine` and `create_table_empty_primary_key_by_default` settings.
+These rely on Cloud's `default_table_engine` setting.
 
 `SETTINGS allow_nullable_key = 1` is added automatically when the table has an `@orderBy`, `@primaryKey` or `@partitionBy`, so `Nullable` columns can be key terms. Set `allow_nullable_key` in `@settings` to override it.
 
@@ -1150,6 +1150,7 @@ LEFT JOIN regions r ON r.region_id = c.region_id
   | ``coalesce(`r`.`region_name`, 'UNKNOWN')`` | `UNKNOWN` | `''` |
 
   To store `NULL`, `CAST` the column to `Nullable(<type>)` and set `joinUseNulls` to `true`. `@defaultValue` and `coalesce()` on a joined column also need `joinUseNulls = true`.
+* **`RIGHT JOIN` and `FULL OUTER JOIN`.** The same applies to the side that can be missing: the left table of a `RIGHT JOIN`, and both tables of a `FULL OUTER JOIN`. A row with no match stores the column's `DEFAULT` (`''`, `0`, nil UUID, `1970-01-01`) in every not-null column of the missing side, e.g. `` `c`.`cust_id` `` becomes `0` for a region with no customer, under either `joinUseNulls` value. `CAST` those columns to `Nullable(<type>)` (with `joinUseNulls = true`) to store `NULL`, or `coalesce()` them to a value of your own.
 * **Changing `joinUseNulls` on an existing environment.** The next load can see the joined columns of rows without a match as changed, once: a `Nullable` column (`''` ↔ `NULL`), a column with `@defaultValue` (`''` ↔ the default) and a `coalesce()` column (`''` ↔ the fallback). An SCD Type 2 Dimension adds one version for each such row; SCD Type 1 and Fact update it. The loads after that see no change. A not-null column without `@defaultValue` stores `''` / `0` either way and is not affected.
 * **A business key taken from the right side of a `LEFT JOIN`.** The rows without a match all get the same key value (`''` / `0`, or `NULL` in a `Nullable` column), so a Dimension or Fact treats them as one business key and keeps one row for it. Take the key from the left side of the join when each source row should keep its own row.
 * **A deployed `Nullable` column that becomes not null.** A redeploy that makes the column not null (its upstream column is now not null, or `@notNull` is added) fails with *Cannot convert column ... from nullable type ... to non-nullable type ... Please specify `DEFAULT` expression* unless the column has a `@defaultValue`, which then fills its `NULL`s. See [Column Type Changes](#column-type-changes).
@@ -1246,7 +1247,7 @@ Each column is created with the type Coalesce infers for it, with its nullabilit
 | `LowCardinality(<type>)`, nullable | `LowCardinality(Nullable(<type>))` |
 | `Array`, `Map`, `Tuple`, `Nested`, `JSON` / `Object`, `Dynamic`, `Variant`, `AggregateFunction`, `SimpleAggregateFunction`, geo types (`Point`, `Ring`, `LineString`, `MultiLineString`, `Polygon`, `MultiPolygon`, `Geometry`) | `<type>` — ClickHouse cannot make these `Nullable` |
 
-**A column without `@notNull` is not necessarily `Nullable`.** Its nullability comes from the upstream node's column properties and the SQL: a column read from a not-null upstream column, or a literal such as `'Y'` or `CAST(1 AS UInt32)`, is created not null; a column read from a `Nullable` upstream column is created `Nullable`. A column taken from the right side of a `LEFT JOIN` follows its upstream column in the same way. `@notNull` only forces not null; to force `Nullable`, `CAST` the value to `Nullable(<type>)` in the SELECT.
+**A column without `@notNull` is not necessarily `Nullable`.** Its nullability comes from the upstream node's column properties and the SQL: a column read from a not-null upstream column, or a literal such as `'Y'` or `CAST(1 AS UInt32)`, is created not null; a column read from a `Nullable` upstream column is created `Nullable`. A column taken from the right side of a `LEFT JOIN` (or the missing side of a `RIGHT` / `FULL OUTER JOIN`) follows its upstream column in the same way. `@notNull` only forces not null; to force `Nullable`, `CAST` the value to `Nullable(<type>)` in the SELECT.
 
 The same type is used by the `CREATE`, **Add Column**, **Alter Column** and the view's column list, so they always agree. See [`Variant` Columns](#known-limitations) for the related limitation.
 
@@ -1989,7 +1990,7 @@ Adds a `DEFAULT` expression to the column.
 
 * Each value is converted with `toString()`, and NULL is hashed as the text `'null'`.
 * Columns are combined in `hashOrder` order.
-* With no column in the group, `get_hash()` returns `NULL`.
+* With no column in the group, `get_hash()` returns `NULL`. Coalesce types the column `String` (not `Nullable`), so the table stores `''` (the empty string). `CAST` it to `Nullable(String)` to store `NULL`.
 
 **`get_hash()` examples:**
 
@@ -2144,7 +2145,7 @@ Key annotation terms (`@orderBy`, `@primaryKey`, `@partitionBy`) are written int
 | `@not_null` | Fails on rows where the column is NULL.<br/>Example: `@not_null` |
 | `@uniqueness` | Fails when a value appears on more than one row.<br/>Example: `@uniqueness` |
 | `@empty` | Fails on rows where the column is empty after `trimBoth(...)` removes leading and trailing spaces. Tabs and newlines aren't removed, so a value made only of them doesn't count as empty.<br/>On `FixedString` columns the test removes the zero bytes that pad the value first, so `''`, spaces and padding all count as empty.<br/>NULL values pass this test — they're caught by `@not_null` instead.<br/>For string columns only (`String`, `FixedString`, `LowCardinality(String)`, and their `Nullable` forms): on any other type ClickHouse rejects `trimBoth(...)` and the run fails with its error.<br/>Example: `@empty` |
-| `@accepted_values("<value>", ...)` | Fails on rows whose value is outside the allow list. NULL values pass.<br/>Repeatable — every occurrence on the column is merged into one list. Each call takes a comma-separated list or separate arguments —<br/>`accepted_values("1, 3, 5")`<br/>`accepted_values("1", "3", "5")`<br/>`accepted_values("1") accepted_values("3, 5")`<br/>Each value is pasted into the SQL verbatim, so write it as a valid SQL value for the column's data type —<br/>numeric: with or without double quotes<br/>string: single quotes inside double quotes, `"'<string>'"`<br/>boolean: `true`/`false`, with or without double quotes<br/>date/time: a literal in single quotes inside double quotes, or a function, e.g. `"'2026-01-01'"` or `"toDate('2026-01-01')"`<br/>Example: `@accepted_values("'ALGERIA', 'ARGENTINA'")` |
+| `@accepted_values("<value>", ...)` | Fails on rows whose value is outside the allow list. NULL values pass.<br/>Repeatable — every occurrence on the column is merged into one list. Each call takes a comma-separated list or separate arguments —<br/>`accepted_values("1, 3, 5")`<br/>`accepted_values("1", "3", "5")`<br/>`accepted_values("1") accepted_values("3, 5")`<br/>Each value is pasted into the SQL verbatim, so write it as a valid SQL value for the column's data type —<br/>integer and `Float*`: with or without double quotes<br/>`Decimal` with a fractional part: as a string, single quotes inside double quotes, `"'12.3456'"` — an unquoted `12.3456` is a `Float64` in ClickHouse, and a `Decimal` value is not found in a list of `Float64` values unless the float is exact (`12.3456` is not found, `0.5` is), so the test fails rows that hold an accepted value (`rejected_values`: misses rows that hold a rejected value)<br/>string: single quotes inside double quotes, `"'<string>'"`<br/>boolean: `true`/`false`, with or without double quotes<br/>date/time: a literal in single quotes inside double quotes, or a function, e.g. `"'2026-01-01'"` or `"toDate('2026-01-01')"`<br/>Example: `@accepted_values("'ALGERIA', 'ARGENTINA'")` |
 | `@rejected_values("<value>", ...)` | Fails on rows whose value is in the deny list. NULL values pass.<br/>Same syntax and quoting rules as `accepted_values`.<br/>Example: `@rejected_values("'NA'")` |
 | `@min_max("<min>", "<max>")` | Fails on rows outside the inclusive range. NULL values pass.<br/>Applies to numeric and date/time columns only.<br/>Each bound is pasted into the SQL verbatim, so write it as a valid SQL value for the column's data type —<br/>positive numeric (integer, decimal or float): with or without double quotes<br/>negative numeric (integer, decimal or float): double quotes required<br/>date/time: a literal or expression in double quotes, e.g. `"'2026-01-01'"`, `"toDate('2026-01-01')"` or `"now()"`<br/>Example: `@min_max("0", "4")` |
 | `@min_value("<min>")` | Fails on rows below the bound. NULL values pass.<br/>Value formatting — see `min_max`.<br/>Example: `@min_value("0")` |
@@ -2291,7 +2292,7 @@ A location whose mapping changed (same location, new database) is only detected 
 Table redeploys copy the table with `CREATE TABLE ... CLONE AS`, which ClickHouse does not support in a `Replicated` database engine. Use an `Atomic` database (the default) or ClickHouse Cloud's `Shared` database, where `EXCHANGE TABLES` is also atomic.
 
 * **Large or High-Precision Numbers in Test Values**:  
-An unquoted number in an annotation is read as a floating-point value, so integers beyond roughly 15–16 digits and decimals with more than about 16 significant digits are rounded before the test runs. Wrap such values in double quotes — `@accepted_values("12345678901234567890")` — to pass them through exactly.
+An unquoted number in an annotation is read as a floating-point value, so integers beyond roughly 15–16 digits and decimals with more than about 16 significant digits are rounded before the test runs. Wrap such values in double quotes — `@accepted_values("12345678901234567890")` — to pass them through exactly. For a `Decimal` column, also put single quotes around a value with a fractional part in `@accepted_values` / `@rejected_values` (`"'12.3456'"`): ClickHouse reads an unquoted `12.3456` in the SQL as a `Float64`, which a `Decimal` value does not match.
 
 * **Commas Inside Values in `accepted_values`/`rejected_values`**:  
 Values are split on every comma, trimmed, and re-joined with `", "`. A string written with exactly one space after each comma, like `"'4, 5'"`, is tested as written; any other spacing is normalised, so `"'A,B'"` is tested as `'A, B'`. A function call with several arguments (e.g. `"toDateTime('2026-06-15 00:00:00', 'UTC')"`) keeps working, because the pieces are re-joined in the same order.
