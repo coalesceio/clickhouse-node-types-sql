@@ -1,10 +1,5 @@
 fileVersion: 1
 id: "27"
 name: SQL_Set_Operations
-steps:
-  - f11adafd-c232-5005-aa91-58ae102b5931
-  - ad5fc1d4-ca22-5b8a-adcd-1e3054d2db0a
-  - 8490d27b-81a8-5abf-868d-3c979d791f32
-  - 0a4d8798-4936-505d-aca5-bd82254aa5e9
-  - a7f330c9-4682-50b2-a902-4a9b7a965d0f
+steps: []
 type: Subgraph
