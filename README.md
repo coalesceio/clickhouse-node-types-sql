@@ -1923,7 +1923,7 @@ Stable column ID for lineage tracking.
 * **Work:** optional. Without it Coalesce uses the column's name as its id, so a rename drops the column and adds a new one.
 * Not for manual editing — value is a stable identifier generated once at creation time.
 * **Column added later:** make sure it gets its own `@id` too. If you're editing by hand, add a new, unique 6-hex-digit `@id("<value>")` along with the column; an agent can generate one for you. Don't reuse a value already on the node — a repeated value fails the **Duplicate Column IDs** check.
-* **Duplicate column names:** if the SELECT returns the same column name twice, Coalesce renames the extra copy (`SYSTEM_CREATE_DATE` → `SYSTEM_CREATE_DATE1`) and drops its `@id`; this is reported by the **Duplicate Column Names** check rather than as a missing ID.
+* **Duplicate column names:** if the SELECT returns the same column name twice, Coalesce renames the extra copy (`SYSTEM_CREATE_DATE` → `SYSTEM_CREATE_DATE1`). The **Duplicate Column Names** check stops the deploy and the run, whether or not the copy has its own `@id`: a column named like another one plus a number, whose name is not written as an alias in the node's SQL, is a renamed copy. A deliberate alias such as `REGIONKEY1` is written in the SQL, so it is not reported (without an `@id` it is a missing ID).
 
 **Example:**
 
