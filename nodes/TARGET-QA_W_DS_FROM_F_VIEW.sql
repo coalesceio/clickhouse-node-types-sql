@@ -1,0 +1,3 @@
+@id("0e1f0a00-0000-4000-8000-000000000178")
+@nodeType("SQLWork")
+SELECT * FROM {{ ref('TARGET', 'QA_F_VIEW_JOIN') }}
