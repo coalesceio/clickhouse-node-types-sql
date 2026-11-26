@@ -1,7 +1,5 @@
 @id("0e1f0a00-0000-4000-8000-000000000176")
 @nodeType("SQLDimension")
-@materializationType("view")
-@joinUseNulls
 SELECT
     generateUUIDv4()        AS `QA_D_VIEW_JUN_KEY`  @id("d76001") @isSurrogateKey @defaultValue("generateUUIDv4()"),
     `c`.`cust_id`           AS `cust_id`            @id("d76002") @isBusinessKey,
