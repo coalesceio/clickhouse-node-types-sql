@@ -1,8 +1,8 @@
 # SQL-First NodeTypes for ClickHouse
 
-The [SQL-first nodes](https://docs.coalesce.io/docs/build-your-pipeline/v2-node-types) is a transformation tool within Coalesce that lets developers write custom, hand-coded SQL instead of using the standard graphical column-mapping interface. It is ideal for complex transformations, advanced window functions, or multi-step logic that is difficult to represent with the standard UI, and ships with a built-in library of column- and node-level data quality tests. While it provides maximum flexibility, it shifts the responsibility of column definition and logic maintenance to the SQL author.
+The [SQL-first nodes](https://docs.coalesce.io/docs/build-your-pipeline/v2-node-types) are a transformation tool within Coalesce that let developers write custom, hand-coded SQL instead of using the standard graphical column-mapping interface. They are ideal for complex transformations, advanced window functions, or multi-step logic that is difficult to represent with the standard UI, and ships with a built-in library of column- and node-level data quality tests. While they provide maximum flexibility, they shift the responsibility of column definition and logic maintenance to the SQL author.
 
-# Coalesce Base Node Types - SQL Package (ClickHouse)
+## Coalesce Base Node Types - SQL Package (ClickHouse)
 
 The Coalesce Base Node Types - SQL Package for ClickHouse includes:
 
@@ -13,6 +13,67 @@ The Coalesce Base Node Types - SQL Package for ClickHouse includes:
 Concepts shared across every node type — ClickHouse table defaults, sort and partition keys, column types, data quality tests, known limitations, and usage examples — are documented once in [Common Reference](#common-reference) and linked to from each node type below.
 
 > **After installing:** read [Before You Start](#before-you-start) — set the package `engine` parameter and the `readWithFinal` and `joinUseNulls` runtime parameters before the first deployment.
+
+## Quick Start
+
+1. Install the package, then set the package `engine` parameter and the `readWithFinal` / `joinUseNulls` runtime parameters — see [Before You Start](#before-you-start).
+2. Pick a node type: [Work](#work) for staging and intermediate tables or views, [Dimension](#dimension) for SCD Type 1/2 dimensions, [Fact](#fact) for facts.
+3. Write the SELECT, give every column an `@id`, and add the annotations the node type needs — see the [Node Annotations Matrix](#node-annotations-matrix) and [Column Annotations Matrix](#column-annotations-matrix).
+4. Deploy, then run. Validation problems are reported as named stages in the deploy and run output.
+
+## Contents
+
+* [Before You Start](#before-you-start)
+  * [1. Package parameter `engine` — choose the table engine](#1-package-parameter-engine--choose-the-table-engine)
+  * [2. Runtime parameter `readWithFinal` — set it in every environment](#2-runtime-parameter-readwithfinal--set-it-in-every-environment)
+  * [3. Runtime parameter `joinUseNulls` — set it once, the same in every environment](#3-runtime-parameter-joinusenulls--set-it-once-the-same-in-every-environment)
+  * [4. ClickHouse `final = 1` for the people and tools that read the tables](#4-clickhouse-final--1-for-the-people-and-tools-that-read-the-tables)
+  * [Checklist](#checklist)
+  * [Warning and Info Stages](#warning-and-info-stages)
+* [Node Type Comparison](#node-type-comparison)
+  * [Node Annotations Matrix](#node-annotations-matrix)
+  * [Column Annotations Matrix](#column-annotations-matrix)
+* [Work](#work)
+  * [Work Node Configuration](#work-node-configuration)
+  * [Work Node Annotations](#work-node-annotations)
+  * [Work Column Annotations](#work-column-annotations)
+  * [Work Deployment](#work-deployment)
+  * [Removing a Work Node](#removing-a-work-node)
+  * [Work Load](#work-load)
+* [Dimension](#dimension)
+  * [Dimension Node Configuration](#dimension-node-configuration)
+  * [Dimension Node Annotations](#dimension-node-annotations)
+  * [Dimension Column Annotations](#dimension-column-annotations)
+  * [Dimension Annotation Details](#dimension-annotation-details)
+  * [Dimension SCD Type & System Column Requirements](#dimension-scd-type--system-column-requirements)
+  * [Dimension Deployment](#dimension-deployment)
+  * [Removing a Dimension Node](#removing-a-dimension-node)
+* [Fact](#fact)
+  * [Fact Node Configuration](#fact-node-configuration)
+  * [Fact Node Annotations](#fact-node-annotations)
+  * [Fact Column Annotations](#fact-column-annotations)
+  * [Fact Annotation Details](#fact-annotation-details)
+  * [Fact Load Behaviour](#fact-load-behaviour)
+  * [Fact Deployment](#fact-deployment)
+  * [Removing a Fact Node](#removing-a-fact-node)
+* [Common Reference](#common-reference)
+  * [ClickHouse Cloud Defaults](#clickhouse-cloud-defaults)
+  * [Package Parameters](#package-parameters)
+  * [Runtime Parameters](#runtime-parameters)
+  * [Column Types](#column-types)
+  * [Column Type Changes](#column-type-changes)
+  * [Sort Key and Partition Key Changes](#sort-key-and-partition-key-changes)
+  * [Storage Location Changes](#storage-location-changes)
+  * [How a Load Replaces Rows (Dimension and Fact)](#how-a-load-replaces-rows-dimension-and-fact)
+  * [Unique Business Keys (Fact and Dimension)](#unique-business-keys-fact-and-dimension)
+  * [Surrogate Keys (Dimension)](#surrogate-keys-dimension)
+  * [Annotation Reference](#annotation-reference)
+  * [Identifier Quoting in Annotations](#identifier-quoting-in-annotations)
+  * [Column-Level Data Quality Tests](#column-level-data-quality-tests)
+  * [Notes & Supported SQL Functionality](#notes--supported-sql-functionality)
+  * [Known Limitations](#known-limitations)
+  * [Usage Examples](#usage-examples)
+  * [Code](#code)
 
 ## Before You Start
 
@@ -92,6 +153,10 @@ Other ways to get clean output (views with `@final`, `@optimize`, MergeTree) are
 | `{ "readWithFinal": true }` in every environment | optional | **required** |
 | `joinUseNulls` set, the same in every environment | recommended | recommended |
 | `final = 1` on the readers' ClickHouse users / profiles | not needed | recommended |
+
+### Warning and Info Stages
+
+**Warning** and **Info** stages (and the stages this README calls non-failing or passing) never stop the deploy or the run. They are written as a test that returns one row, so Coalesce shows them as a test with **1 failing row** (⚠ in `coa`): the row is the message, and the stage's SQL comment explains it. **Note** stages return no row and show as passed.
 
 ## Node Type Comparison
 
@@ -250,7 +315,7 @@ The following stages are executed, in this order (each one only when needed):
 | **Rename Table** | Instead of the swap, when the table is renamed or moved: the clone is renamed to the new name/location |
 | **Drop Table** | After a rename, drops the table at the old path |
 
-> **Note:** A column is renamed only when its `@id` stays the same. A Work column has no `@id` unless you add one — Coalesce then uses its name as the id, so renaming it drops the column and adds a new one, which loses its data. Give a Work column a stable `@id("<6 hex digits>")` to rename it safely.
+> **Note:** A column is renamed only when its `@id` stays the same. A Work column has no `@id` unless you add one — Coalesce then uses its name as the id, so renaming it drops the column and adds a new one, which loses its data. The new column is also added at the end of the table, so the table's column order no longer matches the SELECT (loads are not affected: they name every column). Give a Work column a stable `@id("<6 hex digits>")` to rename it safely.
 
 > **Note:** Column type changes are converted by ClickHouse on the clone, and some bad conversions do not fail — see [Column Type Changes](#column-type-changes).
 
@@ -408,9 +473,10 @@ Chooses how this dimension decides a row has changed, and therefore which column
 
 | **Value** | **Description** |
 |---|---|
-| `changeTracking` | Compares columns marked `@isChangeTracking` (or, if none are marked, every plain attribute column) to detect a change. SCD Type 2 if any column is marked `@isChangeTracking`, otherwise SCD Type 1. Doesn't use `@lastModifiedTracking` — if present, a warning is raised and it's ignored. |
-| `lastModified` | Compares a single `@lastModifiedTracking` column against the target's stored value. Requires exactly one column marked `@lastModifiedTracking` — a validation check flags it if none (or more than one) is present. SCD Type 1 or 2 comes from that column's own `scdType` parameter. Doesn't use `@isChangeTracking` — if present, a warning is raised and it's ignored. |
+| `changeTracking` | Compares columns marked `@isChangeTracking` (or, if none are marked, every plain attribute column) to detect a change. SCD Type 2 if any column is marked `@isChangeTracking`, otherwise SCD Type 1. |
+| `lastModified` | Compares a single `@lastModifiedTracking` column against the target's stored value. Requires exactly one column marked `@lastModifiedTracking` — a validation check flags it if none (or more than one) is present. SCD Type 1 or 2 comes from that column's own `scdType` parameter. |
 
+* A tracking annotation the strategy does not use (`@lastModifiedTracking` under `changeTracking`, `@isChangeTracking` under `lastModified`) raises a warning and is ignored.
 * *Not specified in the SQL editor → defaults to **changeTracking** - SCD Type 1.*
 * The value is not case-sensitive; any other value is flagged by the **Invalid configuration: mergeStrategy** check and stops the deploy and the run.
 * Every strategy matches on the business key. A key the SELECT/CTE returns more than once is loaded once (`lastModified`: the newest row), and a NULL business key is one key value — see [Unique Business Keys](#unique-business-keys-fact-and-dimension).
@@ -449,7 +515,8 @@ Zero record value by column type (`Nullable(...)` and `LowCardinality(...)` are 
 | `UUID` (not the surrogate key) | The nil UUID `00000000-0000-0000-0000-000000000000` |
 | `Point`, `Geometry` | The point `(0, 0)` |
 | `Ring`, `LineString`, `MultiLineString`, `Polygon`, `MultiPolygon` | An empty shape `[]` |
-| Anything else | `NULL` |
+| Anything else, `Nullable` | `NULL` |
+| Anything else, not `Nullable` (`Array`, `Tuple`, `Map`, `Enum`, `IPv4` / `IPv6`, `Time`, ...) | The type's default value (`defaultValueOfTypeName`): `[]`, `(0, '')`, `{}`, the first `Enum` value, `0.0.0.0`, `00:00:00`, ... — these columns cannot hold `NULL` |
 | System columns | Version `1`, current flag `'Y'`, end date the [open end date](#scd-type-2-end-date), create date `1970-01-01 00:00:00` (the zero-record marker), update date the load time |
 
 * Override any column with a column-level `@zeroKey(value)`.
@@ -521,10 +588,10 @@ Marks this column as the node's surrogate key.
 * Optional for SCD Type 1 — the load joins and detects changes entirely off the business key.
 * Recommended for SCD Type 2 — a stable surrogate key per version is the standard way to identify a versioned row, though it isn't enforced by the load itself. Without one, the non-failing **Surrogate Key Not Set/Using Custom Surrogate Key Logic** stage is shown.
 * Required only when the node-level `@zeroKey` is set, since the zero/ghost record is matched against the target by surrogate key value.
-* **Requires `@notNull`**, because every row must have a key. Without it the column is `Nullable` and the **Missing Required System Columns** check stops the deploy and the run.
+* **Must not be `Nullable`**, because every row must have a key. `generateUUIDv4()` is inferred not null; a key read from a `Nullable` upstream column needs `@notNull`, otherwise the **Missing Required System Columns** check stops the deploy and the run.
 * New rows and new SCD Type 2 versions get their key from `@defaultValue`; rows the load re-inserts (an expired version, an in-place update) keep the key they already have. See [Surrogate Keys](#surrogate-keys-dimension).
 * **Note:** Ignored on Views. Agentic creation only — manual creation adds this column automatically.
-* Expected expression: `generateUUIDv4() AS "<NODE_NAME>_KEY" @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")` — type the node name yourself, e.g. `generateUUIDv4() AS "DIM_CUSTOMER_KEY" @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")`.
+* Expected expression: `generateUUIDv4() AS "<NODE_NAME>_KEY" @isSurrogateKey @defaultValue("generateUUIDv4()")` — type the node name yourself, e.g. `generateUUIDv4() AS "DIM_CUSTOMER_KEY" @isSurrogateKey @defaultValue("generateUUIDv4()")`.
 
 ##### `@isSystemVersion` (Dimension)
 
@@ -564,6 +631,8 @@ Marks this column as the SCD Type 2 expiration timestamp — a far-future value 
 
 ### Dimension SCD Type & System Column Requirements
 
+Column aliases can be written with backticks or double quotes (``AS `SYSTEM_VERSION` `` or `AS "SYSTEM_VERSION"`): both are identifiers in ClickHouse. The expected expressions below use double quotes; the examples use backticks.
+
 `@mergeStrategy` picks the change-detection strategy; which SCD type it resolves to (and therefore which system columns are required) depends on that strategy and on which columns are marked:
 
 | `@mergeStrategy` | Resolves to | Driven by |
@@ -602,7 +671,7 @@ The load writes fixed values into the system columns. The expression the SELECT 
 | `@isSystemCurrentFlag` | `'Y'` on the current row; `'N'` on an expired SCD2 row |
 | `@isSystemCreateDate` | The load time on first insert and on each new SCD2 version, then kept |
 | `@isSystemUpdateDate` | The load time whenever the row is inserted, changed, or expired as an old SCD2 version |
-| `@isSystemEndDate` | The [open end date](#scd-type-2-end-date) on the current row; the expiry time (one millisecond before the load time) on an expired SCD2 row |
+| `@isSystemEndDate` | The [open end date](#scd-type-2-end-date) on the current row; the expiry time on an expired SCD2 row: one unit of the column's precision before the load time (1 day for `Date`/`Date32`, 1 second for `DateTime` and `DateTime64(0)`, 1 ms for `DateTime64(3)`, 1 µs for `DateTime64(6)`, 1 ns for `DateTime64(9)`) |
 
 The load time is `now64(6)`, evaluated once per load statement, so every row of one load gets the same value (stored at the column's own precision).
 
@@ -613,13 +682,16 @@ ClickHouse's date types cannot hold a far-future date such as `2999-12-31`, so t
 | Column type | Open end date |
 |---|---|
 | `DateTime64` (generated SELECT: `DateTime64(6)`) | `2299-12-31 23:59:59.999999` |
+| `DateTime64(9)` | `2262-04-11 23:47:16.854775807` |
 | `DateTime` | `2106-02-07 06:28:15` |
 | `Date32` | `2299-12-31` |
 | `Date` | `2149-06-06` |
 
-An expired version gets the expiry time: one millisecond before the load.
+For a type that ends before 2299 (`Date`, `DateTime`, `DateTime64(9)`), the deploy and the run show a passing **Info: Open end date &lt;value&gt;** stage naming the value written.
 
-The SELECT expression only sets the column's type; the load writes the value. Use `CAST('2299-12-31 23:59:59.999999' AS DateTime64(6))`: `CAST(... AS TIMESTAMP)` is a `DateTime` in ClickHouse (seconds only, ending in 2106), so `CAST('2999-12-31 00:00:00' AS TIMESTAMP)` shows as `2106-02-07 06:28:15` in Preview.
+An expired version gets the expiry time: one unit of the column's precision before the load (1 day, 1 second, 1 ms, 1 µs or 1 ns, following the type), so it never equals the next version's start. With `Date` / `Date32`, a version created and expired on the same day gets the day before as its end date, earlier than its own `SYSTEM_CREATE_DATE`. Casting the dates to a lower precision downstream (e.g. `DateTime64(6)` to `DateTime64(3)` or `DateTime`) can make an expired version's end equal the next version's start; compare at the stored precision, or use `ts >= SYSTEM_CREATE_DATE AND ts < <next version's SYSTEM_CREATE_DATE>`.
+
+The SELECT expression only sets the column's type; the load writes the value. Use `CAST('2299-12-31 23:59:59.999999' AS DateTime64(6))`, or `CAST('2299-12-31' AS Date32)` for a date. `CAST(... AS TIMESTAMP)` is a `DateTime` in ClickHouse (seconds only, ending in 2106), so `CAST('2999-12-31 00:00:00' AS TIMESTAMP)` shows as `2106-02-07 06:28:15` in Preview; `toDate32('2299-12-31')` is typed `Date` by Coalesce.
 
 To find current versions, filter on `SYSTEM_CURRENT_FLAG = 'Y'` rather than on a fixed end date.
 
@@ -660,7 +732,7 @@ Every run of a Dimension Node of materialization type table runs its configured 
 | **Stage** | **Description** |
 |-----------|----------------|
 | **Pre Load Test `<n>`** | Node-level `@tests(..., "Before")` tests, in the order they appear. |
-| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Missing Business Key \| Invalid configuration: … \| Warning: mergeStrategy \| Missing Required System Columns \| Missing Recommended System Columns \| Surrogate Key Not Set/Using Custom Surrogate Key Logic \| Warning: Zero Key Value Too Long \| Warning: Column @zeroKey without node-level @zeroKey** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, no `@isBusinessKey`, an unrecognised `@mergeStrategy`, a missing or repeated `@lastModifiedTracking` column, a `@lastModifiedTracking` column that cannot detect newer rows, an `scdType` other than 1 or 2, a tracking annotation the strategy ignores (non-failing), a missing system column, a missing `@defaultValue` on the surrogate key, a surrogate key that is only recommended (non-failing), an `@engine` that is not a MergeTree-family engine, `@orderBy` / `@primaryKey` on a ReplacingMergeTree, a ReplacingMergeTree without a business key, `SYSTEM_VERSION` (Dimension) or `@isSystemUpdateDate` column, or a zero key string longer than its `FixedString` column (non-failing)). |
+| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Missing Business Key \| Invalid configuration: … \| Warning: mergeStrategy \| Missing Required System Columns \| Missing Recommended System Columns \| Surrogate Key Not Set/Using Custom Surrogate Key Logic \| Warning: Zero Key Value Too Long \| Warning: Column @zeroKey without node-level @zeroKey** | Validation checks — rendered only when the node's annotations have a problem (listed below the table). |
 | **Check Last Modified Column - NULL Values (`<column>`)** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only when `@writeMode("truncateInsert")` is set — clears the target before the load. |
@@ -671,6 +743,25 @@ Every run of a Dimension Node of materialization type table runs its configured 
 | **Optimize Table** | Executed only when [`@optimize`](#optimize) is set — `OPTIMIZE TABLE … FINAL` merges the table's parts after the load, before Post-SQL. |
 | **Post-SQL `<n>`** | Each `@postSQL` statement, in the order they appear. |
 | **`<column>: <test>` \| Post Load Test `<n>`** | Column-level data quality tests and node-level `@tests(..., "After")` tests, run after the load. |
+
+**Validation checks fire on:**
+
+* the SELECT returns the same column name twice
+* two columns share an `@id` value
+* a column without `@id`
+* no `@isBusinessKey`
+* an unrecognised `@mergeStrategy`
+* a missing or repeated `@lastModifiedTracking` column
+* a `@lastModifiedTracking` column that cannot detect newer rows
+* an `scdType` other than 1 or 2
+* a tracking annotation the strategy ignores (non-failing)
+* a missing system column
+* a missing `@defaultValue` on the surrogate key
+* a surrogate key that is only recommended (non-failing)
+* an `@engine` that is not a MergeTree-family engine
+* `@orderBy` / `@primaryKey` on a ReplacingMergeTree
+* a ReplacingMergeTree without a business key, `SYSTEM_VERSION` (Dimension) or `@isSystemUpdateDate` column
+* a zero key string longer than its `FixedString` column (non-failing)
 
 > **Note:** ClickHouse has no `MERGE` statement; the load stages only insert the new and changed rows, and **Clean Up Previous Data** (MergeTree) or the ReplacingMergeTree removes the older copies — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact).
 
@@ -787,10 +878,12 @@ Chooses how rows are matched against the target, and therefore which column anno
 
 | **Value** | **Description** |
 |---|---|
-| `changeTracking` | SCD Type 1. Compares every plain attribute column against the target; a changed row is re-inserted with the new values and the old copy removed, a new key is inserted. Doesn't use `@lastModifiedTracking` — if present, a warning is raised and it's ignored. |
+| `changeTracking` | SCD Type 1. Compares every plain attribute column against the target; a changed row is re-inserted with the new values and the old copy removed, a new key is inserted. |
 | `lastModified` | SCD Type 1. Compares a single `@lastModifiedTracking` column against the target's stored value; only rows with a newer value are loaded, then as `changeTracking`. Requires exactly one column marked `@lastModifiedTracking` — a validation check flags it if none (or more than one) is present. |
-| `allColumnMatch` | A factless fact: a source row is inserted only if no target row matches it on the **match columns** — the non-system columns that come from the source — and an existing row is never updated or deleted. `@isBusinessKey` isn't needed — if present, a warning is raised and it's ignored. `@lastModifiedTracking` isn't used either — a warning is raised and it's ignored. System columns are optional, are left out of the comparison, and are written exactly as the SELECT/CTE computes them. |
+| `allColumnMatch` | A factless fact: a source row is inserted only if no target row matches it on the **match columns** — the non-system columns that come from the source — and an existing row is never updated or deleted. |
 
+* An annotation the strategy does not use (`@lastModifiedTracking` under `changeTracking`; `@isBusinessKey` or `@lastModifiedTracking` under `allColumnMatch`) raises a warning and is ignored.
+* `allColumnMatch`: system columns are optional, are left out of the comparison, and are written exactly as the SELECT/CTE computes them.
 * *Not specified in the SQL editor → defaults to **changeTracking** - SCD Type 1 when a column is marked `@isBusinessKey`, otherwise the node is loaded as a [plain insert](#fact-load-behaviour).*
 * The value is not case-sensitive; any other value is flagged by the **Invalid configuration: mergeStrategy** check and stops the deploy and the run.
 * When set, `@mergeStrategy` always takes priority: `changeTracking` and `lastModified` match on the business key, so without an `@isBusinessKey` column the **Invalid configuration: No Business Key** check fails and the load stops. `allColumnMatch` needs no `@isBusinessKey`.
@@ -888,7 +981,7 @@ Every run of a Fact Node of materialization type table runs its configured data 
 | **Stage** | **Description** |
 |-----------|----------------|
 | **Pre Load Test `<n>`** | Node-level `@tests(..., "Before")` tests, in the order they appear. |
-| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Invalid configuration: … \| Warning: mergeStrategy \| Warning: No Business Key \| Missing Required System Columns** | Validation checks — rendered only when the node's annotations have a problem (the SELECT returns the same column name twice, two columns share an `@id` value, a column without `@id`, an unrecognised `@mergeStrategy`, an explicit strategy without a business key, a missing or repeated `@lastModifiedTracking` column, a `@lastModifiedTracking` column that cannot detect newer rows, a tracking/key annotation the strategy ignores (non-failing), an `@engine` that is not a MergeTree-family engine, `@orderBy` / `@primaryKey` on a ReplacingMergeTree, a ReplacingMergeTree without a business key, `SYSTEM_VERSION` (Dimension) or `@isSystemUpdateDate` column, or a missing system column). |
+| **Duplicate Column Names \| Duplicate Column IDs \| Missing Column IDs \| Invalid configuration: … \| Warning: mergeStrategy \| Warning: No Business Key \| Missing Required System Columns** | Validation checks — rendered only when the node's annotations have a problem (listed below the table). |
 | **Check Last Modified Column - NULL Values (`<column>`)** | Pre-load check for `@mergeStrategy("lastModified")` — fails the run on a NULL `@lastModifiedTracking` value in the source. |
 | **Pre-SQL `<n>`** | Each `@preSQL` statement, in the order they appear. |
 | **Truncate table** | Executed only when `@writeMode("truncateInsert")` is set — clears the target before the load. |
@@ -900,6 +993,21 @@ Every run of a Fact Node of materialization type table runs its configured data 
 | **Optimize Table** | Executed only when [`@optimize`](#optimize) is set — `OPTIMIZE TABLE … FINAL` merges the table's parts after the load, before Post-SQL. |
 | **Post-SQL `<n>`** | Each `@postSQL` statement, in the order they appear. |
 | **`<column>: <test>` \| Post Load Test `<n>`** | Column-level data quality tests and node-level `@tests(..., "After")` tests, run after the load. |
+
+**Validation checks fire on:**
+
+* the SELECT returns the same column name twice
+* two columns share an `@id` value
+* a column without `@id`
+* an unrecognised `@mergeStrategy`
+* an explicit strategy without a business key
+* a missing or repeated `@lastModifiedTracking` column
+* a `@lastModifiedTracking` column that cannot detect newer rows
+* a tracking/key annotation the strategy ignores (non-failing)
+* an `@engine` that is not a MergeTree-family engine
+* `@orderBy` / `@primaryKey` on a ReplacingMergeTree
+* a ReplacingMergeTree without a business key, `SYSTEM_VERSION` (Dimension) or `@isSystemUpdateDate` column
+* a missing system column
 
 #### Fact Redeployment
 
@@ -944,13 +1052,13 @@ Concepts and reusable building blocks that apply across every node type in this 
 
 ### ClickHouse Cloud Defaults
 
-Work tables are always MergeTree (Work has no `@engine`); Dimension and Fact tables take their engine from [`@engine`](#engine) or the package `engine` parameter, by default MergeTree. Tables are created without the clauses ClickHouse Cloud adds by itself:
+Work tables are always MergeTree (Work has no `@engine`); Dimension and Fact tables take their engine from [`@engine`](#engine) or the package `engine` parameter, by default MergeTree. Tables are created without the clauses ClickHouse Cloud adds by itself, except `ORDER BY`:
 
 - No `ENGINE` is written on a Work table, or on a Dimension / Fact that defaults to MergeTree; Cloud creates `ENGINE = SharedMergeTree('/clickhouse/tables/{uuid}/{shard}', '{replica}')`. A written `ENGINE = ReplacingMergeTree(...)` becomes `SharedReplacingMergeTree(...)` on Cloud.
-- `ORDER BY tuple()` is not written when the node has no `@orderBy` / `@primaryKey`; Cloud adds it.
+- `ORDER BY tuple()` is written when the node has no `@orderBy` / `@primaryKey`: self-hosted ClickHouse rejects a MergeTree table without an `ORDER BY` (only Cloud adds it by itself, through `create_table_empty_primary_key_by_default`).
 - `SETTINGS index_granularity = 8192` is never written unless `@settings` sets it; Cloud adds it.
 
-These rely on Cloud's `default_table_engine` and `create_table_empty_primary_key_by_default` settings.
+These rely on Cloud's `default_table_engine` setting.
 
 `SETTINGS allow_nullable_key = 1` is added automatically when the table has an `@orderBy`, `@primaryKey` or `@partitionBy`, so `Nullable` columns can be key terms. Set `allow_nullable_key` in `@settings` to override it.
 
@@ -994,7 +1102,9 @@ Example (Environment → Parameters):
 | `true` (or `1`) | End with `SETTINGS final = 1`, so any ReplacingMergeTree they read is read with `FINAL`; ClickHouse ignores it for tables that do not support `FINAL`, e.g. MergeTree |
 | `false` (or `0`) | Run as written — readers rely on `final = 1` set on the ClickHouse user, or `FINAL` in the node's SQL |
 | not set | Same as `false` |
+| anything else | **Invalid configuration: readWithFinal** stops the deploy and the run |
 
+* `true` / `false` are not case-sensitive (`TRUE`, `False`). Any other value — `yes`, `on`, `2`, a typo — is rejected, so FINAL is never turned off by mistake.
 * Loads read the value on every run.
 * The node's own `SETTINGS` clause — see [Where Query Settings Go](#where-query-settings-go).
 * The **Note: Query with FINAL** deploy stage says which value is in effect (runtime parameter, or not set).
@@ -1029,7 +1139,7 @@ LEFT JOIN regions r ON r.region_id = c.region_id
 | `true` | `NULL` | `UNKNOWN` |
 | `false`, with ClickHouse's default | `''` (empty) | `''` — `coalesce()` only replaces `NULL` |
 
-* Applies to every load. Not views: a view sets `join_use_nulls = 1` only with [`@joinUseNulls`](#joinusenulls). With `readWithFinal`, both are added together: `SETTINGS final = 1, join_use_nulls = 1`.
+* Applies to every load. Not views: a view with a `JOIN` sets `join_use_nulls = 1` with [`@joinUseNulls`](#joinusenulls), else `join_use_nulls = 0`. With `readWithFinal`, both are added together: `SETTINGS final = 1, join_use_nulls = 1`.
 * Change detection, SCD Type 2 versioning and the clean-up work the same with either value — only the columns your SQL takes from a join are affected.
 * A node can still set its own value in its SQL (`SETTINGS join_use_nulls = 0`); it takes priority for that node — see [Where Query Settings Go](#where-query-settings-go).
 * With `false`, keep `join_use_nulls` the same on the ClickHouse users of every environment, so they all load the same data.
@@ -1043,6 +1153,7 @@ LEFT JOIN regions r ON r.region_id = c.region_id
   | ``coalesce(`r`.`region_name`, 'UNKNOWN')`` | `UNKNOWN` | `''` |
 
   To store `NULL`, `CAST` the column to `Nullable(<type>)` and set `joinUseNulls` to `true`. `@defaultValue` and `coalesce()` on a joined column also need `joinUseNulls = true`.
+* **`RIGHT JOIN` and `FULL OUTER JOIN`.** The same applies to the side that can be missing: the left table of a `RIGHT JOIN`, and both tables of a `FULL OUTER JOIN`. A row with no match stores the column's `DEFAULT` (`''`, `0`, nil UUID, `1970-01-01`) in every not-null column of the missing side, e.g. `` `c`.`cust_id` `` becomes `0` for a region with no customer, under either `joinUseNulls` value. `CAST` those columns to `Nullable(<type>)` (with `joinUseNulls = true`) to store `NULL`, or `coalesce()` them to a value of your own.
 * **Changing `joinUseNulls` on an existing environment.** The next load can see the joined columns of rows without a match as changed, once: a `Nullable` column (`''` ↔ `NULL`), a column with `@defaultValue` (`''` ↔ the default) and a `coalesce()` column (`''` ↔ the fallback). An SCD Type 2 Dimension adds one version for each such row; SCD Type 1 and Fact update it. The loads after that see no change. A not-null column without `@defaultValue` stores `''` / `0` either way and is not affected.
 * **A business key taken from the right side of a `LEFT JOIN`.** The rows without a match all get the same key value (`''` / `0`, or `NULL` in a `Nullable` column), so a Dimension or Fact treats them as one business key and keeps one row for it. Take the key from the left side of the join when each source row should keep its own row.
 * **A deployed `Nullable` column that becomes not null.** A redeploy that makes the column not null (its upstream column is now not null, or `@notNull` is added) fails with *Cannot convert column ... from nullable type ... to non-nullable type ... Please specify `DEFAULT` expression* unless the column has a `@defaultValue`, which then fills its `NULL`s. See [Column Type Changes](#column-type-changes).
@@ -1107,7 +1218,7 @@ SELECT ... FROM a JOIN b ...                                 -- runs with max_th
 
 The package only reads the `SETTINGS` at the very end of the node's SQL, so an inner one gives no warning and is never changed.
 
-**A view keeps its own settings.** The `SETTINGS` stored in a view (its `@querySettings`, `final = 1` from `@final`, `join_use_nulls = 1` from `@joinUseNulls`) win over the settings of the query that reads it. For example, `SELECT * FROM my_view SETTINGS max_threads = 3` still runs the view's `SELECT` with the view's `max_threads`. To change a view's settings, change the node and deploy it, which recreates the view.
+**A view keeps its own settings.** The `SETTINGS` stored in a view (its `@querySettings`, `final = 1` from `@final`, `join_use_nulls = 1` from `@joinUseNulls` or `join_use_nulls = 0` on a view with a `JOIN`) win over the settings of the query that reads it. For example, `SELECT * FROM my_view SETTINGS max_threads = 3` still runs the view's `SELECT` with the view's `max_threads`. To change a view's settings, change the node and deploy it, which recreates the view.
 
 #### Views Use Node Settings Only
 
@@ -1116,14 +1227,14 @@ A view is created at deploy, not at run time, so it takes every setting from its
 | Setting | Table load (every run) | View (fixed when created) |
 |---|---|---|
 | `final` | `readWithFinal` runtime parameter | [`@final`](#final) |
-| `join_use_nulls` | `joinUseNulls` runtime parameter | [`@joinUseNulls`](#joinusenulls) |
+| `join_use_nulls` | `joinUseNulls` runtime parameter | [`@joinUseNulls`](#joinusenulls): `1`; without it `0` when the view has a `JOIN` |
 | Other query settings | [`@querySettings`](#querysettings), else the `querySettings` runtime parameter | [`@querySettings`](#querysettings) |
 
 When a runtime parameter is set that a view does not follow, the view's deploy shows a passing **Info: Runtime parameters not used by views** stage, e.g.:
 
 ```
 -- readWithFinal = true: this view does not read with FINAL. Add @final to read its ReplacingMergeTree sources with FINAL.
--- joinUseNulls = true: this view does not set join_use_nulls = 1 ... Add @joinUseNulls for NULL.
+-- joinUseNulls = true: this view does not set join_use_nulls = 1 (its JOINs run with join_use_nulls = 0, ClickHouse's default: ...). Add @joinUseNulls for NULL.
 ```
 
 ### Column Types
@@ -1134,16 +1245,16 @@ Each column is created with the type Coalesce infers for it, with its nullabilit
 |---|---|
 | Default: nullability inferred by Coalesce from the source columns and the SQL | `Nullable(<type>)` when the value can be NULL (e.g. a `Nullable` source column), otherwise `<type>` |
 | Marked `@notNull` | `<type>` |
-| `@isSurrogateKey` (Dimension) | Same rule, and `@notNull` is required: without it the **Missing Required System Columns** check stops the deploy and the run |
-| `@isSystemUpdateDate` on a ReplacingMergeTree (the engine's version argument) | Same rule: `<type>` only with `@notNull`. ClickHouse rejects a `Nullable` version argument, so mark it `@notNull` |
+| `@isSurrogateKey` (Dimension) | Same rule; it must not be `Nullable` (`generateUUIDv4()` is not null). A nullable key stops the deploy and the run (**Missing Required System Columns**): add `@notNull` |
+| `@isSystemUpdateDate` on a ReplacingMergeTree (the engine's version argument) | Same rule. ClickHouse rejects a `Nullable` version argument: `now64(6)` is not null; add `@notNull` when the column is read from a `Nullable` upstream column |
 | `LowCardinality(<type>)`, nullable | `LowCardinality(Nullable(<type>))` |
 | `Array`, `Map`, `Tuple`, `Nested`, `JSON` / `Object`, `Dynamic`, `Variant`, `AggregateFunction`, `SimpleAggregateFunction`, geo types (`Point`, `Ring`, `LineString`, `MultiLineString`, `Polygon`, `MultiPolygon`, `Geometry`) | `<type>` — ClickHouse cannot make these `Nullable` |
 
-**A column without `@notNull` is not necessarily `Nullable`.** Its nullability comes from the upstream node's column properties and the SQL: a column read from a not-null upstream column, or a literal such as `'Y'` or `CAST(1 AS UInt32)`, is created not null; a column read from a `Nullable` upstream column is created `Nullable`. A column taken from the right side of a `LEFT JOIN` follows its upstream column in the same way. `@notNull` only forces not null; to force `Nullable`, `CAST` the value to `Nullable(<type>)` in the SELECT.
+**A column without `@notNull` is not necessarily `Nullable`.** Its nullability comes from the upstream node's column properties and the SQL: a column read from a not-null upstream column, or a literal such as `'Y'` or `CAST(1 AS UInt32)`, is created not null; a column read from a `Nullable` upstream column is created `Nullable`. A column taken from the right side of a `LEFT JOIN` (or the missing side of a `RIGHT` / `FULL OUTER JOIN`) follows its upstream column in the same way. `@notNull` only forces not null; to force `Nullable`, `CAST` the value to `Nullable(<type>)` in the SELECT.
 
 The same type is used by the `CREATE`, **Add Column**, **Alter Column** and the view's column list, so they always agree. See [`Variant` Columns](#known-limitations) for the related limitation.
 
-`TIMESTAMP` is an alias of `DateTime` in ClickHouse: whole seconds, up to `2106-02-07 06:28:15`. Use `DateTime64(<precision>)` for sub-second values or later dates. Coalesce types a column written as `CAST(... AS TIMESTAMP)` as `DateTime64(6)`, so the examples' `CAST(CURRENT_TIMESTAMP AS TIMESTAMP)` system columns are created as `DateTime64(6)`.
+`TIMESTAMP` is an alias of `DateTime` in ClickHouse: whole seconds, up to `2106-02-07 06:28:15`. Use `DateTime64(<precision>)` for sub-second values or later dates. The system date columns use `now64(6)`, created as `DateTime64(6)`. Coalesce types `now64(<precision>)` and `CAST(... AS TIMESTAMP)` as `DateTime64(6)` whatever the precision; for another precision write the type, e.g. `CAST(now64(3) AS DateTime64(3))`.
 
 #### NULLs in non-nullable columns
 
@@ -1345,13 +1456,13 @@ A plain-insert Fact stays MergeTree whatever the package `engine` (see [`@engine
 
 A Fact with no `@isBusinessKey` column and no `@mergeStrategy` is loaded as a plain insert: it replaces no rows, nothing is cleaned up, and a package `engine` parameter of `ReplacingMergeTree` does not apply to it — it stays MergeTree (a ReplacingMergeTree would collapse identical rows). An `allColumnMatch` Fact only inserts rows that don't exist yet, so nothing is cleaned up either; it does take a `ReplacingMergeTree` engine, ordered by its match columns — see [Fact All Column Match](#fact-all-column-match).
 
-* The ReplacingMergeTree and the clean-up tell the copies apart only by `SYSTEM_UPDATE_DATE`, so they need that column. On a ReplacingMergeTree it is the engine's version argument: required, and it must be marked `@notNull`. Without `@notNull` its nullability is inferred (see [Column Types](#column-types)), and if it comes out `Nullable`, ClickHouse does not accept it as the version argument:
+* The ReplacingMergeTree and the clean-up tell the copies apart only by `SYSTEM_UPDATE_DATE`, so they need that column. On a ReplacingMergeTree it is the engine's version argument: required, and it must not be `Nullable`. Its nullability is inferred (see [Column Types](#column-types)): `now64(6)` is not null, while a column read from a `Nullable` upstream column is `Nullable` unless marked `@notNull`, and ClickHouse does not accept it as the version argument:
 
   ```sql
-  CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
+  now64(6) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate
   ```
 
-  Without it the deploy and the run show a passing **Warning: @isSystemUpdateDate without @notNull** stage, the flow continues, and ClickHouse's error stops the create — see [`@isSystemUpdateDate` Without `@notNull` on a ReplacingMergeTree](#known-limitations). Manually created nodes do not add `@notNull`; add it when the node is a ReplacingMergeTree.
+  A `Nullable` version column shows a passing **Warning: @isSystemUpdateDate without @notNull** stage in the deploy and the run, the flow continues, and ClickHouse's error stops the create — see [`@isSystemUpdateDate` Without `@notNull` on a ReplacingMergeTree](#known-limitations).
 * A ReplacingMergeTree requires a business key. `SYSTEM_VERSION` is required on an SCD Type 2 Dimension and optional on SCD Type 1 — see [`SYSTEM_VERSION` on a ReplacingMergeTree](#system_version-on-a-replacingmergetree-dimension). Without a business key, or with `@orderBy` / `@primaryKey` set, **Invalid configuration: engine** stops the deploy and the run: a manual sort key could collapse different rows into one, or keep the copies the load replaces. Use MergeTree (the default, or `@engine("MergeTree")` when the package parameter is ReplacingMergeTree) to set your own sort key.
 * A ReplacingMergeTree only replaces rows within one partition. When a row moves partition (its `@partitionBy` value changes), the old copy stays in the old partition for good: background merges never cross partitions. Reads with `FINAL` still show one row per key, because ClickHouse's `FINAL` de-duplicates across partitions by default (`do_not_merge_across_partitions_select_final = 0`); a read without `FINAL` shows both copies. Prefer a `@partitionBy` whose value cannot change for a business key.
 * On a MergeTree, a reader can briefly see both copies of a changed row between the insert and the clean-up. If the clean-up stage fails, the extra copies stay until the next successful run's clean-up removes them.
@@ -1397,12 +1508,12 @@ To decide which row wins, or to stop the run instead, de-duplicate or check the 
 
 ClickHouse has no identity columns. The surrogate key is a plain column, and the Dimension load gives a **new row or a new SCD Type 2 version** its key from the column's `@defaultValue`. Rows that are re-inserted by the load (an expired version, an in-place update) keep the key they already have.
 
-The `@isSurrogateKey` column **requires `@notNull`**, because every row must have a key. The column follows `@notNull` like every other column, so its nullability in the node's mapping matches the table. Without `@notNull` the **Missing Required System Columns** check stops the deploy and the run. This applies to Dimensions only: Facts have no surrogate key.
+The `@isSurrogateKey` column **must not be `Nullable`**, because every row must have a key. Its nullability is inferred like every other column's, so the node's mapping matches the table: `generateUUIDv4()` is not null. A key read from a `Nullable` upstream column needs `@notNull`; otherwise the **Missing Required System Columns** check stops the deploy and the run. This applies to Dimensions only: Facts have no surrogate key.
 
 The recommended key is a UUID, which is what a new Dimension's generated SELECT uses:
 
 ```sql
-generateUUIDv4() AS `DIM_CUSTOMER_KEY` @isSurrogateKey @notNull @defaultValue("generateUUIDv4()")
+generateUUIDv4() AS `DIM_CUSTOMER_KEY` @isSurrogateKey @defaultValue("generateUUIDv4()")
 ```
 
 - A `UUID` surrogate key **must** have `@defaultValue("generateUUIDv4()")`; the deploy and run fail validation without it.
@@ -1522,7 +1633,12 @@ The table's `PARTITION BY` key. Each argument is one term — a column or an exp
 | `min_bytes_for_wide_part` / `min_rows_for_wide_part` | Below this size a part is stored compact (one file); above it wide (one file per column). | `min_bytes_for_wide_part = 0` stores every part wide, so reading a few columns of a wide table is faster. |
 | `allow_nullable_key` | Lets `Nullable` columns be key terms. | Added automatically when the table has a key (see above). |
 
-Only **table settings** belong here — ClickHouse's MergeTree-family settings, which apply to MergeTree and ReplacingMergeTree tables alike. A **query setting** (such as `max_threads`) is not stored with the table: ClickHouse can accept it in the first `CREATE TABLE`, and a redeploy's **Modify Settings** then fails with *Unknown setting*. Query settings go in [`@querySettings`](#querysettings).
+Only **table settings** belong here — ClickHouse's MergeTree-family settings, the names listed in `system.merge_tree_settings`, which apply to MergeTree and ReplacingMergeTree tables alike. **Query settings** (the names in `system.settings`, such as `max_threads`, `max_memory_usage` or `join_algorithm`) go in [`@querySettings`](#querysettings). The two are not interchangeable, and the node types do not check which kind a name is:
+
+* **A query setting in `@settings`** is accepted by the first `CREATE TABLE`, but ClickHouse only applies it to that `CREATE` statement: it is not stored with the table and the loads never run with it. Every later redeploy that changes it fails (**Modify Settings**: *Unknown setting*), and so does removing it (**Reset Settings**: *Cannot reset setting … because it doesn't exist for MergeTree engines family*). The node can then only be deployed again after a change that recreates the table — e.g. to `@partitionBy`, `@primaryKey`, or `@orderBy` without `@primaryKey` — which loses its data (see [Sort Key and Partition Key Changes](#sort-key-and-partition-key-changes)), or by removing the node, deploying, and adding it back.
+* **A table setting in `@querySettings`** is added to the load as a query setting, and the load fails: *Setting index_granularity is neither a builtin setting nor …* (`UNKNOWN_SETTING`). Move it to `@settings`.
+
+A few names (e.g. `max_partitions_to_read`, `parts_to_throw_insert`, `async_insert`) exist as both; in `@settings` they are stored with the table.
 
 ##### `@querySettings`
 
@@ -1539,7 +1655,7 @@ Only **table settings** belong here — ClickHouse's MergeTree-family settings, 
 * **Merged with the environment's, per setting:** a setting named in `@querySettings` overrides the same setting in the [`querySettings`](#runtime-parameters) runtime parameter; every other runtime setting still applies to the table (so an environment-wide memory limit stays in force). Views use only `@querySettings`. A `SETTINGS` clause at the end of the node's SQL overrides both.
 * **`final` and `join_use_nulls` are ignored here**, with a **Warning: final / join_use_nulls in querySettings** stage. They change the data, not only how it is computed, so they have their own parameters: [`readWithFinal`](#runtime-parameters) / [`@final`](#final) and [`joinUseNulls`](#runtime-parameters) / [`@joinUseNulls`](#joinusenulls).
 * **Changing it:** edit `@querySettings`, deploy, then run. A table's next load uses the new values after the deploy (a metadata update); a view is recreated with them. Changing a setting in the `querySettings` runtime parameter has no effect on a node whose `@querySettings` names it.
-* Not the same as [`@settings`](#settings), which are table settings stored with the table.
+* Not the same as [`@settings`](#settings), which are table settings stored with the table. Only query settings (the names in `system.settings`) belong here, and only table settings (`system.merge_tree_settings`) in `@settings` — see [`@settings`](#settings) for what happens when they are mixed.
 * **`transform_null_in`:** Clean Up Previous Data (MergeTree Dimension / Fact) runs with `transform_null_in = 1` by default, so rows with a `NULL` business key are cleaned up too. A `transform_null_in` in `@querySettings` / `querySettings` is respected there as well. With `0` and a nullable business key column, a non-failing **Warning: transform_null_in = 0 in querySettings** stage explains that older copies of rows with a `NULL` key are not removed. Mark the business key `@notNull` to avoid it.
 
 The load then ends with:
@@ -1577,7 +1693,7 @@ The table's `ENGINE`: **`MergeTree` or `ReplacingMergeTree` only**, written with
   2. The package parameter `engine`, set once for every Dimension and Fact in the package — e.g. `ReplacingMergeTree`, so it does not have to be written on each node. A `ReplacingMergeTree` value is not applied to a plain-insert Fact (it would collapse identical rows) — that Fact goes on to step 3. An `allColumnMatch` Fact takes it, ordered by its match columns.
   3. The built-in default: **MergeTree**. No `ENGINE` is written, as when ClickHouse itself is given none (Cloud creates `SharedMergeTree`).
 * **`readWithFinal` parameter:** `true` makes downstream nodes read their upstream ReplacingMergeTree with `FINAL` — see [Reading an Upstream ReplacingMergeTree](#reading-an-upstream-replacingmergetree-readwithfinal).
-* **`ReplacingMergeTree`:** the load only inserts and ClickHouse keeps the latest copy of each row — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). The `@isSystemUpdateDate` column is added as the version argument and must be marked `@notNull`. `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it; `@orderBy` / `@primaryKey` are not accepted. Readers need `FINAL` — see [Querying a ReplacingMergeTree](#querying-a-replacingmergetree). The table `COMMENT` is the node description.
+* **`ReplacingMergeTree`:** the load only inserts and ClickHouse keeps the latest copy of each row — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact). The `@isSystemUpdateDate` column is added as the version argument and must not be `Nullable` (`now64(6)` is not null). `ORDER BY` is always built from the business key, plus `SYSTEM_VERSION` on a Dimension that has it; `@orderBy` / `@primaryKey` are not accepted. Readers need `FINAL` — see [Querying a ReplacingMergeTree](#querying-a-replacingmergetree). The table `COMMENT` is the node description.
 * **`MergeTree` (the default):** the load inserts and then deletes the replaced copies in **Clean Up Previous Data**. `@orderBy` / `@primaryKey` can be set. No `ENGINE` and `@engine("MergeTree")` are the same engine: switching between them does not recreate the table.
 * **Write `ReplacingMergeTree` without arguments.** The loads set the version argument and `ORDER BY` themselves, so an engine with its own arguments, such as ``@engine("ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)")`` or the same value in the package `engine` parameter, stops the deploy and the run.
 * **Invalid configuration: engine** stops the deploy and the run for any engine other than `MergeTree` / `ReplacingMergeTree`, for an engine written with arguments, and for a ReplacingMergeTree with `@orderBy` / `@primaryKey`, or without a business key or `@isSystemUpdateDate` column (except `allColumnMatch`, which needs neither).
@@ -1637,14 +1753,29 @@ The view's `SELECT` ends with `SETTINGS join_use_nulls = 1`, fixed when the view
 
 | `@joinUseNulls` | The view's `SELECT` | An unmatched join column |
 |---|---|---|
-| Set | Ends with `SETTINGS join_use_nulls = 1` | `NULL` |
-| Not set | Nothing added, whatever `joinUseNulls` is (an **Info** stage says so when it is `true`) | As the ClickHouse user is configured when the view is read (ClickHouse default: the type's default — `''`, `0`, nil UUID) |
+| Set | Ends with `SETTINGS join_use_nulls = 1` | `NULL` — the column must be `Nullable` in the view, see below |
+| Not set, the view has a `JOIN` | Ends with `SETTINGS join_use_nulls = 0`, ClickHouse's default, whatever `joinUseNulls` is (an **Info** stage says so when it is `true`) | The type's default — `''`, `0`, nil UUID |
+| Not set, no `JOIN` | Nothing added | — |
 
 * A view never follows the `joinUseNulls` runtime parameter — see [Views Use Node Settings Only](#views-use-node-settings-only).
-
+* **Why a view with a `JOIN` always sets `join_use_nulls`:** a view keeps the column types it was created with, but runs its `SELECT` with the settings of the query that reads it. Without its own value, a reader with `join_use_nulls = 1` — a downstream Work, Dimension or Fact load with the `joinUseNulls` runtime parameter `true`, or a ClickHouse user with that setting — makes the joined columns `Nullable`, and ClickHouse rejects the read: *Query from view … returned Nullable column having not Nullable type*. With the setting written into the view, every reader gets the same result.
+* A `JOIN` anywhere in the node's SQL counts, in a CTE or subquery too (the view's `SETTINGS` applies to the whole query). A `JOIN` in a comment or a string, a column named like `JOIN_ID`, and `ARRAY JOIN` do not.
 * The view's stored setting wins over the reader's: `SELECT … FROM view SETTINGS join_use_nulls = 0` still returns `NULL`.
+* **The joined columns must be `Nullable` in the view.** With `join_use_nulls = 1` ClickHouse makes every column from the joined side of a `LEFT` / `RIGHT` / `FULL JOIN` `Nullable`, whatever the data. Coalesce types such a column not null when its upstream column is not null, and reading it from the view then fails on every query, even when every row has a match. `CAST` each joined column to `Nullable(<type>)`:
+
+  ```sql
+  @materializationType("view")
+  @joinUseNulls
+  SELECT
+      `c`.`cust_id`                                 AS `cust_id`,
+      CAST(`r`.`region_name` AS Nullable(String))   AS `region_name`
+  FROM {{ ref('TARGET', 'CUSTOMER') }} `c`
+  LEFT JOIN {{ ref('TARGET', 'REGION') }} `r` ON `r`.`region_id` = `c`.`region_id`
+  ```
+
+  A non-failing **Warning: join_use_nulls = 1 with not-Nullable columns** stage, at deploy and on every run, lists the view's columns that are not `Nullable` but could be (`Array`, `Map`, `Tuple`, geo types and `JSON` cannot be `Nullable` and are not affected). A listed column from the other side of the join, or used in the `ON` clause, never becomes `NULL` and can be ignored.
 * Adding or removing `@joinUseNulls` on redeploy recreates the view (**Create View**).
-* If the view's SQL ends with its own `SETTINGS` that sets `join_use_nulls`, that value is kept.
+* If the view's SQL ends with its own `SETTINGS` that sets `join_use_nulls`, that value is kept (the warning above follows it).
 * **On a table** `@joinUseNulls` does nothing: a non-failing **Warning: @joinUseNulls on a table** stage is shown at deploy and on every run, and the load follows the `joinUseNulls` runtime parameter.
 
 **Example:**
@@ -1795,7 +1926,7 @@ Stable column ID for lineage tracking.
 * **Work:** optional. Without it Coalesce uses the column's name as its id, so a rename drops the column and adds a new one.
 * Not for manual editing — value is a stable identifier generated once at creation time.
 * **Column added later:** make sure it gets its own `@id` too. If you're editing by hand, add a new, unique 6-hex-digit `@id("<value>")` along with the column; an agent can generate one for you. Don't reuse a value already on the node — a repeated value fails the **Duplicate Column IDs** check.
-* **Duplicate column names:** if the SELECT returns the same column name twice, Coalesce renames the extra copy (`SYSTEM_CREATE_DATE` → `SYSTEM_CREATE_DATE1`) and drops its `@id`; this is reported by the **Duplicate Column Names** check rather than as a missing ID.
+* **Duplicate column names:** if the SELECT returns the same column name twice, Coalesce renames the extra copy (`SYSTEM_CREATE_DATE` → `SYSTEM_CREATE_DATE1`). The **Duplicate Column Names** check stops the deploy and the run, whether or not the copy has its own `@id`: a column named like another one plus a number, whose name is not written as an alias in the node's SQL, is a renamed copy. A deliberate alias such as `REGIONKEY1` is written in the SQL, so it is not reported (without an `@id` it is a missing ID).
 
 **Example:**
 
@@ -1877,12 +2008,12 @@ Adds a `DEFAULT` expression to the column.
 | Parameter | Description |
 |-----------|-------------|
 | `hash_name` | Hash name used across columns to identify the columns included in the hash. |
-| `algo` | **(optional)** Hashing function. `MD5`, `SHA1`, `SHA224`, `SHA256`, `SHA384` and `SHA512` (any case) return a lowercase hex `String`. Any other ClickHouse hash function (e.g. `cityHash64`, `xxHash64`, `sipHash64`) is called as written. These return a `UInt64`, but Coalesce types every `get_hash` column as `String`, so the number is stored as its digits (e.g. `'7740249813402470115'`); wrap the call for a numeric column: `toUInt64({{ get_hash('GH', 'cityHash64') }})`. Defaults to `SHA1`. |
+| `algo` | **(optional)** Hashing function. `MD5`, `SHA1`, `SHA224`, `SHA256`, `SHA384` and `SHA512` (any case) return a lowercase hex `String`. Any other ClickHouse hash function (e.g. `cityHash64`, `xxHash64`, `sipHash64`) is called as written and stored as text — see the `cityHash64` example below. Defaults to `SHA1`. |
 | `delimiter` | **(optional)** Delimiter used to separate column values when generating the hash. Defaults to `\|\|` and can be customized; `''` concatenates without one. |
 
 * Each value is converted with `toString()`, and NULL is hashed as the text `'null'`.
 * Columns are combined in `hashOrder` order.
-* With no column in the group, `get_hash()` returns `NULL`.
+* With no column in the group, `get_hash()` returns `NULL`. Coalesce types the column `String` (not `Nullable`), so the table stores `''` (the empty string). `CAST` it to `Nullable(String)` to store `NULL`.
 
 **`get_hash()` examples:**
 
@@ -1901,10 +2032,15 @@ Using hash macro (algo=SHA256, delimiter='~')
 <col_name> AS <col_name> @inHash("GH_COL", 1),
 {{ get_hash('GH_COL', algo='SHA256', delimiter='~') }} AS `GH_COL`
 ```
-Using a ClickHouse hash function (UInt64 result)
+Using a ClickHouse hash function (`cityHash64`, `xxHash64`, `sipHash64`, ...)
 ```sql
 <col_name> AS <col_name> @inHash("GH_COL", 1),
 {{ get_hash('GH_COL', 'cityHash64') }} AS `GH_COL`
+```
+> **Note:** these functions return a `UInt64`, but Coalesce types every `get_hash` column as `String`, so the example above stores the number as text (e.g. `'7740249813402470115'`). For a numeric column, wrap the call in `toUInt64(...)`:
+```sql
+<col_name> AS <col_name> @inHash("GH_COL", 1),
+toUInt64({{ get_hash('GH_COL', 'cityHash64') }}) AS `GH_COL`
 ```
 Using multiple keys hash macro
 ```sql
@@ -1969,7 +2105,7 @@ Marks the column used to detect newer source rows for an incremental load (SCD T
 Marks this column as the timestamp a row was first created.
 
 * **Note:** Ignored on Views. Agentic creation only — manual creation adds this column automatically.
-* Expected expression: `CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_CREATE_DATE" @isSystemCreateDate` (a `DateTime`, whole seconds).
+* Expected expression: `now64(6) AS "SYSTEM_CREATE_DATE" @isSystemCreateDate` (a `DateTime64(6)`).
 
 **Dimension:**
 
@@ -1989,7 +2125,7 @@ Marks this column as the timestamp a row was last updated.
 
 * The clean-up after each load keeps, per key, only the row with the latest value of this column — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact).
 * **Note:** Ignored on Views. Agentic creation only — manual creation adds this column automatically.
-* Expected expression: `CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate` (a `DateTime`, whole seconds — see [Loads Within the Same Second](#known-limitations)).
+* Expected expression: `now64(6) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate` (a `DateTime64(6)`).
 
 **Dimension:**
 
@@ -2031,8 +2167,8 @@ Key annotation terms (`@orderBy`, `@primaryKey`, `@partitionBy`) are written int
 |---------|-------------|
 | `@not_null` | Fails on rows where the column is NULL.<br/>Example: `@not_null` |
 | `@uniqueness` | Fails when a value appears on more than one row.<br/>Example: `@uniqueness` |
-| `@empty` | Fails on rows where the column trims to the empty string.<br/>NULL values pass this test — they're caught by `@not_null` instead.<br/>Example: `@empty` |
-| `@accepted_values("<value>", ...)` | Fails on rows whose value is outside the allow list. NULL values pass.<br/>Repeatable — every occurrence on the column is merged into one list. Each call takes a comma-separated list or separate arguments —<br/>`accepted_values("1, 3, 5")`<br/>`accepted_values("1", "3", "5")`<br/>`accepted_values("1") accepted_values("3, 5")`<br/>Each value is pasted into the SQL verbatim, so write it as a valid SQL value for the column's data type —<br/>numeric: with or without double quotes<br/>string: single quotes inside double quotes, `"'<string>'"`<br/>boolean: `true`/`false`, with or without double quotes<br/>date/time: a literal in single quotes inside double quotes, or a function, e.g. `"'2026-01-01'"` or `"toDate('2026-01-01')"`<br/>Example: `@accepted_values("'ALGERIA', 'ARGENTINA'")` |
+| `@empty` | Fails on rows where the column is empty after `trimBoth(...)` removes leading and trailing spaces. Tabs and newlines aren't removed, so a value made only of them doesn't count as empty.<br/>On `FixedString` columns the test removes the zero bytes that pad the value first, so `''`, spaces and padding all count as empty.<br/>NULL values pass this test — they're caught by `@not_null` instead.<br/>For string columns only (`String`, `FixedString`, `LowCardinality(String)`, and their `Nullable` forms): on any other type ClickHouse rejects `trimBoth(...)` and the run fails with its error.<br/>Example: `@empty` |
+| `@accepted_values("<value>", ...)` | Fails on rows whose value is outside the allow list. NULL values pass.<br/>Repeatable — every occurrence on the column is merged into one list. Each call takes a comma-separated list or separate arguments —<br/>`accepted_values("1, 3, 5")`<br/>`accepted_values("1", "3", "5")`<br/>`accepted_values("1") accepted_values("3, 5")`<br/>Each value is pasted into the SQL verbatim, so write it as a valid SQL value for the column's data type —<br/>integer and `Float*`: with or without double quotes<br/>`Decimal` with a fractional part: as a string, single quotes inside double quotes, `"'12.3456'"` — an unquoted `12.3456` is a `Float64` in ClickHouse, and a `Decimal` value is not found in a list of `Float64` values unless the float is exact (`12.3456` is not found, `0.5` is), so the test fails rows that hold an accepted value (`rejected_values`: misses rows that hold a rejected value)<br/>string: single quotes inside double quotes, `"'<string>'"`<br/>boolean: `true`/`false`, with or without double quotes<br/>date/time: a literal in single quotes inside double quotes, or a function, e.g. `"'2026-01-01'"` or `"toDate('2026-01-01')"`<br/>Example: `@accepted_values("'ALGERIA', 'ARGENTINA'")` |
 | `@rejected_values("<value>", ...)` | Fails on rows whose value is in the deny list. NULL values pass.<br/>Same syntax and quoting rules as `accepted_values`.<br/>Example: `@rejected_values("'NA'")` |
 | `@min_max("<min>", "<max>")` | Fails on rows outside the inclusive range. NULL values pass.<br/>Applies to numeric and date/time columns only.<br/>Each bound is pasted into the SQL verbatim, so write it as a valid SQL value for the column's data type —<br/>positive numeric (integer, decimal or float): with or without double quotes<br/>negative numeric (integer, decimal or float): double quotes required<br/>date/time: a literal or expression in double quotes, e.g. `"'2026-01-01'"`, `"toDate('2026-01-01')"` or `"now()"`<br/>Example: `@min_max("0", "4")` |
 | `@min_value("<min>")` | Fails on rows below the bound. NULL values pass.<br/>Value formatting — see `min_max`.<br/>Example: `@min_value("0")` |
@@ -2122,10 +2258,7 @@ Changing the parameter does not recreate tables already deployed. Coalesce rende
   Remove any `@orderBy` / `@primaryKey` from nodes that become a ReplacingMergeTree first — they are not accepted on one. Decide the package `engine` before the first deployment where possible.
 
 * **Changing `joinUseNulls`**:  
-Switching the value on tables that already hold data changes the unmatched join values (e.g. `''` becomes `NULL`), so the next run updates those rows even though the source has not changed — on a Dimension, as new SCD Type 2 versions when the joined column is `@isChangeTracking`. Views are not affected: they use [`@joinUseNulls`](#joinusenulls). Choose the value before the first load and use the same one in every environment.
-
-* **Loads Within the Same Second**:  
-The default system column expression `CAST(CURRENT_TIMESTAMP AS TIMESTAMP)` gives a `DateTime` column, which stores whole seconds. The ReplacingMergeTree and the clean-up tell a row's copies apart by `SYSTEM_UPDATE_DATE`, so if two loads change the same key within one second both copies have the same value: a ReplacingMergeTree keeps the one inserted last, the clean-up keeps both. Use a `DateTime64` type for `SYSTEM_UPDATE_DATE` (e.g. `CAST(now64(6) AS DateTime64(6))`) if a node can run more than once a second.
+Switching the value on tables that already hold data changes the unmatched join values (e.g. `''` becomes `NULL`), so the next run updates those rows even though the source has not changed — on a Dimension, as new SCD Type 2 versions when the joined column is `@isChangeTracking`. Views are not affected: they use [`@joinUseNulls`](#joinusenulls) (without it, `join_use_nulls = 0` in a view with a `JOIN`). Choose the value before the first load and use the same one in every environment.
 
 * **Duplicate Business Keys**:  
 Duplicates in the source are not rejected: the load keeps one row per business key (under `lastModified` the one with the newest `@lastModifiedTracking` value; otherwise which row is kept is not defined) and drops the rest without an error. De-duplicate upstream — see [Unique Business Keys](#unique-business-keys-fact-and-dimension).
@@ -2167,10 +2300,10 @@ A ReplacingMergeTree uses the `@isSystemUpdateDate` column (`SYSTEM_UPDATE_DATE`
   Cannot alter version column SYSTEM_UPDATE_DATE to type Nullable(DateTime64(6)) because version column must be of an integer type or of type Date or DateTime.
   ```
 
-  Add `@notNull` to the column:
+  Add `@notNull` to the column, or use `now64(6)`, which is not null:
 
   ```sql
-  CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
+  now64(6) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate
   ```
 
   A failed redeploy leaves the table unchanged, with a `<table>_COALESCE_INTERNAL_TABLE` clone that the next successful redeploy replaces (or drop it).
@@ -2182,7 +2315,7 @@ A location whose mapping changed (same location, new database) is only detected 
 Table redeploys copy the table with `CREATE TABLE ... CLONE AS`, which ClickHouse does not support in a `Replicated` database engine. Use an `Atomic` database (the default) or ClickHouse Cloud's `Shared` database, where `EXCHANGE TABLES` is also atomic.
 
 * **Large or High-Precision Numbers in Test Values**:  
-An unquoted number in an annotation is read as a floating-point value, so integers beyond roughly 15–16 digits and decimals with more than about 16 significant digits are rounded before the test runs. Wrap such values in double quotes — `@accepted_values("12345678901234567890")` — to pass them through exactly.
+An unquoted number in an annotation is read as a floating-point value, so integers beyond roughly 15–16 digits and decimals with more than about 16 significant digits are rounded before the test runs. Wrap such values in double quotes — `@accepted_values("12345678901234567890")` — to pass them through exactly. For a `Decimal` column, also put single quotes around a value with a fractional part in `@accepted_values` / `@rejected_values` (`"'12.3456'"`): ClickHouse reads an unquoted `12.3456` in the SQL as a `Float64`, which a `Decimal` value does not match.
 
 * **Commas Inside Values in `accepted_values`/`rejected_values`**:  
 Values are split on every comma, trimmed, and re-joined with `", "`. A string written with exactly one space after each comma, like `"'4, 5'"`, is tested as written; any other spacing is normalised, so `"'A,B'"` is tested as `'A, B'`. A function call with several arguments (e.g. `"toDateTime('2026-06-15 00:00:00', 'UTC')"`) keeps working, because the pieces are re-joined in the same order.
@@ -2516,12 +2649,12 @@ The default strategy. Any change in a non-key column overwrites the row.
 ```sql
 @orderBy("`c_custkey`")
 SELECT
-    generateUUIDv4()                         AS `customer_key`       @id("a10000") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
+    generateUUIDv4()                         AS `customer_key`       @id("a10000") @isSurrogateKey @defaultValue("generateUUIDv4()"),
     `c_custkey`                              AS `c_custkey`          @id("a10001") @isBusinessKey @notNull,
     `c_name`                                 AS `c_name`             @id("a10002"),
     `c_address`                              AS `c_address`          @id("a10003"),
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_CREATE_DATE` @id("a10008") @isSystemCreateDate,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_UPDATE_DATE` @id("a10009") @isSystemUpdateDate
+    now64(6)                                 AS `SYSTEM_CREATE_DATE` @id("a10008") @isSystemCreateDate,
+    now64(6)                                 AS `SYSTEM_UPDATE_DATE` @id("a10009") @isSystemUpdateDate
 FROM {{ ref('SRC', 'customer') }} `customer`
 ```
 
@@ -2533,15 +2666,15 @@ A change in a column marked `@isChangeTracking` keeps the old row and adds a new
 @mergeStrategy("changeTracking")
 @orderBy("`c_custkey`", "`SYSTEM_VERSION`")
 SELECT
-    generateUUIDv4()                                     AS `customer_key`        @id("b10000") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
+    generateUUIDv4()                                     AS `customer_key`        @id("b10000") @isSurrogateKey @defaultValue("generateUUIDv4()"),
     `c_custkey`                                          AS `c_custkey`           @id("b10001") @isBusinessKey @notNull,
     `c_name`                                             AS `c_name`              @id("b10002"),
     `c_address`                                          AS `c_address`           @id("b10003") @isChangeTracking,
     1                                                    AS `SYSTEM_VERSION`      @id("b10005") @isSystemVersion,
     'Y'                                                  AS `SYSTEM_CURRENT_FLAG` @id("b10006") @isSystemCurrentFlag,
     CAST('2299-12-31 23:59:59.999999' AS DateTime64(6))  AS `SYSTEM_END_DATE`     @id("b10007") @isSystemEndDate,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)                 AS `SYSTEM_CREATE_DATE`  @id("b10008") @isSystemCreateDate,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)                 AS `SYSTEM_UPDATE_DATE`  @id("b10009") @isSystemUpdateDate
+    now64(6)                                             AS `SYSTEM_CREATE_DATE`  @id("b10008") @isSystemCreateDate,
+    now64(6)                                             AS `SYSTEM_UPDATE_DATE`  @id("b10009") @isSystemUpdateDate
 FROM {{ ref('SRC', 'customer') }} `customer`
 ```
 
@@ -2555,12 +2688,12 @@ A row is overwritten only when its `@lastModifiedTracking` value is newer than t
 @mergeStrategy("lastModified")
 @orderBy("`c_custkey`")
 SELECT
-    generateUUIDv4()                         AS `customer_key`       @id("c10000") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
+    generateUUIDv4()                         AS `customer_key`       @id("c10000") @isSurrogateKey @defaultValue("generateUUIDv4()"),
     `c_custkey`                              AS `c_custkey`          @id("c10001") @isBusinessKey @notNull,
     `c_name`                                 AS `c_name`             @id("c10002"),
     `updated_at`                             AS `updated_at`         @id("c10003") @lastModifiedTracking(1),
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_CREATE_DATE` @id("c10008") @isSystemCreateDate,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_UPDATE_DATE` @id("c10009") @isSystemUpdateDate
+    now64(6)                                 AS `SYSTEM_CREATE_DATE` @id("c10008") @isSystemCreateDate,
+    now64(6)                                 AS `SYSTEM_UPDATE_DATE` @id("c10009") @isSystemUpdateDate
 FROM {{ ref('SRC', 'customer') }} `customer`
 ```
 
@@ -2572,15 +2705,15 @@ Same as above, but a newer value keeps the old row and adds a new version.
 @mergeStrategy("lastModified")
 @orderBy("`n_Nationkey`", "`SYSTEM_VERSION`")
 SELECT
-    generateUUIDv4()                                     AS `DIM_Nation_Test_KEY` @id("f8e055") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
+    generateUUIDv4()                                     AS `DIM_Nation_Test_KEY` @id("f8e055") @isSurrogateKey @defaultValue("generateUUIDv4()"),
     `n_Nationkey`                                        AS `n_Nationkey`         @id("4fdd08") @isBusinessKey,
     `n_Name`                                             AS `n_Name`              @id("1dcbf7"),
     `n_Regionkey`                                        AS `n_Regionkey`         @id("5db1aa"),
     `last_Modified`                                      AS `last_Modified`       @id("15ef53") @lastModifiedTracking(2),
     1                                                    AS `SYSTEM_VERSION`      @id("cdab35") @isSystemVersion,
     'Y'                                                  AS `SYSTEM_CURRENT_FLAG` @id("e5e916") @isSystemCurrentFlag,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)                 AS `SYSTEM_CREATE_DATE`  @id("2538b2") @isSystemCreateDate,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)                 AS `SYSTEM_UPDATE_DATE`  @id("6b90e8") @isSystemUpdateDate,
+    now64(6)                                             AS `SYSTEM_CREATE_DATE`  @id("2538b2") @isSystemCreateDate,
+    now64(6)                                             AS `SYSTEM_UPDATE_DATE`  @id("6b90e8") @isSystemUpdateDate,
     CAST('2299-12-31 23:59:59.999999' AS DateTime64(6))  AS `SYSTEM_END_DATE`     @id("d9a32f") @isSystemEndDate
 FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`
 ```
@@ -2593,12 +2726,12 @@ Adds a placeholder row for unmatched lookups. Needs a surrogate key column.
 @zeroKey("00000000-0000-0000-0000-000000000000", "'UNKNOWN'", "1900-01-01 00:00:00", true)
 @orderBy("`c_custkey`")
 SELECT
-    generateUUIDv4()                         AS `customer_key`       @id("f10000") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
+    generateUUIDv4()                         AS `customer_key`       @id("f10000") @isSurrogateKey @defaultValue("generateUUIDv4()"),
     `c_custkey`                              AS `c_custkey`          @id("f10001") @isBusinessKey,
     `c_name`                                 AS `c_name`             @id("f10002") @zeroKey("'N/A'"),
     `c_mktsegment`                           AS `c_mktsegment`       @id("f10003"),
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_CREATE_DATE` @id("f10008") @isSystemCreateDate,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_UPDATE_DATE` @id("f10009") @isSystemUpdateDate
+    now64(6)                                 AS `SYSTEM_CREATE_DATE` @id("f10008") @isSystemCreateDate,
+    now64(6)                                 AS `SYSTEM_UPDATE_DATE` @id("f10009") @isSystemUpdateDate
 FROM {{ ref('SRC', 'customer') }} `customer`
 ```
 
@@ -2624,12 +2757,12 @@ Every merge strategy loads one row per business key and treats a NULL key as one
 @mergeStrategy("changeTracking")
 @tests("SELECT `n_Nationkey`, `n_Name` FROM {{ ref('SRC', 'Nation_Test') }} GROUP BY `n_Nationkey`, `n_Name` HAVING count() > 1 OR `n_Nationkey` IS NULL OR `n_Name` IS NULL", false, "Before")  -- runs Before the load, continueOnFailure=false
 SELECT
-    generateUUIDv4()                         AS `DIM_NATION_KEY`     @id("a1b2c3") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
+    generateUUIDv4()                         AS `DIM_NATION_KEY`     @id("a1b2c3") @isSurrogateKey @defaultValue("generateUUIDv4()"),
     `n_Nationkey`                            AS `n_Nationkey`        @id("b2c3d4") @isBusinessKey,
     `n_Name`                                 AS `n_Name`             @id("c3d4e5") @isBusinessKey,
     `n_Regionkey`                            AS `n_Regionkey`        @id("d4e5f6"),
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_CREATE_DATE` @id("e5f6a7") @isSystemCreateDate,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_UPDATE_DATE` @id("f6a7b8") @isSystemUpdateDate
+    now64(6)                                 AS `SYSTEM_CREATE_DATE` @id("e5f6a7") @isSystemCreateDate,
+    now64(6)                                 AS `SYSTEM_UPDATE_DATE` @id("f6a7b8") @isSystemUpdateDate
 FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`
 ```
 * The test query must read the same source, CTE and filters as the node's SELECT, so it checks the rows that are actually loaded. List every `@isBusinessKey` column in the `GROUP BY` and the `IS NULL` checks.
@@ -2647,7 +2780,7 @@ SELECT
     `o_orderkey`                             AS `o_orderkey`         @id("1a0001"),
     `o_custkey`                              AS `o_custkey`          @id("1a0002"),
     `o_totalprice`                           AS `o_totalprice`       @id("1a0003"),
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_CREATE_DATE` @id("1a0008") @isSystemCreateDate
+    now64(6)                                 AS `SYSTEM_CREATE_DATE` @id("1a0008") @isSystemCreateDate
 FROM {{ ref('SRC', 'orders') }} `orders`
 ```
 
@@ -2661,8 +2794,8 @@ SELECT
     `o_orderkey`                             AS `o_orderkey`         @id("1b0001") @isBusinessKey @notNull,
     `o_orderstatus`                          AS `o_orderstatus`      @id("1b0002"),
     `o_totalprice`                           AS `o_totalprice`       @id("1b0003"),
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_CREATE_DATE` @id("1b0008") @isSystemCreateDate,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_UPDATE_DATE` @id("1b0009") @isSystemUpdateDate
+    now64(6)                                 AS `SYSTEM_CREATE_DATE` @id("1b0008") @isSystemCreateDate,
+    now64(6)                                 AS `SYSTEM_UPDATE_DATE` @id("1b0009") @isSystemUpdateDate
 FROM {{ ref('SRC', 'orders') }} `orders`
 ```
 
@@ -2677,8 +2810,8 @@ SELECT
     `o_orderkey`                             AS `o_orderkey`         @id("1c0001") @isBusinessKey @notNull,
     `o_orderstatus`                          AS `o_orderstatus`      @id("1c0002"),
     `updated_at`                             AS `updated_at`         @id("1c0003") @lastModifiedTracking,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_CREATE_DATE` @id("1c0008") @isSystemCreateDate,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_UPDATE_DATE` @id("1c0009") @isSystemUpdateDate
+    now64(6)                                 AS `SYSTEM_CREATE_DATE` @id("1c0008") @isSystemCreateDate,
+    now64(6)                                 AS `SYSTEM_UPDATE_DATE` @id("1c0009") @isSystemUpdateDate
 FROM {{ ref('SRC', 'orders') }} `orders`
 ```
 
@@ -2698,14 +2831,14 @@ SELECT
     `ps_partkey`                             AS `ps_partkey`         @id("1e0001") @notNull,
     `ps_suppkey`                             AS `ps_suppkey`         @id("1e0002") @notNull,
     `ps_availqty`                            AS `ps_availqty`        @id("1e0003"),
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP)     AS `SYSTEM_CREATE_DATE` @id("1e0008") @isSystemCreateDate
+    now64(6)                                 AS `SYSTEM_CREATE_DATE` @id("1e0008") @isSystemCreateDate
 FROM {{ ref('SRC', 'partsupp') }} `partsupp`
 ```
 * **Match columns** are the non-system columns that come from the source: Coalesce's column lineage links them to a source column (`ps_partkey`, `ps_suppkey`, `ps_availqty` above). The load stage shows them in a `/* Match columns … */` comment.
-* **Left out of the match:** system columns (`SYSTEM_CREATE_DATE` above), and any column that is only a transform with no source column — a constant, `now()`, `CURRENT_TIMESTAMP`, `generateUUIDv4()`, a load or batch id. Such a column never makes a stored row look new, so re-running the load doesn't insert the same row again.
+* **Left out of the match:** system columns (`SYSTEM_CREATE_DATE` above), and any column that is only a transform with no source column — a constant, `now()`, `now64(6)`, `generateUUIDv4()`, a load or batch id. Such a column never makes a stored row look new, so re-running the load doesn't insert the same row again.
 * **No lineage to go on:** when the node has its own `WITH` CTEs (Coalesce does not trace columns through them) or reads a table function, every non-system column is matched. Then a column that changes on every run makes every row new on every run — mark such a timestamp `@isSystemCreateDate` / `@isSystemUpdateDate`, or leave it out.
 * Matching is NULL-safe (`isNotDistinctFrom`): a row with a NULL in a match column matches its stored copy and is not inserted again.
-* **ReplacingMergeTree** (`@engine("ReplacingMergeTree")` or the package `engine` parameter): `ORDER BY` is the match columns, so identical rows also collapse — within one insert and at background merges. The version argument is the `@isSystemUpdateDate` column when the node has one (``ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)``, marked `@notNull`); without one the engine is a bare `ReplacingMergeTree`, which keeps the last copy inserted — the copies only differ in the columns left out of the match. No business key or update date is required; `@orderBy` / `@primaryKey` and an engine with its own arguments stop the deploy and the run (**Invalid configuration: engine**), and so does a node whose columns are all system columns. Readers need `FINAL` — see [Querying a ReplacingMergeTree](#querying-a-replacingmergetree). (The example above sets `@orderBy`, so it is for a MergeTree.)
+* **ReplacingMergeTree** (`@engine("ReplacingMergeTree")` or the package `engine` parameter): `ORDER BY` is the match columns, so identical rows also collapse — within one insert and at background merges. The version argument is the `@isSystemUpdateDate` column when the node has one (``ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)``, not `Nullable`); without one the engine is a bare `ReplacingMergeTree`, which keeps the last copy inserted — the copies only differ in the columns left out of the match. No business key or update date is required; `@orderBy` / `@primaryKey` and an engine with its own arguments stop the deploy and the run (**Invalid configuration: engine**), and so does a node whose columns are all system columns. Readers need `FINAL` — see [Querying a ReplacingMergeTree](#querying-a-replacingmergetree). (The example above sets `@orderBy`, so it is for a MergeTree.)
 * **MergeTree and ReplacingMergeTree give the same result** (as for every strategy — see [How a Load Replaces Rows](#how-a-load-replaces-rows-dimension-and-fact)). Each load keeps one source row per combination of match columns (`LIMIT 1 BY`; the row with the latest `@isSystemUpdateDate` when the node has one, as a ReplacingMergeTree's version argument would) and skips combinations already stored. So a MergeTree holds one row per combination — what a ReplacingMergeTree returns with `FINAL` — without needing `FINAL`; on a ReplacingMergeTree, ClickHouse also collapses copies at merges. Columns left out of the match (system columns, transforms) are not compared, so for duplicates that differ only there, the copy kept is not defined unless an `@isSystemUpdateDate` decides it.
 * Changing the match columns (adding or removing a source column) on a ReplacingMergeTree changes its `ORDER BY` and recreates the table on redeploy — see [Sort Key and Partition Key Changes](#sort-key-and-partition-key-changes).
 
@@ -2718,14 +2851,14 @@ A fact that looks up each dimension's surrogate key, pointing unmatched members 
 @orderBy("`l_orderkey`", "`l_linenumber`")
 @partitionBy("toYYYYMM(`o_orderdate`)")
 SELECT
-    `ol`.`l_orderkey`        AS `l_orderkey`         @id("fo0001") @isBusinessKey @notNull,
-    `ol`.`l_linenumber`      AS `l_linenumber`       @id("fo0002") @isBusinessKey @notNull,
-    coalesce(`dc`.`customer_key`, toUUID('00000000-0000-0000-0000-000000000000')) AS `customer_key` @id("fo0003") @notNull,
-    coalesce(`dp`.`part_key`, toUUID('00000000-0000-0000-0000-000000000000'))     AS `part_key`     @id("fo0004") @notNull,
-    `ol`.`o_orderdate`       AS `o_orderdate`        @id("fo0006") @notNull,
-    `ol`.`net_amount`        AS `net_amount`         @id("fo0011"),
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_CREATE_DATE` @id("fo0013") @isSystemCreateDate,
-    CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS `SYSTEM_UPDATE_DATE` @id("fo0014") @isSystemUpdateDate
+    `ol`.`l_orderkey`        AS `l_orderkey`         @id("f00001") @isBusinessKey @notNull,
+    `ol`.`l_linenumber`      AS `l_linenumber`       @id("f00002") @isBusinessKey @notNull,
+    coalesce(`dc`.`customer_key`, toUUID('00000000-0000-0000-0000-000000000000')) AS `customer_key` @id("f00003") @notNull,
+    coalesce(`dp`.`part_key`, toUUID('00000000-0000-0000-0000-000000000000'))     AS `part_key`     @id("f00004") @notNull,
+    `ol`.`o_orderdate`       AS `o_orderdate`        @id("f00006") @notNull,
+    `ol`.`net_amount`        AS `net_amount`         @id("f00011"),
+    now64(6) AS `SYSTEM_CREATE_DATE` @id("f00013") @isSystemCreateDate,
+    now64(6) AS `SYSTEM_UPDATE_DATE` @id("f00014") @isSystemUpdateDate
 FROM {{ ref('TARGET', 'WRK_ORDER_LINE') }} `ol`
 LEFT JOIN {{ ref('TARGET', 'DIM_CUSTOMER') }} `dc` ON `dc`.`c_custkey` = `ol`.`o_custkey` AND `dc`.`SYSTEM_CURRENT_FLAG` = 'Y'
 LEFT JOIN {{ ref('TARGET', 'DIM_PART') }} `dp` ON `dp`.`p_partkey` = `ol`.`l_partkey`
