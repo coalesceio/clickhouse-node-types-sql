@@ -13,6 +13,6 @@ steps:
   - 8e9a3c99-1861-4140-9d37-755e1937a46c
   - 8f3166a0-047b-40e8-9f97-11d1a772e425
   - a767bdd2-07de-45d4-b2fa-ad47b821d528
-  - f52bc508-c7d9-4994-8bd2-9d4e09bec562
   - aac36045-9310-43c3-a0dd-af0a08ab5df9
+  - f52bc508-c7d9-4994-8bd2-9d4e09bec562
 type: Subgraph

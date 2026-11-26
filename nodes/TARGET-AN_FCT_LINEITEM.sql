@@ -7,7 +7,6 @@
 @partitionBy("toYYYYMM(`ship_date`)")
 @settings("index_granularity = 8192")
 @querySettings("max_threads = 8", "max_memory_usage = 20000000000", "max_bytes_before_external_group_by = 10000000000")
-@optimize
 @tests("SELECT 1 FROM {{ this }} FINAL WHERE `gross_amount` < `net_amount`", true, "After")
 SELECT
     `w`.`l_orderkey`          AS `l_orderkey`         @id("afl01") @isBusinessKey @notNull @description("Order key") @not_null,

@@ -7,9 +7,8 @@
 @partitionBy("toYear(`ship_month`)")
 @settings("index_granularity = 8192")
 @querySettings("max_threads = 8", "max_memory_usage = 20000000000", "max_bytes_before_external_group_by = 10000000000", "max_bytes_in_join = 10000000000")
-@optimize
 @tests("SELECT `part_id`, `ship_month` FROM {{ this }} FINAL GROUP BY `part_id`, `ship_month` HAVING count() > 1", false, "After")
-@tests("SELECT 1 FROM {{ this }} FINAL WHERE `part_sk` NOT IN (SELECT `part_sk` FROM {{ ref('TARGET', 'AN_DIM_PART') }} FINAL)", true, "After")
+@tests("SELECT 1 FROM {{ this }} FINAL WHERE `part_sk` NOT IN (SELECT `part_sk` FROM {{ ref('TARGET', 'AN_DIM_PART_RMT') }} FINAL)", true, "After")
 SELECT
     `w`.`part_key`                    AS `part_id`             @id("afq01") @isBusinessKey @notNull @description("Part business key (l_partkey)") @not_null,
     toStartOfMonth(`w`.`ship_date`)   AS `ship_month`          @id("afq02") @isBusinessKey @notNull @description("First day of the ship month") @not_null @min_max("toDate('1990-01-01')", "today()"),
@@ -25,6 +24,6 @@ SELECT
     CAST(now64(6) AS DateTime64(6))   AS `SYSTEM_CREATE_DATE`  @id("afq11") @isSystemCreateDate @notNull,
     CAST(now64(6) AS DateTime64(6))   AS `SYSTEM_UPDATE_DATE`  @id("afq12") @isSystemUpdateDate @notNull @description("ReplacingMergeTree version column: the latest copy wins") @relative_time(">=", "SYSTEM_CREATE_DATE")
 FROM {{ ref('TARGET', 'AN_WRK_LINEITEM') }} `w`
-LEFT JOIN {{ ref('TARGET', 'AN_DIM_PART') }} `d`
+LEFT JOIN {{ ref('TARGET', 'AN_DIM_PART_RMT') }} `d`
   ON `d`.`part_id` = `w`.`part_key` AND `d`.`SYSTEM_CURRENT_FLAG` = 'Y'
 GROUP BY `w`.`part_key`, toStartOfMonth(`w`.`ship_date`), `d`.`part_sk`

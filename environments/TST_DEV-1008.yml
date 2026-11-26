@@ -1,0 +1,11 @@
+fileVersion: 1
+id: "1008"
+mappingDefinitions:
+  SRC:
+    database: ""
+    schema: WORKSPACE_ANANDHI
+  TARGET:
+    database: ""
+    schema: WORKSPACE_ANANDHI_TST_DEPLOY
+name: TST_DEV
+type: Environment
