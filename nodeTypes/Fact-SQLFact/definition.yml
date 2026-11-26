@@ -65,7 +65,7 @@ metadata:
                 - name: engine
                   type: string
                   isRequired: true
-                  default: ReplacingMergeTree
+                  default: MergeTree
                   example: MergeTree
                   options:
                     - ReplacingMergeTree
