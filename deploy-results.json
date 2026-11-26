@@ -1,11 +1,737 @@
 {
   "runResults": {
-    "runStartTime": "2026-11-26T11:17:03.539Z",
-    "runEndTime": "2026-11-26T11:17:20.464Z",
+    "runStartTime": "2026-11-26T12:07:58.089Z",
+    "runEndTime": "2026-11-26T12:08:22.516Z",
     "runType": "deploy",
     "runStatus": "completed",
-    "runID": 31146,
-    "runResults": [],
+    "runID": 31148,
+    "runResults": [
+      {
+        "nodeID": "245033b8-d045-4b85-8a5a-adc4498bab89",
+        "queryResultSequence": {
+          "name": "WRK_SALES_CTE_ARRAY_JOIN",
+          "queryResults": [
+            {
+              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`WRK_SALES_CTE_ARRAY_JOIN`\n            (\n                `product` String,\n                `sales` Nullable(UInt16)\n            )\n            ORDER BY tuple()",
+              "success": true,
+              "rows": [],
+              "fields": [],
+              "error": null,
+              "startTime": "2026-11-26T12:08:13.192Z",
+              "endTime": "2026-11-26T12:08:13.719Z",
+              "name": "Create table",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "e2fccd74-bdad-400f-bbcd-575e416f7fc8",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:13.190Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:13.719Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "7457371f-164a-46ac-a4cb-67e8f12fff39",
+        "queryResultSequence": {
+          "name": "AN_WRK_LINEITEM",
+          "queryResults": [
+            {
+              "sql": "\n        select 1=0",
+              "success": true,
+              "rows": [
+                {
+                  "values": [
+                    0
+                  ]
+                }
+              ],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "equals(1, 0)"
+                }
+              ],
+              "error": null,
+              "startTime": "2026-11-26T12:08:10.663Z",
+              "endTime": "2026-11-26T12:08:11.525Z",
+              "name": "Metadata Update-Default",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "089a5ba7-c303-453e-b31b-08aaa8ec35f4",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:10.661Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:11.525Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "bfb9af9f-ad7e-4e64-b725-dca6d84d734e",
+        "queryResultSequence": {
+          "name": "WRK_lineitem_limit",
+          "queryResults": [
+            {
+              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`WRK_lineitem_limit`\n            (\n                `l_orderkey` UInt32,\n                `l_partkey` UInt32,\n                `l_suppkey` UInt32,\n                `l_linenumber` Int32,\n                `l_quantity` Decimal(12, 2),\n                `l_extendedprice` Decimal(12, 2),\n                `l_discount` Decimal(12, 2),\n                `l_tax` Decimal(12, 2),\n                `l_returnflag` FixedString(1),\n                `l_linestatus` FixedString(1),\n                `l_shipdate` Date,\n                `l_commitdate` Date,\n                `l_receiptdate` Date,\n                `l_shipinstruct` FixedString(25),\n                `l_shipmode` FixedString(10),\n                `l_comment` String\n            )\n            ORDER BY tuple()",
+              "success": true,
+              "rows": [],
+              "fields": [],
+              "error": null,
+              "startTime": "2026-11-26T12:08:13.195Z",
+              "endTime": "2026-11-26T12:08:13.773Z",
+              "name": "Create table",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "9a5934c8-2763-42ee-b13a-d1917d1cd648",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:13.194Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:13.773Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "f52bc508-c7d9-4994-8bd2-9d4e09bec562",
+        "queryResultSequence": {
+          "name": "AN_FCT_SUPPLIER_PART",
+          "queryResults": [
+            {
+              "sql": "\n        select 1=0",
+              "success": true,
+              "rows": [
+                {
+                  "values": [
+                    0
+                  ]
+                }
+              ],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "equals(1, 0)"
+                }
+              ],
+              "error": null,
+              "startTime": "2026-11-26T12:08:10.666Z",
+              "endTime": "2026-11-26T12:08:11.544Z",
+              "name": "Metadata Update-Default",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "3c092242-4632-4d20-821b-a38e81ce17b6",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:10.665Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:11.545Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "8e9a3c99-1861-4140-9d37-755e1937a46c",
+        "queryResultSequence": {
+          "name": "AN_DIM_ORDER",
+          "queryResults": [
+            {
+              "sql": "\n        select 1=0",
+              "success": true,
+              "rows": [
+                {
+                  "values": [
+                    0
+                  ]
+                }
+              ],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "equals(1, 0)"
+                }
+              ],
+              "error": null,
+              "startTime": "2026-11-26T12:08:10.668Z",
+              "endTime": "2026-11-26T12:08:11.554Z",
+              "name": "Metadata Update-Default",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "df28ac3e-a2cb-411f-b731-0fc2863a9115",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:10.668Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:11.555Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "8f7e1f39-7c23-49de-9920-41016672462f",
+        "queryResultSequence": {
+          "name": "WRK_customer_except",
+          "queryResults": [
+            {
+              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`WRK_customer_except`\n            (\n                `c_name` String,\n                `c_address` String,\n                `c_nationkey` UInt32,\n                `c_phone` FixedString(15),\n                `c_acctbal` Decimal(12, 2),\n                `c_mktsegment` FixedString(10),\n                `c_comment` String\n            )\n            ORDER BY tuple()",
+              "success": true,
+              "rows": [],
+              "fields": [],
+              "error": null,
+              "startTime": "2026-11-26T12:08:13.196Z",
+              "endTime": "2026-11-26T12:08:13.687Z",
+              "name": "Create table",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "c0f1bac0-4f7c-44cb-9de6-552f87ed9e85",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:13.196Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:13.688Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "1822e151-081c-4f22-aae0-c91385aaa050",
+        "queryResultSequence": {
+          "name": "AN_WRK_LINE_EVENTS",
+          "queryResults": [
+            {
+              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_WRK_LINE_EVENTS`\n            (\n                `l_orderkey` UInt32 COMMENT 'Order key',\n                `l_linenumber` Int32 COMMENT 'Line number within the order',\n                `part_key` UInt32 COMMENT 'Part key',\n                `supplier_key` UInt32 COMMENT 'Supplier key',\n                `ship_mode` String COMMENT 'Shipping mode',\n                `event_type` String COMMENT 'SHIP, COMMIT or RECEIPT',\n                `event_date` Date COMMENT 'Date of the event',\n                `quantity` Decimal(12, 2) COMMENT 'Quantity',\n                `net_amount` Decimal(18, 4) COMMENT 'extended_price * (1 - discount)'\n            )\n            PARTITION BY toYear(`event_date`)\n            ORDER BY (`event_date`, `event_type`, `l_orderkey`, `l_linenumber`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN line events - Work table: UNION ALL of the ship, commit and receipt dates of each line item, one row per line item and event'",
+              "success": true,
+              "rows": [],
+              "fields": [],
+              "error": null,
+              "startTime": "2026-11-26T12:08:13.199Z",
+              "endTime": "2026-11-26T12:08:13.765Z",
+              "name": "Create table",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "988424d2-f200-4802-8a5e-cf2585a8747c",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:13.199Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:13.765Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "a767bdd2-07de-45d4-b2fa-ad47b821d528",
+        "queryResultSequence": {
+          "name": "AN_FCT_LINEITEM",
+          "queryResults": [
+            {
+              "sql": "\n        select 1=0",
+              "success": true,
+              "rows": [
+                {
+                  "values": [
+                    0
+                  ]
+                }
+              ],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "equals(1, 0)"
+                }
+              ],
+              "error": null,
+              "startTime": "2026-11-26T12:08:10.670Z",
+              "endTime": "2026-11-26T12:08:11.500Z",
+              "name": "Metadata Update-Default",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "1c5f6b10-4004-4d80-a914-ae4b12555c6b",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:10.669Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:11.500Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "61e94dd9-67b3-4cd5-8bbf-e86323b6e47e",
+        "queryResultSequence": {
+          "name": "AN_FCT_SUPPLIER_MONTHLY",
+          "queryResults": [
+            {
+              "sql": "\n        select 1=0",
+              "success": true,
+              "rows": [
+                {
+                  "values": [
+                    0
+                  ]
+                }
+              ],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "equals(1, 0)"
+                }
+              ],
+              "error": null,
+              "startTime": "2026-11-26T12:08:10.672Z",
+              "endTime": "2026-11-26T12:08:11.511Z",
+              "name": "Metadata Update-Default",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "7c40254b-dfa2-4d61-8661-1d5aa0a4271f",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:10.672Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:11.512Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "f7b58d77-f4f7-43a2-adf4-95f828ce0983",
+        "queryResultSequence": {
+          "name": "AN_WRK_CUSTOMER_REGION",
+          "queryResults": [
+            {
+              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_WRK_CUSTOMER_REGION`\n            (\n                `c_custkey` UInt32 COMMENT 'Customer business key',\n                `customer_name` String COMMENT 'Customer name',\n                `nation_key` UInt32 COMMENT 'Nation key (TPC-H 0-24)',\n                `region_key` UInt32 COMMENT 'Region key (TPC-H 0-4)',\n                `region_name` String COMMENT 'Region name',\n                `market_segment` String COMMENT 'Market segment',\n                `account_balance` Decimal(12, 2) COMMENT 'Account balance'\n            )\n            ORDER BY (`c_custkey`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN line events - Work table: customer JOIN region, using the TPC-H nation-to-region mapping on c_nationkey'",
+              "success": true,
+              "rows": [],
+              "fields": [],
+              "error": null,
+              "startTime": "2026-11-26T12:08:13.202Z",
+              "endTime": "2026-11-26T12:08:13.723Z",
+              "name": "Create table",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "b7fe3884-da4a-4c9e-86b7-e8d84785bfb3",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:13.201Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:13.724Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "497dac89-3778-41be-8f26-29c2e2dc5a93",
+        "queryResultSequence": {
+          "name": "AN_FCT_LINE_EVENT_DAILY",
+          "queryResults": [
+            {
+              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_FCT_LINE_EVENT_DAILY`\n            (\n                `event_date` Date COMMENT 'Event date',\n                `event_type` String COMMENT 'SHIP, COMMIT or RECEIPT',\n                `ship_mode` String COMMENT 'Shipping mode',\n                `ship_mode_sk` UUID COMMENT 'Ship mode surrogate key from AN_DIM_SHIP_MODE; zero key when unresolved',\n                `line_count` UInt64 COMMENT 'Line items with this event on the day',\n                `order_count` UInt64 COMMENT 'Distinct orders',\n                `supplier_count` UInt64 COMMENT 'Distinct suppliers',\n                `total_quantity` Decimal(38, 2) COMMENT 'Total quantity',\n                `total_net_amount` Decimal(38, 4) COMMENT 'Total net amount',\n                `SYSTEM_CREATE_DATE` DateTime64(6),\n                `SYSTEM_UPDATE_DATE` DateTime64(6)\n            )\n            ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)\n            PARTITION BY toYear(`event_date`)\n            ORDER BY (`event_date`, `event_type`, `ship_mode`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN line events - Fact: line events per day, event type and ship mode, SCD Type 1 on (event_date, event_type, ship_mode), with the AN_DIM_SHIP_MODE surrogate key lookup'\n            \n\n            ",
+              "success": true,
+              "rows": [],
+              "fields": [],
+              "error": null,
+              "startTime": "2026-11-26T12:08:13.204Z",
+              "endTime": "2026-11-26T12:08:13.763Z",
+              "name": "Create table",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "7c55f6cd-b560-4a58-ae79-2a37d03028a8",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:13.203Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:13.763Z",
+              "continueOnFailure": true
+            },
+            {
+              "sql": "\n            -- AN_FCT_LINE_EVENT_DAILY is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.\n            -- Query it with FINAL for one row per key: SELECT ... FROM `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_FCT_LINE_EVENT_DAILY` FINAL (or SETTINGS final = 1).\n    -- Engine: from the package engine parameter (ReplacingMergeTree) - this node has no @engine.\n    -- readWithFinal = false (not set): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.\n    -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.\n            SELECT 1 WHERE 0",
+              "success": true,
+              "rows": [],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "1"
+                }
+              ],
+              "error": null,
+              "startTime": "2026-11-26T12:08:13.770Z",
+              "endTime": "2026-11-26T12:08:14.075Z",
+              "name": "Note: Query with FINAL",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "cda2bf8c-4943-4776-9ac7-e1a538b45f41",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:13.770Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:14.076Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "6e545e5a-716f-4d20-b65f-6737c68ea8aa",
+        "queryResultSequence": {
+          "name": "AN_FCT_ORDER_SUMMARY",
+          "queryResults": [
+            {
+              "sql": "\n        select 1=0",
+              "success": true,
+              "rows": [
+                {
+                  "values": [
+                    0
+                  ]
+                }
+              ],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "equals(1, 0)"
+                }
+              ],
+              "error": null,
+              "startTime": "2026-11-26T12:08:10.674Z",
+              "endTime": "2026-11-26T12:08:11.469Z",
+              "name": "Metadata Update-Default",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "4365631f-f8b9-43f5-a26f-2c1bf6b6e730",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:10.674Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:11.470Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "5a4149f7-1beb-4042-ac44-c435cf279601",
+        "queryResultSequence": {
+          "name": "AN_DIM_PART_RMT",
+          "queryResults": [
+            {
+              "sql": "\n        select 1=0",
+              "success": true,
+              "rows": [
+                {
+                  "values": [
+                    0
+                  ]
+                }
+              ],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "equals(1, 0)"
+                }
+              ],
+              "error": null,
+              "startTime": "2026-11-26T12:08:10.676Z",
+              "endTime": "2026-11-26T12:08:11.490Z",
+              "name": "Metadata Update-Default",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "804e555c-5093-4a6a-a039-e60f187b3bb1",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:10.676Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:11.491Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "ea39418b-83a9-4bb6-b789-905e44746a64",
+        "queryResultSequence": {
+          "name": "AN_DIM_SHIP_MODE",
+          "queryResults": [
+            {
+              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_SHIP_MODE`\n            (\n                `ship_mode_sk` UUID DEFAULT generateUUIDv4() COMMENT 'Surrogate key',\n                `ship_mode` String COMMENT 'Shipping mode business key',\n                `line_count` UInt64 COMMENT 'Line items shipped with this mode',\n                `first_event_date` Date COMMENT 'First event date for this mode',\n                `last_event_date` Date COMMENT 'Latest event date; a newer value overwrites the row (SCD1)',\n                `SYSTEM_CREATE_DATE` DateTime64(6),\n                `SYSTEM_UPDATE_DATE` DateTime64(6)\n            )\n            ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)\n            ORDER BY (`ship_mode`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN line events - Dimension: ship mode, SCD Type 1 with last-modified tracking on last_event_date'\n            \n\n            ",
+              "success": true,
+              "rows": [],
+              "fields": [],
+              "error": null,
+              "startTime": "2026-11-26T12:08:13.206Z",
+              "endTime": "2026-11-26T12:08:13.781Z",
+              "name": "Create table",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "aa7d1af5-9985-4c70-b6b1-71fe6dad41a3",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:13.205Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:13.782Z",
+              "continueOnFailure": true
+            },
+            {
+              "sql": "\n            -- AN_DIM_SHIP_MODE is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.\n            -- Query it with FINAL for one row per key: SELECT ... FROM `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_SHIP_MODE` FINAL (or SETTINGS final = 1).\n    -- Engine: from the package engine parameter (ReplacingMergeTree) - this node has no @engine.\n    -- readWithFinal = false (not set): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.\n    -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.\n            SELECT 1 WHERE 0",
+              "success": true,
+              "rows": [],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "1"
+                }
+              ],
+              "error": null,
+              "startTime": "2026-11-26T12:08:13.785Z",
+              "endTime": "2026-11-26T12:08:14.104Z",
+              "name": "Note: Query with FINAL",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "9b890f31-debf-408d-80f7-f9ffef98b9b3",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:13.784Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:14.104Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "1230ce4c-e89e-4fa0-adad-71916aca2314",
+        "queryResultSequence": {
+          "name": "AN_DIM_CUSTOMER_GEO",
+          "queryResults": [
+            {
+              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_CUSTOMER_GEO`\n            (\n                `customer_geo_sk` UUID DEFAULT generateUUIDv4() COMMENT 'Surrogate key',\n                `c_custkey` UInt32 COMMENT 'Customer business key',\n                `customer_name` String COMMENT 'Customer name (updated in place)',\n                `nation_key` UInt32 COMMENT 'Nation key (SCD2)',\n                `region_key` UInt32 COMMENT 'Region key (SCD2)',\n                `region_name` String COMMENT 'Region name (SCD2)',\n                `market_segment` String COMMENT 'Market segment (SCD2)',\n                `account_balance` Decimal(12, 2) COMMENT 'Account balance (updated in place)',\n                `SYSTEM_VERSION` UInt8,\n                `SYSTEM_CURRENT_FLAG` String,\n                `SYSTEM_END_DATE` DateTime64(6),\n                `SYSTEM_CREATE_DATE` DateTime64(6),\n                `SYSTEM_UPDATE_DATE` DateTime64(6)\n            )\n            ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)\n            ORDER BY (`c_custkey`, `SYSTEM_VERSION`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN line events - Dimension: customer geography, SCD Type 2 (new version on nation, region or market segment change)'\n            \n\n            ",
+              "success": true,
+              "rows": [],
+              "fields": [],
+              "error": null,
+              "startTime": "2026-11-26T12:08:14.060Z",
+              "endTime": "2026-11-26T12:08:14.520Z",
+              "name": "Create table",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "d46a7ac7-2825-42c8-8a4f-5aa75ff1f333",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:14.059Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:14.520Z",
+              "continueOnFailure": true
+            },
+            {
+              "sql": "\n            -- AN_DIM_CUSTOMER_GEO is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.\n            -- Query it with FINAL for one row per key: SELECT ... FROM `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_CUSTOMER_GEO` FINAL (or SETTINGS final = 1).\n    -- Engine: from the package engine parameter (ReplacingMergeTree) - this node has no @engine.\n    -- readWithFinal = false (not set): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.\n    -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.\n            SELECT 1 WHERE 0",
+              "success": true,
+              "rows": [],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "1"
+                }
+              ],
+              "error": null,
+              "startTime": "2026-11-26T12:08:14.537Z",
+              "endTime": "2026-11-26T12:08:14.853Z",
+              "name": "Note: Query with FINAL",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "e0eb067b-8c63-4bfd-8057-f360e516fcb3",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:14.537Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:14.854Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "aac36045-9310-43c3-a0dd-af0a08ab5df9",
+        "queryResultSequence": {
+          "name": "AN_FCT_PART_MONTHLY_RMT",
+          "queryResults": [
+            {
+              "sql": "\n        select 1=0",
+              "success": true,
+              "rows": [
+                {
+                  "values": [
+                    0
+                  ]
+                }
+              ],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "equals(1, 0)"
+                }
+              ],
+              "error": null,
+              "startTime": "2026-11-26T12:08:12.006Z",
+              "endTime": "2026-11-26T12:08:12.326Z",
+              "name": "Metadata Update-Default",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "727af78d-71f6-4186-8689-17e6fa64917e",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:12.005Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:12.327Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "605e5f12-037a-4eda-be54-2a6c73147020",
+        "queryResultSequence": {
+          "name": "AN_DIM_SUPPLIER",
+          "queryResults": [
+            {
+              "sql": "\n        select 1=0",
+              "success": true,
+              "rows": [
+                {
+                  "values": [
+                    0
+                  ]
+                }
+              ],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "equals(1, 0)"
+                }
+              ],
+              "error": null,
+              "startTime": "2026-11-26T12:08:12.018Z",
+              "endTime": "2026-11-26T12:08:12.346Z",
+              "name": "Metadata Update-Default",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "a4130bbf-646a-464a-b95d-7a332cc84b55",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:12.017Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:12.346Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      },
+      {
+        "nodeID": "8f3166a0-047b-40e8-9f97-11d1a772e425",
+        "queryResultSequence": {
+          "name": "AN_FCT_SHIPMODE_SNAPSHOT",
+          "queryResults": [
+            {
+              "sql": "\n        select 1=0",
+              "success": true,
+              "rows": [
+                {
+                  "values": [
+                    0
+                  ]
+                }
+              ],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "equals(1, 0)"
+                }
+              ],
+              "error": null,
+              "startTime": "2026-11-26T12:08:12.033Z",
+              "endTime": "2026-11-26T12:08:12.358Z",
+              "name": "Metadata Update-Default",
+              "isRunning": false,
+              "exportedRefs": [],
+              "invalidExportedRefs": [],
+              "status": "Success",
+              "type": "sql",
+              "queryID": "17ce6824-a5bb-40e1-9a12-43796f5a58ab",
+              "warehouse": null,
+              "stageExecutionStartTime": "2026-11-26T12:08:12.033Z",
+              "stageExecutionEndTime": "2026-11-26T12:08:12.358Z",
+              "continueOnFailure": true
+            }
+          ],
+          "isRunning": false
+        },
+        "runState": "complete"
+      }
+    ],
     "runTimeParameters": {},
     "environmentID": "1008"
   }

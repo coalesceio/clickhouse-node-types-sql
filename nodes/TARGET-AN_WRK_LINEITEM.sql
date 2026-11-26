@@ -10,7 +10,7 @@
 @querySettings("max_threads = 8", "max_memory_usage = 20000000000", "max_block_size = 65536")
 @tests("SELECT 1 FROM {{ ref('SRC', 'lineitem') }} HAVING count() = 0", true, "Before")
 @tests("SELECT `l_orderkey`, `l_linenumber` FROM {{ this }} GROUP BY `l_orderkey`, `l_linenumber` HAVING count() > 1", false, "After")
-SELECT
+SELECT distinct
     `l`.`l_orderkey`                                   AS `l_orderkey`      @id("awl01") @notNull @description("Order key") @not_null @inHash("GH_LINE_KEY", 1),
     `l`.`l_linenumber`                                 AS `l_linenumber`    @id("awl02") @notNull @description("Line number within the order") @min_max("1", "7") @inHash("GH_LINE_KEY", 2),
     `l`.`l_partkey`                                    AS `part_key`        @id("awl03") @notNull @description("Part key"),
