@@ -4,12 +4,13 @@ macroString: |-
   {#- Package parameter
       engine: ENGINE of every Dimension / Fact
       without @engine (@engine always wins).
-        ""   MergeTree (default)
+      a plain-insert Fact stays MergeTree
+      Options:
+        ""
         "MergeTree"
         "ReplacingMergeTree"
-             (a plain-insert Fact stays MergeTree)
-      Any other value stops the deploy and the
-      run (Invalid configuration: engine). -#}
+      Default: MergeTree
+  -#}
   {%- set packageParameter = namespace(engine = "") -%}
 
   {#- readWithFinal in effect: the runtime parameter, else false.
