@@ -8,7 +8,7 @@
 @partitionBy("toYYYYMM(`snapshot_at`)")
 @settings("index_granularity = 8192")
 @querySettings("max_threads = 8", "max_bytes_before_external_group_by = 10000000000")
-@tests("SELECT 1 FROM {{ this }} HAVING countIf(`snapshot_at` = (SELECT max(`snapshot_at`) FROM {{ this }})) = 0", false, "After")
+@tests("SELECT 1 FROM {{ this }} HAVING count() = 0", false, "After")
 @tests("SELECT `snapshot_at`, `ship_mode`, `line_status` FROM {{ this }} GROUP BY `snapshot_at`, `ship_mode`, `line_status` HAVING count() > 1", true, "After")
 SELECT
     CAST(now64(6) AS DateTime64(6))   AS `snapshot_at`        @id("afp01") @notNull @description("Load time of the snapshot; the same for every row of one run") @freshness(1, "DAY"),
