@@ -1,18 +1,6 @@
 fileVersion: 1
 id: "1"
 macroString: |-
-  {#- Package parameter
-      engine: ENGINE of every Dimension / Fact
-      without @engine (@engine always wins).
-      a plain-insert Fact stays MergeTree
-      Options:
-        ""
-        "MergeTree"
-        "ReplacingMergeTree"
-      Default: MergeTree
-  -#}
-  {%- set packageParameter = namespace(engine = "") -%}
-
   {#- readWithFinal in effect: the runtime parameter, else false.
       nsReadWithFinal.origin says which ('runtime parameter', 'not set').
         true / 1   -> FINAL (case-insensitive)
