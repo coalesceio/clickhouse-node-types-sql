@@ -23,8 +23,8 @@ SELECT
                                                        AS `net_amount`      @id("awl09") @notNull @description("extended_price * (1 - discount)") @min_value("0"),
     CAST(`l`.`l_extendedprice` * (1 - `l`.`l_discount`) * (1 + `l`.`l_tax`) AS Decimal(18, 4))
                                                        AS `gross_amount`    @id("awl10") @notNull @description("net_amount * (1 + tax)") @min_value("0"),
-    toStringCutToZero(`l`.`l_returnflag`)              AS `return_flag`     @id("awl11") @notNull @description("Return flag") @accepted_values("'R', 'A', 'N'"),
-    toStringCutToZero(`l`.`l_linestatus`)              AS `line_status`     @id("awl12") @notNull @description("Line status") @accepted_values("'O', 'F'"),
+    CAST(toStringCutToZero(`l`.`l_returnflag`) AS FixedString(1))  AS `return_flag`     @id("awl11") @notNull @description("Return flag") @accepted_values("'R', 'A', 'N'"),
+    CAST(toStringCutToZero(`l`.`l_linestatus`) AS FixedString(1))  AS `line_status`     @id("awl12") @notNull @description("Line status") @accepted_values("'O', 'F'"),
     `l`.`l_shipdate`                                   AS `ship_date`       @id("awl13") @notNull @description("Ship date"),
     `l`.`l_commitdate`                                 AS `commit_date`     @id("awl14") @notNull @description("Commit date"),
     `l`.`l_receiptdate`                                AS `receipt_date`    @id("awl15") @notNull @description("Receipt date") @relative_time(">=", "ship_date"),
