@@ -49,7 +49,6 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {%- set mergeStrategy = 'changetracking' %}
     {%- endif %}
     {%- set isLastModifiedStrategy = mergeStrategy == 'lastmodified' %}
-    {%- set isChangeTrackingStrategy = mergeStrategy == 'changetracking' %}
     {%- set isAllColumnMatch = mergeStrategy == 'allcolumnmatch' %}
 
     {# lastModified with a tracking column present — the no-column case is rejected by validate_fact_requirements, and there'd be nothing to compare.
@@ -95,14 +94,13 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {# Test stage for checking NULL values in source - last modified column (any datatype: a NULL date/time or numeric value can never compare as newer, so the row would never be picked up as changed) #}
         {{ test_stage('Check Last Modified Column - NULL Values (' ~ lastModifiedColName ~ ')', false) }}
         /* If NULL values are detected, this stage will fail and execution will be terminated */
-        {%- set ns = namespace(first=true) %}
         {%- for col in source.columns if col.name == lastModifiedColName %}
             {%- set col_transform = get_source_transform(col) %}
             {%- if col_transform is not none and col_transform != 'NULL' %}
                 {{- source.cteString }}
                 SELECT 1
                 FROM (
-                    SELECT {{ get_source_transform(col) }} AS `CHECK_COL`
+                    SELECT {{ col_transform }} AS `CHECK_COL`
                     {{ source.join }}
                 ) `T`
                 WHERE `T`.`CHECK_COL` IS NULL
@@ -124,7 +122,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 	{# == Truncate data before data insertion  == #}
     {%- if writeMode | lower != "append" -%}
         {{ stage('Truncate ' + materializationType) }}
-        TRUNCATE IF EXISTS {{ targetPath }}
+        TRUNCATE TABLE IF EXISTS {{ targetPath }}
     {%- endif %}
 
     {%- if not hasBusinessKey and not isAllColumnMatch %}
@@ -173,7 +171,6 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
             {# SCD Type 1: one row per business key, classified NEW/CHANGED/NOCHANGE off the business key. #}
             {%- set sysCreateDateCol = get_value_by_column_attribute("isSystemCreateDate") %}
             {# allColumnMatch may have no @isBusinessKey column at all — guard so template rendering doesn't crash. #}
-            {%- set firstBizKeyCol = (columns | selectattr("isBusinessKey") | first).name if hasBusinessKey else none %}
 
             {%- if isAllColumnMatch %}
             {# @allColumnMatch: the match columns are the business key, @isBusinessKey is ignored.

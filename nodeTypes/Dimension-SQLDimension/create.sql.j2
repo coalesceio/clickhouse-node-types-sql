@@ -50,8 +50,9 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
            Cloud adds SharedMergeTree(...). Without @orderBy / @primaryKey, ORDER BY tuple()
            is written: self-hosted ClickHouse rejects a MergeTree without one (create_table_empty_primary_key_by_default
            is only on by default in Cloud).
-           Column types from ch_column_type(): Nullable(<type>) unless the column is not null (@notNull); the surrogate
-           key is never Nullable. A ReplacingMergeTree's version argument needs @notNull: ClickHouse rejects a Nullable one. ClickHouse has no identity columns, so the surrogate key is a plain column
+           Column types from ch_column_type(): Nullable(<type>) when the column is nullable (inferred from the SQL, or
+           not null with @notNull). The surrogate key and a ReplacingMergeTree's version argument must not be Nullable:
+           ClickHouse rejects a Nullable version argument. ClickHouse has no identity columns, so the surrogate key is a plain column
            (a UUID key gets its value from @defaultValue("generateUUIDv4()")).
            On a ReplacingMergeTree, ORDER BY is the replace key built by set_table_engine() (no @orderBy /
            @primaryKey accepted). COMMENT is the node description only. Otherwise

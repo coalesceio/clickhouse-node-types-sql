@@ -1,7 +1,7 @@
 @id("b3000000-0000-4000-8000-000000000002")
 @nodeType("SQLDimension")
 SELECT
-    generateUUIDv4() AS `k` @id("c00002") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
+    generateUUIDv4() AS `k` @id("c00002") @isSurrogateKey @defaultValue("generateUUIDv4()"),
     `c`.`c_custkey` AS `c_custkey` @id("c10002") @isBusinessKey @notNull,
     CAST(`o`.`o_comment` AS Nullable(String)) AS `o_comment` @id("c20002") @isChangeTracking,
     1 AS `SYSTEM_VERSION` @id("c30002") @isSystemVersion @notNull,

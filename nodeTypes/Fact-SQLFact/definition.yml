@@ -15,9 +15,8 @@ metadata:
         Ex. `n_Nationkey` AS `n_Nationkey` @id("a1b2c3") @isBusinessKey
       • Engine: the node's @engine, else the package parameter "engine", else MergeTree. A plain-insert Fact is never a ReplacingMergeTree; an allColumnMatch Fact on a ReplacingMergeTree is ordered by its match columns.
       • ReplacingMergeTree: ORDER BY is built from the business key — do not add @orderBy / @primaryKey. Query it with FINAL.
-      • ReplacingMergeTree (package engine parameter or @engine("ReplacingMergeTree")): add @notNull to the @isSystemUpdateDate column. Without it the column is Nullable, a "Warning: @isSystemUpdateDate without @notNull" stage is shown, and ClickHouse rejects the table (a Nullable version argument).
-      • Agentic creation: when the user asks for a ReplacingMergeTree, or the package engine parameter is set to ReplacingMergeTree, write the @isSystemUpdateDate column with @notNull (see isSystemUpdateDate).
-        Ex. CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
+      • ReplacingMergeTree (package engine parameter or @engine("ReplacingMergeTree")): the @isSystemUpdateDate column is the version argument and must not be Nullable. now64(6) is inferred not null; a column read from a Nullable upstream column needs @notNull, otherwise a "Warning: @isSystemUpdateDate without @notNull" stage is shown and ClickHouse rejects the table.
+        Ex. now64(6) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate
 
     deployStrategy: advanced
 
@@ -53,9 +52,9 @@ metadata:
                 • The table's ENGINE: MergeTree or ReplacingMergeTree only, written without arguments. The name is not case-sensitive (replacingmergetree works), and MergeTree() is the same as MergeTree. Any other engine (SummingMergeTree, Log, ...) or arguments stop the deploy and the run (Invalid configuration: engine).
                 • If not specified, the package's engine parameter is used; if that is empty too, defaults to 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 (no ENGINE is written, as in ClickHouse). Set the package parameter to ReplacingMergeTree to make it the default for every Dimension and Fact — except a plain-insert Fact, which stays MergeTree, since a ReplacingMergeTree would collapse its identical rows. An allColumnMatch Fact takes it, ordered by its match columns.
                 • 𝗥𝗲𝗽𝗹𝗮𝗰𝗶𝗻𝗴𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 — the load only inserts. A changed row is re-inserted with a newer SYSTEM_UPDATE_DATE, and ClickHouse keeps the latest row per ORDER BY key at a background merge (nothing is deleted).
-                  • The @isSystemUpdateDate column is the version argument: ReplacingMergeTree → ReplacingMergeTree(`SYSTEM_UPDATE_DATE`). Required, and must be marked @notNull.
-                  • Like every column it is Nullable without @notNull, and ClickHouse rejects a Nullable version argument: a "Warning: @isSystemUpdateDate without @notNull" stage is shown, the flow continues, and the create (or the redeploy's ALTER) fails with ClickHouse's error.
-                    Ex. CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
+                  • The @isSystemUpdateDate column is the version argument: ReplacingMergeTree → ReplacingMergeTree(`SYSTEM_UPDATE_DATE`). Required, and must not be Nullable.
+                  • now64(6) is inferred not null. A column read from a Nullable upstream column is Nullable unless marked @notNull, and ClickHouse rejects a Nullable version argument: a "Warning: @isSystemUpdateDate without @notNull" stage is shown, the flow continues, and the create (or the redeploy's ALTER) fails with ClickHouse's error.
+                    Ex. now64(6) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate
                   • ORDER BY is always built from the business key (required) — orderBy / primaryKey are not accepted (a manual key could collapse different rows or keep replaced copies).
                   • Until a merge, a plain SELECT can return the replaced copies as well — query with FINAL (SELECT ... FROM <table> FINAL, or SETTINGS final = 1). With the readWithFinal runtime parameter true, the load and the column tests end with SETTINGS final = 1; with it false they read the table as stored, so set final = 1 on the ClickHouse user. A "Note: Query with FINAL" deploy stage reminds whoever deploys.
                 • 𝗠𝗲𝗿𝗴𝗲𝗧𝗿𝗲𝗲 — the load inserts and then DELETEs the replaced copies (Clean Up Previous Data). orderBy / primaryKey can be set.
@@ -66,7 +65,7 @@ metadata:
                 - name: engine
                   type: string
                   isRequired: true
-                  default: ReplacingMergeTree
+                  default: MergeTree
                   example: MergeTree
                   options:
                     - ReplacingMergeTree
@@ -375,11 +374,11 @@ metadata:
                 ⚙ This is a system column.
                 • Marks this column as the timestamp a row was first created.
                 • 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱 𝘂𝗻𝗹𝗲𝘀𝘀 mergeStrategy 𝗶𝘀 𝗮𝗹𝗹𝗖𝗼𝗹𝘂𝗺𝗻𝗠𝗮𝘁𝗰𝗵, or no column is marked isBusinessKey (these write it as computed).
-                • Value written under changeTracking/lastModified: CURRENT_TIMESTAMP on first insert, then kept unchanged.
+                • Value written under changeTracking/lastModified: the load time on first insert, then kept unchanged.
                 • The expression in the SELECT is only used to derive the column's datatype — its value is ignored under changeTracking/lastModified.
 
                 Expected expression:
-                CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_CREATE_DATE" @isSystemCreateDate
+                now64(6) AS "SYSTEM_CREATE_DATE" @isSystemCreateDate
 
                 Agentic creation only — manual creation adds this column automatically.
               isRequired: false
@@ -389,21 +388,14 @@ metadata:
                 ⚙ This is a system column.
                 • Marks this column as the timestamp a row was last updated.
                 • 𝗥𝗲𝗾𝘂𝗶𝗿𝗲𝗱 𝘂𝗻𝗹𝗲𝘀𝘀 mergeStrategy 𝗶𝘀 𝗮𝗹𝗹𝗖𝗼𝗹𝘂𝗺𝗻𝗠𝗮𝘁𝗰𝗵, or no column is marked isBusinessKey (these write it as computed) — recomputed to the current timestamp on every inserted or changed row, so every row change carries an audit trail of when it was last updated.
-                • Value written under changeTracking/lastModified: CURRENT_TIMESTAMP whenever the row is inserted or changed.
+                • Value written under changeTracking/lastModified: the load time whenever the row is inserted or changed.
                 • The expression in the SELECT is only used to derive the column's datatype — its value is ignored under changeTracking/lastModified.
 
                 Expected expression:
-                CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate
-                On a ReplacingMergeTree (package engine parameter or @engine("ReplacingMergeTree")) add @notNull — it is the engine's version argument, ReplacingMergeTree(`SYSTEM_UPDATE_DATE`):
-                CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
+                now64(6) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate
+                On a ReplacingMergeTree it is the engine's version argument, ReplacingMergeTree(`SYSTEM_UPDATE_DATE`), and must not be Nullable. now64(6) is inferred not null; add @notNull only when the column is read from a Nullable upstream column.
 
-                Agentic creation only — manual creation adds this column automatically, with @notNull when the engine is a ReplacingMergeTree.
-                When writing it, add @notNull if either:
-                  • the user asks for a ReplacingMergeTree, or
-                  • the package engine parameter is set to ReplacingMergeTree.
-                Otherwise leave it out.
-                Add it on a new Fact before the business key is decided — on a Fact that ends up a plain-insert MergeTree it only makes the column non-nullable.
-                Ex. CAST(CURRENT_TIMESTAMP AS TIMESTAMP) AS "SYSTEM_UPDATE_DATE" @isSystemUpdateDate @notNull
+                Agentic creation only — manual creation adds this column automatically.
               isRequired: false
 
         - groupName: Data Quality Tests
@@ -555,23 +547,15 @@ metadata:
           {%- endmacro -%}
           {%- set ns = namespace(items=[], lines=[]) -%}
           {%- set idAnnotation = '@id("<ID>") ' -%}
-          {#- @isSystemUpdateDate is a ReplacingMergeTree's version argument and must be @notNull.
-              Engine: the node's @engine, else the package engine parameter (as ch_table_engine()). #}
-          {%- set nsInitEngine = namespace(value='') -%}
-          {%- if config is defined and config and config.engine is defined and config.engine -%}
-              {%- set engineArgs = config.engine.parameters if (config.engine is mapping and config.engine.parameters is defined) else [config.engine] -%}
-              {%- set nsInitEngine.value = (engineArgs[0] if engineArgs else '') | string | trim -%}
-          {%- elif packageParameter is defined and packageParameter.engine is defined and packageParameter.engine -%}
-              {%- set nsInitEngine.value = packageParameter.engine | string | trim -%}
-          {%- endif -%}
-          {%- set updateDateNotNull = ' @notNull' if 'replacingmergetree' in (nsInitEngine.value | lower) else '' -%}
+          {#- now64(6) is inferred not null, so the @isSystemUpdateDate column (a ReplacingMergeTree's
+              version argument) needs no @notNull. #}
           {%- for dep in sources[0].dependencies -%}
             {%- for col in dep.columns -%}
               {%- set ns.items = ns.items + [{'expr': '"' ~ col.name ~ '"', 'alias': '"' ~ col.name ~ '"', 'annotation': idAnnotation.rstrip()}] -%}
             {%- endfor -%}
           {%- endfor -%}
-          {%- set ns.items = ns.items + [{'expr': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP)', 'alias': '"SYSTEM_CREATE_DATE"', 'annotation': idAnnotation ~ '@isSystemCreateDate'}] -%}
-          {%- set ns.items = ns.items + [{'expr': 'CAST(CURRENT_TIMESTAMP AS TIMESTAMP)', 'alias': '"SYSTEM_UPDATE_DATE"', 'annotation': idAnnotation ~ '@isSystemUpdateDate' ~ updateDateNotNull}] -%}
+          {%- set ns.items = ns.items + [{'expr': 'now64(6)', 'alias': '"SYSTEM_CREATE_DATE"', 'annotation': idAnnotation ~ '@isSystemCreateDate'}] -%}
+          {%- set ns.items = ns.items + [{'expr': 'now64(6)', 'alias': '"SYSTEM_UPDATE_DATE"', 'annotation': idAnnotation ~ '@isSystemUpdateDate'}] -%}
           {%- set maxExprLen = ns.items | map(attribute='expr') | map('length') | max -%}
           {%- set maxAliasLen = ns.items | map(attribute='alias') | map('length') | max -%}
           {%- for item in ns.items -%}

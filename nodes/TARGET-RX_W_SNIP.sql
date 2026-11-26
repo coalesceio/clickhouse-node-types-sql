@@ -21,6 +21,6 @@ SELECT
     `n_Comment`     AS `n_Comment`,
     `last_Modified` AS `last_Modified`,
     CAST(`n_Regionkey` AS UInt32) AS `dv_num` @defaultValue("20"),
-    CAST(`n_Comment` AS String) AS `dv_str` @defaultValue("'NA'"),
+    CAST(ifNull(`n_Comment`, 'NA') AS String) AS `dv_str` @defaultValue("'NA'"),
     generateUUIDv4() AS `dv_uuid` @defaultValue("generateUUIDv4()")
 FROM {{ ref('SRC', 'Nation_Test') }} `Nation_Test`

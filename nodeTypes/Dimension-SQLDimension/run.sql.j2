@@ -48,7 +48,6 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {%- set mergeStrategy = 'changetracking' %}
     {%- endif %}
     {%- set isLastModifiedStrategy = mergeStrategy == 'lastmodified' %}
-    {%- set isChangeTrackingStrategy = mergeStrategy == 'changetracking' %}
 
     {# lastModified with a tracking column present — the no-column case is rejected by validate_dimension_requirements, and there'd be nothing to compare. #}
     {%- set lastModifiedComparison = isLastModifiedStrategy and lastModifiedCount > 0 %}
@@ -109,14 +108,13 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {# Test stage for checking NULL values in source - last modified column (any datatype: a NULL date/time or numeric value can never compare as newer, so the row would never be picked up as changed) #}
         {{ test_stage('Check Last Modified Column - NULL Values (' ~ lastModifiedColName ~ ')', false) }}
         /* If NULL values are detected, this stage will fail and execution will be terminated */
-        {%- set ns = namespace(first=true) %}
         {%- for col in source.columns if col.name == lastModifiedColName %}
             {%- set col_transform = get_source_transform(col) %}
             {%- if col_transform is not none and col_transform != 'NULL' %}
                 {{- source.cteString }}
                 SELECT 1
                 FROM (
-                    SELECT {{ get_source_transform(col) }} AS `CHECK_COL`
+                    SELECT {{ col_transform }} AS `CHECK_COL`
                     {{ source.join }}
                 ) `T`
                 WHERE `T`.`CHECK_COL` IS NULL
@@ -138,7 +136,7 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
 	{# == Truncate data before data insertion  == #}
     {%- if writeMode | lower != "append" -%}
         {{ stage('Truncate ' + materializationType) }}
-        TRUNCATE IF EXISTS {{ targetPath }}
+        TRUNCATE TABLE IF EXISTS {{ targetPath }}
     {%- endif %}
 
     {%- if config.zeroKey is defined and hasSurrogateKey %}
@@ -391,7 +389,8 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
                     {%- elif col.isSystemCurrentFlag %}
                     'N'
                     {%- elif col.isSystemEndDate %}
-                    {{ loadTimestamp }} - toIntervalMillisecond(1)
+                    {#- one unit of the column's own precision — see ch_expiry_interval() #}
+                    {{ loadTimestamp }} - {{ ch_expiry_interval(col) }}
                     {%- else %}
                     `TGT_{{ col.name }}`
                     {%- endif %}
@@ -441,9 +440,6 @@ Coalesce permits you to copy and modify this script for the purposes of using wi
         {%- else -%}
             {# SCD Type 1: one row per business key, classified NEW/CHANGED/NOCHANGE off the business key (version/current-flag/end-date columns are optional here). #}
             {%- set sysCreateDateCol = get_value_by_column_attribute("isSystemCreateDate") %}
-            {# No @isBusinessKey column is already caught by validate_dimension_requirements()'s "Missing Business Key" test above —
-               guard here too so a missing key fails that test with a clear message instead of crashing template rendering outright. #}
-            {%- set firstBizKeyCol = (columns | selectattr("isBusinessKey") | first).name if hasBusinessKey else none %}
 
             {{ sourceDataCteOpen }}`SOURCE_ROWS` AS (
                 /* Incoming source rows, transformed and aliased to the target column names */

@@ -3,7 +3,7 @@
 @engine("MergeTree")
 @zeroKey("00000000-0000-0000-0000-000000000000", "'UNKNOWN'", "1900-01-01 00:00:00", true)
 SELECT
-    generateUUIDv4() AS `k` @id("e00001") @isSurrogateKey @notNull @defaultValue("generateUUIDv4()"),
+    generateUUIDv4() AS `k` @id("e00001") @isSurrogateKey @defaultValue("generateUUIDv4()"),
     `c_custkey` AS `c_custkey` @id("e00002") @isBusinessKey @notNull,
     `c_name` AS `c_name` @id("e00003") @zeroKey("'N/A'"),
     CAST(`customer_id` AS Int32) AS `num` @id("e00004") @zeroKey("-1"),

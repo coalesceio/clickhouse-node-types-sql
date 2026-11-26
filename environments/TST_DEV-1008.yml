@@ -1,5 +1,5 @@
 fileVersion: 1
-id: "147"
+id: "1008"
 mappingDefinitions: {}
-name: clickhouse-sql-AN
+name: TST_DEV
 type: Environment
