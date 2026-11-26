@@ -1,6 +1,6 @@
 excludeSelector: ""
 fileVersion: 1
 id: "120"
-includeSelector: "{ subgraph: \"AN_Pipeline\" }"
+includeSelector: "{ subgraph: \"AN_Pipeline\" } OR { subgraph: \"AN_Line_Events\" }"
 name: Job_test
 type: Job
