@@ -5,7 +5,7 @@
 @writeMode("append")
 @mergeStrategy("allColumnMatch")
 @settings("index_granularity = 8192")
-@querySettings("max_threads = 8", "max_memory_usage = 20000000000", "max_bytes_before_external_group_by = 10000000000", "max_bytes_in_join = 10000000000")
+@querySettings("max_threads = 7", "max_memory_usage = 20000000000", "max_bytes_before_external_group_by = 10000000000", "max_bytes_in_join = 10000000000")
 @optimize
 @tests("SELECT 1 FROM {{ this }} FINAL WHERE `supplier_sk` NOT IN (SELECT `supplier_sk` FROM {{ ref('TARGET', 'AN_DIM_SUPPLIER') }} FINAL)", true, "After")
 SELECT

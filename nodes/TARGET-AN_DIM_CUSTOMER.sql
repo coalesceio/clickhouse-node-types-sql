@@ -5,7 +5,7 @@
 @writeMode("append")
 @mergeStrategy("changeTracking")
 @settings("index_granularity = 8192")
-@querySettings("max_threads = 4", "max_memory_usage = 20000000000")
+@querySettings("max_threads = 3", "max_memory_usage = 20000000000")
 @optimize
 @zeroKey("00000000-0000-0000-0000-000000000000", "'UNKNOWN'", "1900-01-01 00:00:00", false)
 @tests("SELECT `c_custkey` FROM {{ this }} FINAL WHERE `SYSTEM_CURRENT_FLAG` = 'Y' GROUP BY `c_custkey` HAVING count() > 1", false, "After")

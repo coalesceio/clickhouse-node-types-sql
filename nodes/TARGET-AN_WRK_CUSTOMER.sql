@@ -3,7 +3,7 @@
 @description("AN pipeline - Work view: customer with FixedString padding removed and text trimmed")
 @materializationType("view")
 @final
-@querySettings("max_threads = 4")
+@querySettings("max_threads = 3")
 SELECT
     `c`.`c_custkey`                               AS `c_custkey`       @id("awc01") @notNull @description("Customer business key") @not_null @uniqueness,
     trimBoth(`c`.`c_name`)                        AS `customer_name`   @id("awc02") @notNull @description("Customer name") @empty,
