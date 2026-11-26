@@ -515,7 +515,8 @@ Zero record value by column type (`Nullable(...)` and `LowCardinality(...)` are 
 | `UUID` (not the surrogate key) | The nil UUID `00000000-0000-0000-0000-000000000000` |
 | `Point`, `Geometry` | The point `(0, 0)` |
 | `Ring`, `LineString`, `MultiLineString`, `Polygon`, `MultiPolygon` | An empty shape `[]` |
-| Anything else | `NULL` |
+| Anything else, `Nullable` | `NULL` |
+| Anything else, not `Nullable` (`Array`, `Tuple`, `Map`, `Enum`, `IPv4` / `IPv6`, `Time`, ...) | The type's default value (`defaultValueOfTypeName`): `[]`, `(0, '')`, `{}`, the first `Enum` value, `0.0.0.0`, `00:00:00`, ... — these columns cannot hold `NULL` |
 | System columns | Version `1`, current flag `'Y'`, end date the [open end date](#scd-type-2-end-date), create date `1970-01-01 00:00:00` (the zero-record marker), update date the load time |
 
 * Override any column with a column-level `@zeroKey(value)`.

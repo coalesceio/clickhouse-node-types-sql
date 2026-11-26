@@ -2648,6 +2648,8 @@ macroString: |-
       UUID                              -> the nil UUID
       Point / Geometry                  -> the point (0, 0)
       Ring / LineString / MultiLineString / Polygon / MultiPolygon -> an empty shape
+      anything else                     -> NULL when the column is Nullable, else the type's default value
+                                           (defaultValueOfTypeName: [] / (0, '') / {} / first Enum value / ...)
     The type comes from the node's column (source columns carry no dataType).
   ===========================================================================#}
   {%- macro resolve_zero_key(col) -%}
@@ -2687,8 +2689,13 @@ macroString: |-
               CAST((0, 0) AS Point)
           {%- elif family in ['ring', 'linestring', 'multilinestring', 'polygon', 'multipolygon'] -%}
               CAST([] AS {{ ns.dt }})
-          {%- else -%}
+          {# Any other type: NULL in a Nullable column; a column that is not Nullable (Array, Tuple, Map, Enum, IPv4 / IPv6,
+             Time, ...) cannot take NULL (CAST(NULL AS Array(...)) fails), so it gets its type's default value
+             ([], (0, ''), {}, the first Enum value, 0.0.0.0, 00:00:00, ...) #}
+          {%- elif (ch_column_type(nodeCol) | lower).startswith('nullable(') or (ch_column_type(nodeCol) | lower).startswith('lowcardinality(nullable(') -%}
               NULL
+          {%- else -%}
+              defaultValueOfTypeName('{{ ch_string(ch_column_type(nodeCol)) }}')
           {%- endif -%}
       {%- endif -%}
 
