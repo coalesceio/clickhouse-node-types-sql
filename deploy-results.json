@@ -1,34 +1,45 @@
 {
   "runResults": {
-    "runStartTime": "2026-11-26T10:54:11.956Z",
-    "runEndTime": "2026-11-26T10:54:38.250Z",
+    "runStartTime": "2026-11-26T11:00:53.797Z",
+    "runEndTime": "2026-11-26T11:01:12.370Z",
     "runType": "deploy",
     "runStatus": "completed",
-    "runID": 31143,
+    "runID": 31144,
     "runResults": [
       {
-        "nodeID": "7457371f-164a-46ac-a4cb-67e8f12fff39",
+        "nodeID": "5b52001a-d074-4e7e-83b8-58d78b1e8508",
         "queryResultSequence": {
-          "name": "AN_WRK_LINEITEM",
+          "name": "AN_DIM_CUSTOMER",
           "queryResults": [
             {
-              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_WRK_LINEITEM`\n            (\n                `l_orderkey` UInt32 COMMENT 'Order key',\n                `l_linenumber` Int32 COMMENT 'Line number within the order',\n                `part_key` UInt32 COMMENT 'Part key',\n                `supplier_key` UInt32 COMMENT 'Supplier key',\n                `quantity` Decimal(12, 2) COMMENT 'Quantity',\n                `extended_price` Decimal(12, 2) COMMENT 'Extended price',\n                `discount` Decimal(12, 2) COMMENT 'Discount rate',\n                `tax` Decimal(12, 2) COMMENT 'Tax rate',\n                `net_amount` Decimal(18, 4) COMMENT 'extended_price * (1 - discount)',\n                `gross_amount` Decimal(18, 4) COMMENT 'net_amount * (1 + tax)',\n                `return_flag` FixedString(1) COMMENT 'Return flag',\n                `line_status` FixedString(1) COMMENT 'Line status',\n                `ship_date` Date COMMENT 'Ship date',\n                `commit_date` Date COMMENT 'Commit date',\n                `receipt_date` Date COMMENT 'Receipt date',\n                `ship_instruct` String COMMENT 'Shipping instruction',\n                `ship_mode` String COMMENT 'Shipping mode',\n                `comment` String COMMENT 'Line comment',\n                `line_hash` String COMMENT 'cityHash64 of l_orderkey, l_linenumber'\n            )\n            PARTITION BY toYYYYMM(`ship_date`)\n            ORDER BY (`l_orderkey`, `l_linenumber`)\n            PRIMARY KEY (`l_orderkey`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN pipeline - Work table: line items with net, tax and gross amounts'",
+              "sql": "\n        select 1=0",
               "success": true,
-              "rows": [],
-              "fields": [],
+              "rows": [
+                {
+                  "values": [
+                    0
+                  ]
+                }
+              ],
+              "fields": [
+                {
+                  "type": "UInt8",
+                  "name": "equals(1, 0)"
+                }
+              ],
               "error": null,
-              "startTime": "2026-11-26T10:54:25.793Z",
-              "endTime": "2026-11-26T10:54:26.903Z",
-              "name": "Create table",
+              "startTime": "2026-11-26T11:01:04.495Z",
+              "endTime": "2026-11-26T11:01:05.367Z",
+              "name": "Metadata Update-Default",
               "isRunning": false,
               "exportedRefs": [],
               "invalidExportedRefs": [],
               "status": "Success",
               "type": "sql",
-              "queryID": "47a408d8-2836-46e7-ac05-966ee1007bd8",
+              "queryID": "bbff1c72-b46e-4878-9175-1f29bd3abfa2",
               "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:25.789Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:26.903Z",
+              "stageExecutionStartTime": "2026-11-26T11:01:04.494Z",
+              "stageExecutionEndTime": "2026-11-26T11:01:05.368Z",
               "continueOnFailure": true
             }
           ],
@@ -42,667 +53,35 @@
           "name": "AN_FCT_SUPPLIER_PART",
           "queryResults": [
             {
-              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_FCT_SUPPLIER_PART`\n            (\n                `supplier_sk` UUID COMMENT 'Supplier surrogate key from AN_DIM_SUPPLIER; zero key when unresolved',\n                `supplier_id` UInt32 COMMENT 'Supplier business key (l_suppkey)',\n                `part_id` UInt32 COMMENT 'Part business key (l_partkey)',\n                `ship_mode` String COMMENT 'Shipping mode',\n                `SYSTEM_CREATE_DATE` DateTime64(6) COMMENT 'Load time the combination was first seen',\n                `SYSTEM_UPDATE_DATE` DateTime64(6)\n            )\n            ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)\n            ORDER BY (`supplier_sk`, `supplier_id`, `part_id`, `ship_mode`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN pipeline - factless Fact: which supplier ships which part by which ship mode; allColumnMatch inserts new combinations only'\n            \n\n            ",
+              "sql": "\n        select 1=0",
               "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:25.797Z",
-              "endTime": "2026-11-26T10:54:26.866Z",
-              "name": "Create table",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "1e573736-b9d4-4344-93a6-a880683ec093",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:25.796Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:26.866Z",
-              "continueOnFailure": true
-            },
-            {
-              "sql": "\n            -- AN_FCT_SUPPLIER_PART is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.\n            -- Query it with FINAL for one row per key: SELECT ... FROM `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_FCT_SUPPLIER_PART` FINAL (or SETTINGS final = 1).\n    -- Engine: from the package engine parameter (ReplacingMergeTree) - this node has no @engine.\n    -- readWithFinal = false (not set): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.\n    -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.\n            SELECT 1 WHERE 0",
-              "success": true,
-              "rows": [],
+              "rows": [
+                {
+                  "values": [
+                    0
+                  ]
+                }
+              ],
               "fields": [
                 {
                   "type": "UInt8",
-                  "name": "1"
+                  "name": "equals(1, 0)"
                 }
               ],
               "error": null,
-              "startTime": "2026-11-26T10:54:26.894Z",
-              "endTime": "2026-11-26T10:54:28.907Z",
-              "name": "Note: Query with FINAL",
+              "startTime": "2026-11-26T11:01:04.498Z",
+              "endTime": "2026-11-26T11:01:05.329Z",
+              "name": "Metadata Update-Default",
               "isRunning": false,
               "exportedRefs": [],
               "invalidExportedRefs": [],
               "status": "Success",
               "type": "sql",
-              "queryID": "abb9f8e6-7078-42a2-a4c3-850b4376f4cf",
+              "queryID": "42dcf5d9-1b63-45ba-9348-7ce7c612ce74",
               "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:26.894Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:28.908Z",
+              "stageExecutionStartTime": "2026-11-26T11:01:04.498Z",
+              "stageExecutionEndTime": "2026-11-26T11:01:05.331Z",
               "continueOnFailure": true
-            }
-          ],
-          "isRunning": false
-        },
-        "runState": "complete"
-      },
-      {
-        "nodeID": "61e94dd9-67b3-4cd5-8bbf-e86323b6e47e",
-        "queryResultSequence": {
-          "name": "AN_FCT_SUPPLIER_MONTHLY",
-          "queryResults": [
-            {
-              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_FCT_SUPPLIER_MONTHLY`\n            (\n                `supplier_id` UInt32 COMMENT 'Supplier business key (l_suppkey)',\n                `ship_month` Date COMMENT 'First day of the ship month',\n                `supplier_sk` UUID COMMENT 'Supplier surrogate key from AN_DIM_SUPPLIER; zero key when unresolved',\n                `line_count` UInt64 COMMENT 'Line items shipped in the month',\n                `order_count` UInt64 COMMENT 'Distinct orders',\n                `part_count` UInt64 COMMENT 'Distinct parts shipped',\n                `total_quantity` Decimal(38, 2) COMMENT 'Total quantity',\n                `total_net_amount` Decimal(38, 4) COMMENT 'Total net amount',\n                `total_gross_amount` Decimal(38, 4) COMMENT 'Total gross amount',\n                `late_line_count` UInt64 COMMENT 'Line items shipped after their commit date',\n                `returned_line_count` UInt64 COMMENT 'Line items with return flag R',\n                `SYSTEM_CREATE_DATE` DateTime64(6),\n                `SYSTEM_UPDATE_DATE` DateTime64(6)\n            )\n            ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)\n            PARTITION BY toYear(`ship_month`)\n            ORDER BY (`supplier_id`, `ship_month`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN pipeline - Fact: supplier activity per ship month, SCD Type 1 on (supplier_id, ship_month); any changed measure reloads the row'\n            \n\n            ",
-              "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:25.801Z",
-              "endTime": "2026-11-26T10:54:26.886Z",
-              "name": "Create table",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "ec74e8e9-0af3-40c6-b6ba-78992570f523",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:25.801Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:26.887Z",
-              "continueOnFailure": true
-            },
-            {
-              "sql": "\n            -- AN_FCT_SUPPLIER_MONTHLY is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.\n            -- Query it with FINAL for one row per key: SELECT ... FROM `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_FCT_SUPPLIER_MONTHLY` FINAL (or SETTINGS final = 1).\n    -- Engine: from the package engine parameter (ReplacingMergeTree) - this node has no @engine.\n    -- readWithFinal = false (not set): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.\n    -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.\n            SELECT 1 WHERE 0",
-              "success": true,
-              "rows": [],
-              "fields": [
-                {
-                  "type": "UInt8",
-                  "name": "1"
-                }
-              ],
-              "error": null,
-              "startTime": "2026-11-26T10:54:26.896Z",
-              "endTime": "2026-11-26T10:54:28.916Z",
-              "name": "Note: Query with FINAL",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "aaeca126-c566-4b8d-be97-1fb13a13eb0d",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:26.895Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:28.916Z",
-              "continueOnFailure": true
-            }
-          ],
-          "isRunning": false
-        },
-        "runState": "complete"
-      },
-      {
-        "nodeID": "8f3166a0-047b-40e8-9f97-11d1a772e425",
-        "queryResultSequence": {
-          "name": "AN_FCT_SHIPMODE_SNAPSHOT",
-          "queryResults": [
-            {
-              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_FCT_SHIPMODE_SNAPSHOT`\n            (\n                `snapshot_at` DateTime64(6) COMMENT 'Load time of the snapshot; the same for every row of one run',\n                `ship_mode` String COMMENT 'Shipping mode',\n                `line_status` FixedString(1) COMMENT 'Line status',\n                `line_count` UInt64 COMMENT 'Line items',\n                `order_count` UInt64 COMMENT 'Distinct orders',\n                `late_line_count` UInt64 COMMENT 'Line items shipped after their commit date',\n                `total_quantity` Decimal(38, 2) COMMENT 'Total quantity',\n                `total_net_amount` Decimal(38, 4) COMMENT 'Total net amount',\n                `total_gross_amount` Decimal(38, 4) COMMENT 'Total gross amount',\n                `SYSTEM_CREATE_DATE` DateTime64(6) COMMENT 'Insert time, written as computed'\n            )\n            PARTITION BY toYYYYMM(`snapshot_at`)\n            ORDER BY (`snapshot_at`, `ship_mode`, `line_status`)\n            PRIMARY KEY (`snapshot_at`, `ship_mode`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN pipeline - periodic snapshot Fact (plain insert): each run appends line-item counts and amounts by ship mode and line status'\n",
-              "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:25.803Z",
-              "endTime": "2026-11-26T10:54:26.868Z",
-              "name": "Create table",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "4e42f4e6-44c3-4ac4-944c-a21ad800d399",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:25.803Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:26.869Z",
-              "continueOnFailure": true
-            }
-          ],
-          "isRunning": false
-        },
-        "runState": "complete"
-      },
-      {
-        "nodeID": "aac36045-9310-43c3-a0dd-af0a08ab5df9",
-        "queryResultSequence": {
-          "name": "AN_FCT_PART_MONTHLY_RMT",
-          "queryResults": [
-            {
-              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_FCT_PART_MONTHLY_RMT`\n            (\n                `part_id` UInt32 COMMENT 'Part business key (l_partkey)',\n                `ship_month` Date COMMENT 'First day of the ship month',\n                `part_sk` UUID COMMENT 'Current AN_DIM_PART version; zero key when unresolved',\n                `line_count` UInt64 COMMENT 'Line items shipped in the month',\n                `supplier_count` UInt64 COMMENT 'Distinct suppliers shipping the part in the month',\n                `total_quantity` Decimal(38, 2) COMMENT 'Total quantity',\n                `total_extended_price` Decimal(38, 2) COMMENT 'Total extended price',\n                `total_net_amount` Decimal(38, 4) COMMENT 'Total net amount',\n                `total_gross_amount` Decimal(38, 4) COMMENT 'Total gross amount',\n                `returned_line_count` UInt64 COMMENT 'Line items with return flag R',\n                `SYSTEM_CREATE_DATE` DateTime64(6),\n                `SYSTEM_UPDATE_DATE` DateTime64(6) COMMENT 'ReplacingMergeTree version column: the latest copy wins'\n            )\n            ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)\n            PARTITION BY toYear(`ship_month`)\n            ORDER BY (`part_id`, `ship_month`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN pipeline - Fact: part sales per ship month on an explicit ReplacingMergeTree; SCD Type 1 on (part_id, ship_month) by the default changeTracking strategy'\n            \n\n            ",
-              "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:25.805Z",
-              "endTime": "2026-11-26T10:54:26.898Z",
-              "name": "Create table",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "94e0bb25-1ac4-42b0-93f7-754c61dff1ea",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:25.804Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:26.898Z",
-              "continueOnFailure": true
-            },
-            {
-              "sql": "\n            -- AN_FCT_PART_MONTHLY_RMT is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.\n            -- Query it with FINAL for one row per key: SELECT ... FROM `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_FCT_PART_MONTHLY_RMT` FINAL (or SETTINGS final = 1).\n    -- Engine: set on this node with @engine (package engine parameter: ReplacingMergeTree).\n    -- readWithFinal = false (not set): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.\n    -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.\n            SELECT 1 WHERE 0",
-              "success": true,
-              "rows": [],
-              "fields": [
-                {
-                  "type": "UInt8",
-                  "name": "1"
-                }
-              ],
-              "error": null,
-              "startTime": "2026-11-26T10:54:26.926Z",
-              "endTime": "2026-11-26T10:54:28.927Z",
-              "name": "Note: Query with FINAL",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "89435a60-6756-40f7-9d10-3a623469d959",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:26.925Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:28.928Z",
-              "continueOnFailure": true
-            }
-          ],
-          "isRunning": false
-        },
-        "runState": "complete"
-      },
-      {
-        "nodeID": "6e545e5a-716f-4d20-b65f-6737c68ea8aa",
-        "queryResultSequence": {
-          "name": "AN_FCT_ORDER_SUMMARY",
-          "queryResults": [
-            {
-              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_FCT_ORDER_SUMMARY`\n            (\n                `order_id` UInt32 COMMENT 'Order business key (l_orderkey)',\n                `order_sk` UUID COMMENT 'Current AN_DIM_ORDER version; zero key when unresolved',\n                `line_count` UInt64 COMMENT 'Line items on the order',\n                `total_quantity` Decimal(38, 2) COMMENT 'Total quantity',\n                `total_extended_price` Decimal(38, 2) COMMENT 'Total extended price',\n                `total_discount_amount` Decimal(38, 4) COMMENT 'Total discount given',\n                `total_net_amount` Decimal(38, 4) COMMENT 'Total net amount',\n                `total_gross_amount` Decimal(38, 4) COMMENT 'Total gross amount',\n                `late_line_count` UInt64 COMMENT 'Line items shipped after their commit date',\n                `returned_line_count` UInt64 COMMENT 'Line items with return flag R',\n                `first_ship_date` Date COMMENT 'First ship date',\n                `last_receipt_date` Date COMMENT 'Latest receipt date; a newer value reloads the order',\n                `SYSTEM_CREATE_DATE` DateTime64(6),\n                `SYSTEM_UPDATE_DATE` DateTime64(6)\n            )\n            ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)\n            PARTITION BY toYear(`first_ship_date`)\n            ORDER BY (`order_id`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN pipeline - Fact: one row per order, SCD Type 1 on l_orderkey; only orders with a newer last_receipt_date are reloaded'\n            \n\n            ",
-              "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:25.810Z",
-              "endTime": "2026-11-26T10:54:26.849Z",
-              "name": "Create table",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "ef54a767-7e71-4d42-9c54-32c834402c32",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:25.809Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:26.849Z",
-              "continueOnFailure": true
-            },
-            {
-              "sql": "\n            -- AN_FCT_ORDER_SUMMARY is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.\n            -- Query it with FINAL for one row per key: SELECT ... FROM `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_FCT_ORDER_SUMMARY` FINAL (or SETTINGS final = 1).\n    -- Engine: from the package engine parameter (ReplacingMergeTree) - this node has no @engine.\n    -- readWithFinal = false (not set): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.\n    -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.\n            SELECT 1 WHERE 0",
-              "success": true,
-              "rows": [],
-              "fields": [
-                {
-                  "type": "UInt8",
-                  "name": "1"
-                }
-              ],
-              "error": null,
-              "startTime": "2026-11-26T10:54:26.859Z",
-              "endTime": "2026-11-26T10:54:28.887Z",
-              "name": "Note: Query with FINAL",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "348e7c33-ba86-4ab9-a1fb-44c2f2f308ac",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:26.859Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:28.888Z",
-              "continueOnFailure": true
-            }
-          ],
-          "isRunning": false
-        },
-        "runState": "complete"
-      },
-      {
-        "nodeID": "a767bdd2-07de-45d4-b2fa-ad47b821d528",
-        "queryResultSequence": {
-          "name": "AN_FCT_LINEITEM",
-          "queryResults": [
-            {
-              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_FCT_LINEITEM`\n            (\n                `l_orderkey` UInt32 COMMENT 'Order key',\n                `l_linenumber` Int32 COMMENT 'Line number',\n                `part_key` UInt32 COMMENT 'Part key',\n                `supplier_key` UInt32 COMMENT 'Supplier key',\n                `quantity` Decimal(12, 2) COMMENT 'Quantity',\n                `extended_price` Decimal(12, 2) COMMENT 'Extended price',\n                `discount` Decimal(12, 2) COMMENT 'Discount rate',\n                `tax` Decimal(12, 2) COMMENT 'Tax rate',\n                `net_amount` Decimal(18, 4) COMMENT 'Net amount',\n                `gross_amount` Decimal(18, 4) COMMENT 'Gross amount',\n                `return_flag` FixedString(1) COMMENT 'Return flag',\n                `line_status` FixedString(1) COMMENT 'Line status',\n                `ship_date` Date COMMENT 'Ship date',\n                `commit_date` Date COMMENT 'Commit date',\n                `receipt_date` Date COMMENT 'Receipt date',\n                `days_in_transit` Int64 COMMENT 'Days from ship to receipt',\n                `is_late_shipment` Bool COMMENT 'Shipped after the commit date',\n                `ship_mode` String COMMENT 'Shipping mode',\n                `ship_instruct` String COMMENT 'Shipping instruction',\n                `SYSTEM_CREATE_DATE` DateTime64(6),\n                `SYSTEM_UPDATE_DATE` DateTime64(6)\n            )\n            ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)\n            PARTITION BY toYYYYMM(`ship_date`)\n            ORDER BY (`l_orderkey`, `l_linenumber`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN pipeline - Fact: line items, SCD Type 1 on (l_orderkey, l_linenumber)'\n            \n\n            ",
-              "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:25.813Z",
-              "endTime": "2026-11-26T10:54:26.804Z",
-              "name": "Create table",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "b9f731f5-e0e8-4cd7-9b48-ed9c94213842",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:25.812Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:26.804Z",
-              "continueOnFailure": true
-            },
-            {
-              "sql": "\n            -- AN_FCT_LINEITEM is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.\n            -- Query it with FINAL for one row per key: SELECT ... FROM `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_FCT_LINEITEM` FINAL (or SETTINGS final = 1).\n    -- Engine: from the package engine parameter (ReplacingMergeTree) - this node has no @engine.\n    -- readWithFinal = false (not set): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.\n    -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.\n            SELECT 1 WHERE 0",
-              "success": true,
-              "rows": [],
-              "fields": [
-                {
-                  "type": "UInt8",
-                  "name": "1"
-                }
-              ],
-              "error": null,
-              "startTime": "2026-11-26T10:54:26.813Z",
-              "endTime": "2026-11-26T10:54:28.668Z",
-              "name": "Note: Query with FINAL",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "8fe86d89-c4a5-4210-a36e-9897683d9e54",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:26.812Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:28.670Z",
-              "continueOnFailure": true
-            }
-          ],
-          "isRunning": false
-        },
-        "runState": "complete"
-      },
-      {
-        "nodeID": "605e5f12-037a-4eda-be54-2a6c73147020",
-        "queryResultSequence": {
-          "name": "AN_DIM_SUPPLIER",
-          "queryResults": [
-            {
-              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_SUPPLIER`\n            (\n                `supplier_sk` UUID DEFAULT generateUUIDv4() COMMENT 'Surrogate key',\n                `supplier_id` UInt32 COMMENT 'Supplier business key (l_suppkey)',\n                `line_count` UInt64 COMMENT 'Number of line items supplied',\n                `order_count` UInt64 COMMENT 'Number of distinct orders supplied',\n                `total_quantity` Decimal(38, 2) COMMENT 'Total quantity supplied',\n                `total_net_amount` Decimal(38, 4) COMMENT 'Total net amount',\n                `late_line_count` UInt64 COMMENT 'Line items shipped after their commit date',\n                `first_ship_date` Date COMMENT 'First ship date',\n                `last_receipt_date` Date COMMENT 'Latest receipt date; a newer value overwrites the row (SCD1)',\n                `SYSTEM_CREATE_DATE` DateTime64(6),\n                `SYSTEM_UPDATE_DATE` DateTime64(6)\n            )\n            ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)\n            ORDER BY (`supplier_id`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN pipeline - Dimension: supplier activity, SCD Type 1 with last-modified tracking on last_receipt_date'\n            \n\n            ",
-              "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:25.816Z",
-              "endTime": "2026-11-26T10:54:26.810Z",
-              "name": "Create table",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "1dbc6d67-f08a-4c28-b6a2-03c4e9761c20",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:25.815Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:26.811Z",
-              "continueOnFailure": true
-            },
-            {
-              "sql": "\n            -- AN_DIM_SUPPLIER is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.\n            -- Query it with FINAL for one row per key: SELECT ... FROM `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_SUPPLIER` FINAL (or SETTINGS final = 1).\n    -- Engine: from the package engine parameter (ReplacingMergeTree) - this node has no @engine.\n    -- readWithFinal = false (not set): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.\n    -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.\n            SELECT 1 WHERE 0",
-              "success": true,
-              "rows": [],
-              "fields": [
-                {
-                  "type": "UInt8",
-                  "name": "1"
-                }
-              ],
-              "error": null,
-              "startTime": "2026-11-26T10:54:26.815Z",
-              "endTime": "2026-11-26T10:54:28.716Z",
-              "name": "Note: Query with FINAL",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "79bf2b66-989f-4739-aa0e-36675e2e3758",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:26.814Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:28.717Z",
-              "continueOnFailure": true
-            }
-          ],
-          "isRunning": false
-        },
-        "runState": "complete"
-      },
-      {
-        "nodeID": "79040b1f-a94e-4d69-869a-534a5c49460a",
-        "queryResultSequence": {
-          "name": "AN_DIM_REGION",
-          "queryResults": [
-            {
-              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_REGION`\n            (\n                `region_key` UUID DEFAULT generateUUIDv4() COMMENT 'Surrogate key',\n                `r_regionkey` UInt32 COMMENT 'Region business key',\n                `region_name` String COMMENT 'Region name',\n                `comment` String COMMENT 'Region comment',\n                `SYSTEM_CREATE_DATE` DateTime64(6),\n                `SYSTEM_UPDATE_DATE` DateTime64(6)\n            )\n            ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)\n            ORDER BY (`r_regionkey`)\n            SETTINGS allow_nullable_key = 1\n            COMMENT 'AN pipeline - Dimension: region SCD Type 1 (overwrite in place)'\n            \n\n            ",
-              "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:25.818Z",
-              "endTime": "2026-11-26T10:54:28.606Z",
-              "name": "Create table",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "24f525a2-478d-4e11-8769-d3be4bb5da53",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:25.818Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:28.611Z",
-              "continueOnFailure": true
-            },
-            {
-              "sql": "\n            -- AN_DIM_REGION is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.\n            -- Query it with FINAL for one row per key: SELECT ... FROM `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_REGION` FINAL (or SETTINGS final = 1).\n    -- Engine: from the package engine parameter (ReplacingMergeTree) - this node has no @engine.\n    -- readWithFinal = false (not set): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.\n    -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.\n            SELECT 1 WHERE 0",
-              "success": true,
-              "rows": [],
-              "fields": [
-                {
-                  "type": "UInt8",
-                  "name": "1"
-                }
-              ],
-              "error": null,
-              "startTime": "2026-11-26T10:54:28.753Z",
-              "endTime": "2026-11-26T10:54:29.065Z",
-              "name": "Note: Query with FINAL",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "4ea9d19e-2eb9-42b4-a7eb-af5cedbc661d",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:28.752Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:29.065Z",
-              "continueOnFailure": true
-            }
-          ],
-          "isRunning": false
-        },
-        "runState": "complete"
-      },
-      {
-        "nodeID": "5a4149f7-1beb-4042-ac44-c435cf279601",
-        "queryResultSequence": {
-          "name": "AN_DIM_PART_RMT",
-          "queryResults": [
-            {
-              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_PART_RMT`\n            (\n                `part_sk` UUID DEFAULT generateUUIDv4() COMMENT 'Surrogate key, new on every version',\n                `part_id` UInt32 COMMENT 'Part business key (l_partkey)',\n                `retail_price` Decimal(12, 2) COMMENT 'Retail price (extended_price / quantity); a change creates a new version (SCD2)',\n                `supplier_count` UInt64 COMMENT 'Distinct suppliers shipping the part (updated in place)',\n                `line_count` UInt64 COMMENT 'Line items for the part (updated in place)',\n                `first_ship_date` Date COMMENT 'First ship date (updated in place)',\n                `last_ship_date` Date COMMENT 'Latest ship date (updated in place)',\n                `SYSTEM_VERSION` UInt8,\n                `SYSTEM_CURRENT_FLAG` String,\n                `SYSTEM_END_DATE` DateTime64(6),\n                `SYSTEM_CREATE_DATE` DateTime64(6),\n                `SYSTEM_UPDATE_DATE` DateTime64(6)\n            )\n            ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)\n            ORDER BY (`part_id`, `SYSTEM_VERSION`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN pipeline - Dimension: part with retail price history, SCD Type 2 on an explicit ReplacingMergeTree'\n            \n\n            ",
-              "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:25.820Z",
-              "endTime": "2026-11-26T10:54:26.864Z",
-              "name": "Create table",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "a49f2485-0034-46ba-bebe-b8850f8b0076",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:25.820Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:26.864Z",
-              "continueOnFailure": true
-            },
-            {
-              "sql": "\n            -- AN_DIM_PART_RMT is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.\n            -- Query it with FINAL for one row per key: SELECT ... FROM `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_PART_RMT` FINAL (or SETTINGS final = 1).\n    -- Engine: set on this node with @engine (package engine parameter: ReplacingMergeTree).\n    -- readWithFinal = false (not set): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.\n    -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.\n            SELECT 1 WHERE 0",
-              "success": true,
-              "rows": [],
-              "fields": [
-                {
-                  "type": "UInt8",
-                  "name": "1"
-                }
-              ],
-              "error": null,
-              "startTime": "2026-11-26T10:54:26.892Z",
-              "endTime": "2026-11-26T10:54:28.871Z",
-              "name": "Note: Query with FINAL",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "94b80fe5-a26f-498c-980b-6661d73fb045",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:26.891Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:28.871Z",
-              "continueOnFailure": true
-            }
-          ],
-          "isRunning": false
-        },
-        "runState": "complete"
-      },
-      {
-        "nodeID": "8e9a3c99-1861-4140-9d37-755e1937a46c",
-        "queryResultSequence": {
-          "name": "AN_DIM_ORDER",
-          "queryResults": [
-            {
-              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_ORDER`\n            (\n                `order_sk` UUID DEFAULT generateUUIDv4() COMMENT 'Surrogate key, new on every version',\n                `order_id` UInt32 COMMENT 'Order business key (l_orderkey)',\n                `order_status` String COMMENT 'F all lines fulfilled, O all open, P partly fulfilled',\n                `line_count` UInt64 COMMENT 'Line items on the order',\n                `fulfilled_line_count` UInt64 COMMENT 'Line items with line status F',\n                `returned_line_count` UInt64 COMMENT 'Line items with return flag R',\n                `order_gross_amount` Decimal(38, 4) COMMENT 'Sum of line gross amounts',\n                `first_ship_date` Date COMMENT 'First ship date',\n                `last_receipt_date` Date COMMENT 'Latest receipt date; a newer value expires the current version and inserts a new one (SCD2)',\n                `SYSTEM_VERSION` UInt8,\n                `SYSTEM_CURRENT_FLAG` String,\n                `SYSTEM_END_DATE` DateTime64(6),\n                `SYSTEM_CREATE_DATE` DateTime64(6),\n                `SYSTEM_UPDATE_DATE` DateTime64(6)\n            )\n            ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)\n            ORDER BY (`order_id`, `SYSTEM_VERSION`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN pipeline - Dimension: order status history, SCD Type 2 with last-modified tracking on last_receipt_date'\n            \n\n            ",
-              "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:28.958Z",
-              "endTime": "2026-11-26T10:54:29.431Z",
-              "name": "Create table",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "e988e578-fabb-41e8-98fc-3f0e3259a77c",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:28.957Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:29.431Z",
-              "continueOnFailure": true
-            },
-            {
-              "sql": "\n            -- AN_DIM_ORDER is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.\n            -- Query it with FINAL for one row per key: SELECT ... FROM `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_ORDER` FINAL (or SETTINGS final = 1).\n    -- Engine: from the package engine parameter (ReplacingMergeTree) - this node has no @engine.\n    -- readWithFinal = false (not set): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.\n    -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.\n            SELECT 1 WHERE 0",
-              "success": true,
-              "rows": [],
-              "fields": [
-                {
-                  "type": "UInt8",
-                  "name": "1"
-                }
-              ],
-              "error": null,
-              "startTime": "2026-11-26T10:54:29.437Z",
-              "endTime": "2026-11-26T10:54:29.754Z",
-              "name": "Note: Query with FINAL",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "980796e6-e926-4360-8f64-ddc18937908c",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:29.436Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:29.754Z",
-              "continueOnFailure": true
-            }
-          ],
-          "isRunning": false
-        },
-        "runState": "complete"
-      },
-      {
-        "nodeID": "5b52001a-d074-4e7e-83b8-58d78b1e8508",
-        "queryResultSequence": {
-          "name": "AN_DIM_CUSTOMER",
-          "queryResults": [
-            {
-              "sql": "\n            \n            CREATE OR REPLACE TABLE `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_CUSTOMER`\n            (\n                `customer_key` UUID DEFAULT generateUUIDv4() COMMENT 'Surrogate key',\n                `c_custkey` UInt32 COMMENT 'Customer business key',\n                `customer_name` String COMMENT 'Customer name (updated in place)',\n                `address` String COMMENT 'Address (SCD2)',\n                `nation_key` UInt32 COMMENT 'Nation key (SCD2)',\n                `phone` String COMMENT 'Phone (SCD2)',\n                `market_segment` String COMMENT 'Market segment (SCD2)',\n                `account_balance` Decimal(12, 2) COMMENT 'Account balance (updated in place)',\n                `comment` String COMMENT 'Customer comment (updated in place)',\n                `SYSTEM_VERSION` UInt8,\n                `SYSTEM_CURRENT_FLAG` String,\n                `SYSTEM_END_DATE` DateTime64(6),\n                `SYSTEM_CREATE_DATE` DateTime64(6),\n                `SYSTEM_UPDATE_DATE` DateTime64(6)\n            )\n            ENGINE = ReplacingMergeTree(`SYSTEM_UPDATE_DATE`)\n            ORDER BY (`c_custkey`, `SYSTEM_VERSION`)\n            SETTINGS allow_nullable_key = 1, index_granularity = 8192\n            COMMENT 'AN pipeline - Dimension: customer SCD Type 2 (new version on address, phone, nation or market segment change)'\n            \n\n            ",
-              "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:29.006Z",
-              "endTime": "2026-11-26T10:54:29.467Z",
-              "name": "Create table",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "b91f2c09-f094-4b1c-a104-1d56cc45f94e",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:29.005Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:29.468Z",
-              "continueOnFailure": true
-            },
-            {
-              "sql": "\n            -- AN_DIM_CUSTOMER is a ReplacingMergeTree: the load only inserts, and a changed row keeps its older copy until ClickHouse merges the table in the background.\n            -- Query it with FINAL for one row per key: SELECT ... FROM `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_DIM_CUSTOMER` FINAL (or SETTINGS final = 1).\n    -- Engine: from the package engine parameter (ReplacingMergeTree) - this node has no @engine.\n    -- readWithFinal = false (not set): downstream loads read it as written - set final = 1 on the ClickHouse user Coalesce runs as, add FINAL in their SQL, or set the readWithFinal runtime parameter to true.\n    -- Queries outside Coalesce (BI tools, analysts): add FINAL, or set final = 1 on their ClickHouse user or profile.\n            SELECT 1 WHERE 0",
-              "success": true,
-              "rows": [],
-              "fields": [
-                {
-                  "type": "UInt8",
-                  "name": "1"
-                }
-              ],
-              "error": null,
-              "startTime": "2026-11-26T10:54:29.474Z",
-              "endTime": "2026-11-26T10:54:29.804Z",
-              "name": "Note: Query with FINAL",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "status": "Success",
-              "type": "sql",
-              "queryID": "8eadb792-acae-4be6-88da-23bee995564b",
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:29.473Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:29.804Z",
-              "continueOnFailure": true
-            }
-          ],
-          "isRunning": false
-        },
-        "runState": "complete"
-      },
-      {
-        "nodeID": "dd9155ac-f4d2-4736-8f97-803f747c66d2",
-        "queryResultSequence": {
-          "name": "region",
-          "queryResults": [
-            {
-              "sql": "",
-              "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:29.343Z",
-              "endTime": "2026-11-26T10:54:29.359Z",
-              "name": "Making metadata updates",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "queryResultSequence": null,
-              "status": "Success",
-              "type": "sql",
-              "queryID": null,
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:29.358Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:29.360Z",
-              "continueOnFailure": false
-            }
-          ],
-          "isRunning": false
-        },
-        "runState": "complete"
-      },
-      {
-        "nodeID": "e331fcd8-dd2a-4e4a-87a8-7b653efb2b2f",
-        "queryResultSequence": {
-          "name": "lineitem",
-          "queryResults": [
-            {
-              "sql": "",
-              "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:29.416Z",
-              "endTime": "2026-11-26T10:54:29.419Z",
-              "name": "Making metadata updates",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "queryResultSequence": null,
-              "status": "Success",
-              "type": "sql",
-              "queryID": null,
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:29.419Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:29.420Z",
-              "continueOnFailure": false
-            }
-          ],
-          "isRunning": false
-        },
-        "runState": "complete"
-      },
-      {
-        "nodeID": "92f1cbee-dc80-46d2-bde1-b3ef751621b1",
-        "queryResultSequence": {
-          "name": "customer",
-          "queryResults": [
-            {
-              "sql": "",
-              "success": true,
-              "rows": [],
-              "fields": [],
-              "error": null,
-              "startTime": "2026-11-26T10:54:29.604Z",
-              "endTime": "2026-11-26T10:54:29.606Z",
-              "name": "Making metadata updates",
-              "isRunning": false,
-              "exportedRefs": [],
-              "invalidExportedRefs": [],
-              "queryResultSequence": null,
-              "status": "Success",
-              "type": "sql",
-              "queryID": null,
-              "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:29.606Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:29.606Z",
-              "continueOnFailure": false
             }
           ],
           "isRunning": false
@@ -715,23 +94,23 @@
           "name": "AN_WRK_CUSTOMER",
           "queryResults": [
             {
-              "sql": "\n        CREATE OR REPLACE VIEW `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_WRK_CUSTOMER`\n        (\n            `c_custkey` UInt32 COMMENT 'Customer business key',\n            `customer_name` String COMMENT 'Customer name',\n            `address` String COMMENT 'Customer address',\n            `nation_key` UInt32 COMMENT 'Nation key (TPC-H 0-24)',\n            `phone` String COMMENT 'Phone number',\n            `account_balance` Decimal(12, 2) COMMENT 'Account balance',\n            `market_segment` String COMMENT 'Market segment',\n            `comment` String COMMENT 'Customer comment'\n    )\n    COMMENT 'AN pipeline - Work view: customer with FixedString padding removed and text trimmed'\n    AS\n    \n    SELECT \n        `c`.`c_custkey` AS `c_custkey`,\n        trimBoth(`c`.`c_name`) AS `customer_name`,\n        trimBoth(`c`.`c_address`) AS `address`,\n        `c`.`c_nationkey` AS `nation_key`,\n        trimBoth(toStringCutToZero(`c`.`c_phone`)) AS `phone`,\n        `c`.`c_acctbal` AS `account_balance`,\n        trimBoth(toStringCutToZero(`c`.`c_mktsegment`)) AS `market_segment`,\n        `c`.`c_comment` AS `comment`\n    FROM `WORKSPACE_ANANDHI`.`customer` `c`\n    SETTINGS max_threads = 4, final = 1\n\n        \n",
+              "sql": "\n        CREATE OR REPLACE VIEW `WORKSPACE_ANANDHI_TST_DEPLOY`.`AN_WRK_CUSTOMER`\n        (\n            `c_custkey` UInt32 COMMENT 'Customer business key',\n            `customer_name` String COMMENT 'Customer name',\n            `address` String COMMENT 'Customer address',\n            `nation_key` UInt32 COMMENT 'Nation key (TPC-H 0-24)',\n            `phone` String COMMENT 'Phone number',\n            `account_balance` Decimal(12, 2) COMMENT 'Account balance',\n            `market_segment` String COMMENT 'Market segment',\n            `comment` String COMMENT 'Customer comment'\n    )\n    COMMENT 'AN pipeline - Work view: customer with FixedString padding removed and text trimmed'\n    AS\n    \n    SELECT \n        `c`.`c_custkey` AS `c_custkey`,\n        trimBoth(`c`.`c_name`) AS `customer_name`,\n        trimBoth(`c`.`c_address`) AS `address`,\n        `c`.`c_nationkey` AS `nation_key`,\n        trimBoth(toStringCutToZero(`c`.`c_phone`)) AS `phone`,\n        `c`.`c_acctbal` AS `account_balance`,\n        trimBoth(toStringCutToZero(`c`.`c_mktsegment`)) AS `market_segment`,\n        `c`.`c_comment` AS `comment`\n    FROM `WORKSPACE_ANANDHI`.`customer` `c`\n    SETTINGS max_threads = 3, final = 1\n\n",
               "success": true,
               "rows": [],
               "fields": [],
               "error": null,
-              "startTime": "2026-11-26T10:54:30.426Z",
-              "endTime": "2026-11-26T10:54:30.797Z",
+              "startTime": "2026-11-26T11:01:04.505Z",
+              "endTime": "2026-11-26T11:01:05.403Z",
               "name": "Create View",
               "isRunning": false,
               "exportedRefs": [],
               "invalidExportedRefs": [],
               "status": "Success",
               "type": "sql",
-              "queryID": "9cb855be-e713-4893-8600-6534b83db387",
+              "queryID": "dafb7074-b11a-470f-8dd2-7680a1526cfd",
               "warehouse": null,
-              "stageExecutionStartTime": "2026-11-26T10:54:30.425Z",
-              "stageExecutionEndTime": "2026-11-26T10:54:30.798Z",
+              "stageExecutionStartTime": "2026-11-26T11:01:04.500Z",
+              "stageExecutionEndTime": "2026-11-26T11:01:05.403Z",
               "continueOnFailure": true
             }
           ],
