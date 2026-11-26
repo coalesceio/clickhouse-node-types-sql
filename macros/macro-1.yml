@@ -18,10 +18,17 @@ macroString: |-
   {%- set packageParameter = namespace(engine = "") -%}
 
   {#- readWithFinal in effect: the runtime parameter, else false.
-      nsReadWithFinal.origin says which ('runtime parameter', 'not set'). #}
-  {%- set nsReadWithFinal = namespace(value=false, origin='not set') -%}
+      nsReadWithFinal.origin says which ('runtime parameter', 'not set').
+        true / 1   -> FINAL (case-insensitive)
+        false / 0  -> no FINAL
+        not set    -> same as false
+        other      -> nsReadWithFinal.invalid: validate_materialization_type() stops the deploy and the run,
+                      so a typo never turns FINAL off without a word #}
+  {%- set nsReadWithFinal = namespace(value=false, origin='not set', raw='', invalid=false) -%}
   {%- if parameters is defined and parameters is mapping and parameters.readWithFinal is defined and parameters.readWithFinal is not none -%}
-      {%- set nsReadWithFinal.value = (parameters.readWithFinal | string | trim | lower) in ['true', '1'] -%}
+      {%- set nsReadWithFinal.raw = parameters.readWithFinal | string | trim -%}
+      {%- set nsReadWithFinal.value = (nsReadWithFinal.raw | lower) in ['true', '1'] -%}
+      {%- set nsReadWithFinal.invalid = (nsReadWithFinal.raw | lower) not in ['true', '1', 'false', '0'] -%}
       {%- set nsReadWithFinal.origin = 'runtime parameter' -%}
   {%- endif -%}
 
@@ -481,6 +488,14 @@ macroString: |-
           -- The table's load uses the joinUseNulls runtime parameter on every run.
           -- Fix: remove @joinUseNulls, or set @materializationType("view").
           SELECT 1
+      {%- endif %}
+      {%- if nsReadWithFinal.invalid %}
+          {{ test_stage('Invalid configuration: readWithFinal', false) }}
+          -- The readWithFinal runtime parameter is "{{ nsReadWithFinal.raw }}". It takes true (or 1) or false (or 0), in any case:
+          --   true  -> the loads, the zero key record and the column-level tests read ReplacingMergeTree tables with FINAL (SETTINGS final = 1)
+          --   false -> they read them as written (not set is the same as false)
+          -- Fix: set "readWithFinal" to true or false in the environment's parameters, or remove it.
+          {{ fail_sql(true, 'Invalid configuration: readWithFinal') }}
       {%- endif %}
       {%- if nsJoinUseNulls.value == 'invalid' %}
           {{ test_stage('Invalid configuration: joinUseNulls', false) }}

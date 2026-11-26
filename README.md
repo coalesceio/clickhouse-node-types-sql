@@ -1102,7 +1102,9 @@ Example (Environment → Parameters):
 | `true` (or `1`) | End with `SETTINGS final = 1`, so any ReplacingMergeTree they read is read with `FINAL`; ClickHouse ignores it for tables that do not support `FINAL`, e.g. MergeTree |
 | `false` (or `0`) | Run as written — readers rely on `final = 1` set on the ClickHouse user, or `FINAL` in the node's SQL |
 | not set | Same as `false` |
+| anything else | **Invalid configuration: readWithFinal** stops the deploy and the run |
 
+* `true` / `false` are not case-sensitive (`TRUE`, `False`). Any other value — `yes`, `on`, `2`, a typo — is rejected, so FINAL is never turned off by mistake.
 * Loads read the value on every run.
 * The node's own `SETTINGS` clause — see [Where Query Settings Go](#where-query-settings-go).
 * The **Note: Query with FINAL** deploy stage says which value is in effect (runtime parameter, or not set).
