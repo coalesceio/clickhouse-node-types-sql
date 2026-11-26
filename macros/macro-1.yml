@@ -517,11 +517,30 @@ macroString: |-
       {%- set nsQs = namespace(items=[], ignored=[], origin='') -%}
       {{- query_settings(config if config is defined else none, nsQs, nsNodeVariables.desiredMatType != 'view') -}}
       {%- if nsQs.ignored %}
+          {#- Name where the ignored settings were written, not where the node's other query settings come from:
+              a setting named in @querySettings is taken from there, any other from the runtime parameter. #}
+          {%- set nsNodeQsNames = namespace(items=[], names=[]) -%}
+          {%- if config is defined and config and config.querySettings is defined -%}
+              {{- collect_key_terms(config.querySettings, nsNodeQsNames) -}}
+          {%- endif -%}
+          {%- for qs in nsNodeQsNames.items -%}
+              {%- set nsNodeQsNames.names = nsNodeQsNames.names + [qs.split('=')[0] | trim | lower] -%}
+          {%- endfor -%}
+          {%- set nsIgn = namespace(node=false, runtime=false) -%}
+          {%- for qs in nsQs.ignored -%}
+              {%- if (qs.split('=')[0] | trim | lower) in nsNodeQsNames.names -%}
+                  {%- set nsIgn.node = true -%}
+              {%- else -%}
+                  {%- set nsIgn.runtime = true -%}
+              {%- endif -%}
+          {%- endfor -%}
+          {%- set ignoredOrigin = '@querySettings and the querySettings runtime parameter' if (nsIgn.node and nsIgn.runtime)
+                                  else ('@querySettings' if nsIgn.node else 'querySettings runtime parameter') %}
           {{ test_stage('Warning: final / join_use_nulls in querySettings', true) }}
-          -- {{ node.name }}: {{ nsQs.ignored | join(', ') }} in the {{ nsQs.origin }} is ignored. These settings change the data, so they have their own parameters:
+          -- {{ node.name }}: {{ nsQs.ignored | join(', ') }} in the {{ ignoredOrigin }} is ignored. These settings change the data, so they have their own parameters:
           --   final           -> the readWithFinal runtime parameter (all nodes), or @final on a view
           --   join_use_nulls  -> the joinUseNulls runtime parameter (all nodes), or @joinUseNulls on a view
-          -- Fix: remove them from {{ nsQs.origin }} and set the dedicated parameter instead.
+          -- Fix: remove them from the {{ ignoredOrigin }} and set the dedicated parameter instead.
           SELECT 1
       {%- endif %}
       {#- transform_null_in = 0: Clean Up Previous Data (MergeTree Dimension / Fact) uses it as given,
