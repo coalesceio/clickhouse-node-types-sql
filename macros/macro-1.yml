@@ -1,20 +1,15 @@
 fileVersion: 1
 id: "1"
 macroString: |-
-  {#===========================================================================
-    packageParameter: package-level defaults, between a node's own annotation and the built-in
-    default (see ch_table_engine()):
-      engine    the Dimension / Fact ENGINE when the node has no @engine, so ReplacingMergeTree can be
-                turned on once instead of on every node. A node's @engine always wins.
-                Options:
-                  "ReplacingMergeTree"  every Dimension / Fact without @engine is a ReplacingMergeTree
-                                        (except a plain-insert Fact, which stays MergeTree; an
-                                        allColumnMatch Fact is ordered by its match columns)
-                  "MergeTree"           every Dimension / Fact without @engine is a MergeTree
-                Only these two values, without arguments (the name in any case); any other value stops the
-                deploy and the run of every Dimension / Fact without @engine (Invalid configuration: engine)
-                  ""                    not set: the built-in default, MergeTree (default)
-  ===========================================================================#}
+  {#- Package parameter
+      engine: ENGINE of every Dimension / Fact
+      without @engine (@engine always wins).
+        ""   MergeTree (default)
+        "MergeTree"
+        "ReplacingMergeTree"
+             (a plain-insert Fact stays MergeTree)
+      Any other value stops the deploy and the
+      run (Invalid configuration: engine). -#}
   {%- set packageParameter = namespace(engine = "") -%}
 
   {#- readWithFinal in effect: the runtime parameter, else false.
