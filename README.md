@@ -81,13 +81,13 @@ Three decisions to make after installing the package and **before the first depl
 
 ### 1. Package parameter `engine` — choose the table engine
 
-Sets the `ENGINE` of every Dimension and Fact table that has no [`@engine`](#engine) of its own (Work tables are always MergeTree). Set it in the package's parameters:
+Sets the `ENGINE` of every Dimension and Fact table that has no [`@engine`](#engine) of its own (Work tables are always MergeTree). Set it in the package's parameters (edit the installed package in Coalesce):
 
 ```
 {%- set packageParameter = namespace(engine = "ReplacingMergeTree") -%}
 ```
 
-Use `"MergeTree"` (or `""` for the default) in place of `"ReplacingMergeTree"`.
+The package ships with `engine = ""` (MergeTree). Use `"MergeTree"` or `"ReplacingMergeTree"` in its place.
 
 | `engine` | Use it when | What it means |
 |---|---|---|
@@ -126,7 +126,7 @@ When the environment already has parameters, add `"readWithFinal": true` to the 
 }
 ```
 
-* `true` (recommended): no match gives `NULL`, as in standard SQL, and `coalesce(<col>, <default>)` works as expected.
+* `true` (recommended): no match gives `NULL`, as in standard SQL, and `coalesce(<col>, <default>)` works as expected. A table column stores the `NULL` only when it is `Nullable`; a not-`Nullable` column stores its type's default (`''`, `0`, nil UUID), so `CAST` the joined column to `Nullable(<type>)` to keep `NULL` — see [Runtime Parameters](#runtime-parameters).
 * `false` or not set: the package adds nothing, and the `join_use_nulls` configured in ClickHouse (server, settings profile, user or session) applies. ClickHouse's default gives the type's default value (`''`, `0`, nil UUID).
 * ⚠️ **Choose once, before the first load**, and use the same value in every environment — see [Changing `joinUseNulls`](#known-limitations).
 * Details: [Runtime Parameters](#runtime-parameters).
@@ -520,7 +520,7 @@ Zero record value by column type (`Nullable(...)` and `LowCardinality(...)` are 
 | System columns | Version `1`, current flag `'Y'`, end date the [open end date](#scd-type-2-end-date), create date `1970-01-01 00:00:00` (the zero-record marker), update date the load time |
 
 * Override any column with a column-level `@zeroKey(value)`.
-* The zero record is written by its own stage, **Load table - Zero Key Record**, on every run, independent of the main data load. It looks up the zero record by the current surrogate value: when there is none (first run, after a `truncateInsert`, or a new surrogate value) it inserts one; when its stored values differ from the `@zeroKey` values it inserts a refreshed copy (the previous copy is removed by the clean-up on MergeTree, or replaced on a ReplacingMergeTree); otherwise it writes nothing.
+* The zero record is written by its own stage, **Load table - Zero Key Record**, on every run, independent of the main data load. It looks up the zero record by the current surrogate value: when there is none (first run, after a `truncateInsert`, or a new surrogate value) it inserts one; when its stored values differ from the `@zeroKey` values it inserts a refreshed copy (the previous copy is removed by the clean-up on MergeTree, or replaced on a ReplacingMergeTree); otherwise it writes nothing. A column added to the node is a difference too, so the next run writes one refreshed zero record.
 * **Every zero record gets `SYSTEM_CREATE_DATE` = 1970-01-01 00:00:00 UTC** (epoch 0, in the column's type). Real rows are stamped with the load time, so this marks a row as a zero record for good: the main load leaves every such row out of change detection.
 * **⚠️ The zero record's business key must be unique.** Its business key values must differ from every business key in the data: numeric key columns get `0` and string ones `'UNKNOWN'` by default, so if the data can contain that value (e.g. a nation with key `0`), override it on the business key column with a column-level `@zeroKey`, e.g. `@zeroKey("-1")` or `@zeroKey("'N/A'")`. Pick a value the column's type can hold: on an unsigned column (`UInt8` … `UInt64`) ClickHouse wraps `-1` to the type's largest value (`UInt32`: `4294967295`) without an error — it is still unique, but write that value (or another unused one) explicitly so it reads clearly. The table key is the business key + `SYSTEM_VERSION` (the zero record is version 1, like a real row; the MergeTree clean-up uses the same key), so a zero record that shares a real row's business key is the same key: a ReplacingMergeTree keeps only one of the two (the other is hidden by `FINAL` and removed at a merge), and the MergeTree clean-up deletes one. The load itself never matches the zero record to a source row (see its `SYSTEM_CREATE_DATE` below), but it cannot stop the engine from treating the two as one key.
 * **Changing the surrogate value** (e.g. `…000` → `…001`) inserts the new zero record, which **replaces** the earlier one — same business key and version — on both engines (ReplacingMergeTree at a merge / with `FINAL`, MergeTree in the clean-up). Facts that still point at the old surrogate value no longer find it. **Removing `@zeroKey`** leaves the stored zero record in place, still left out of the load; delete it yourself if it is not wanted.
@@ -602,7 +602,7 @@ Marks this column as the SCD version number, incremented each time a business ke
 * Required for SCD Type 2 — shows which version of a row this is; each time a business key's row changes, the expired row is kept and a new row is inserted with this value incremented by 1.
 * Optional for SCD Type 1 — new-vs-existing is detected off the business key alone, so this column can be dropped entirely; if kept, it is always written as 1 and never incremented. This holds on a ReplacingMergeTree too — see [`SYSTEM_VERSION` on a ReplacingMergeTree](#system_version-on-a-replacingmergetree-dimension).
 * **Note:** Ignored on Views. Agentic creation only — manual creation adds this column automatically.
-* Expected expression: `1 AS "SYSTEM_VERSION" @isSystemVersion`
+* Expected expression: `1 AS "SYSTEM_VERSION" @isSystemVersion` — a bare `1` is created as `UInt8` (at most 255 versions); use `toUInt32(1) AS "SYSTEM_VERSION"` for a longer history.
 
 ##### `@isSystemCurrentFlag` (Dimension)
 
@@ -778,6 +778,8 @@ After the Dimension Node has been deployed for the first time into a target Envi
 Dimension tables are altered on an internal clone exactly like Work tables — the same stages, in the same order. See [Altering the Work Tables](#altering-the-work-tables).
 
 > **Note:** Every Dimension column carries a required `@id`, so renaming a column (same `@id`) is a true `RENAME COLUMN` that keeps its data.
+
+> **Note:** Adding or removing `@isChangeTracking` on columns only updates the node metadata. The history already loaded is kept; later loads detect changes on the new set of columns.
 
 > **Note:** Adding a surrogate key to a Dimension that already holds rows works: **Add Column** adds it with its `@defaultValue` and **Materialize Column Default** writes a value into every existing row once — see [Surrogate Keys](#surrogate-keys-dimension).
 
@@ -1064,13 +1066,13 @@ These rely on Cloud's `default_table_engine` setting.
 
 ### Package Parameters
 
-Package-level defaults, set once for every node instead of on each one. A node's own annotation always wins. Syntax:
+Package-level defaults, set once for every node instead of on each one, in the package's parameters (edit the installed package in Coalesce). A node's own annotation always wins. Syntax:
 
 ```
 {%- set packageParameter = namespace(engine = "ReplacingMergeTree") -%}
 ```
 
-Use `"MergeTree"` (or `""` for the default) in place of `"ReplacingMergeTree"`.
+The package ships with `engine = ""` (MergeTree). Use `"MergeTree"` or `"ReplacingMergeTree"` in its place.
 
 **`engine`** — the Dimension / Fact `ENGINE` when the node has no [`@engine`](#engine).
 
@@ -1773,7 +1775,7 @@ The view's `SELECT` ends with `SETTINGS join_use_nulls = 1`, fixed when the view
   LEFT JOIN {{ ref('TARGET', 'REGION') }} `r` ON `r`.`region_id` = `c`.`region_id`
   ```
 
-  A non-failing **Warning: join_use_nulls = 1 with not-Nullable columns** stage, at deploy and on every run, lists the view's columns that are not `Nullable` but could be (`Array`, `Map`, `Tuple`, geo types and `JSON` cannot be `Nullable` and are not affected). A listed column from the other side of the join, or used in the `ON` clause, never becomes `NULL` and can be ignored.
+  A non-failing **Warning: join_use_nulls = 1 with not-Nullable columns** stage, at deploy and on every run, lists the view's columns that are not `Nullable` but could be (`Array`, `Map`, `Tuple`, geo types and `JSON` cannot be `Nullable` and are not affected). A listed column from the other side of the join, used in the `ON` clause, or an aggregate such as `count()` never becomes `NULL` and can be ignored: the warning then stays on every run, and does not mean the view is broken.
 * Adding or removing `@joinUseNulls` on redeploy recreates the view (**Create View**).
 * If the view's SQL ends with its own `SETTINGS` that sets `join_use_nulls`, that value is kept (the warning above follows it).
 * **On a table** `@joinUseNulls` does nothing: a non-failing **Warning: @joinUseNulls on a table** stage is shown at deploy and on every run, and the load follows the `joinUseNulls` runtime parameter.
@@ -1784,6 +1786,11 @@ The view's `SELECT` ends with `SETTINGS join_use_nulls = 1`, fixed when the view
 @materializationType("view")
 @final
 @joinUseNulls
+SELECT
+    `f`.`order_id`                              AS `order_id`,
+    CAST(`c`.`segment` AS Nullable(String))     AS `segment`
+FROM {{ ref('TARGET', 'FCT_ORDERS') }} `f`
+LEFT JOIN {{ ref('TARGET', 'DIM_CUSTOMER') }} `c` ON `c`.`customer_key` = `f`.`customer_key`
 ```
 
 ##### `@optimize`
@@ -1924,7 +1931,7 @@ Stable column ID for lineage tracking.
 
 * **Dimension / Fact:** required on every column — the SQL editor generates a fresh `@id("<value>")` for each column it creates, and the **Missing Column IDs** check flags any column that is missing one. The `@id` keeps a column's identity separate from its name, so a rename is an in-place `RENAME COLUMN` rather than a drop and re-add.
 * **Work:** optional. Without it Coalesce uses the column's name as its id, so a rename drops the column and adds a new one.
-* Not for manual editing — value is a stable identifier generated once at creation time.
+* Not for manual editing — value is a stable identifier generated once at creation time. Keep the column `@id` even where general Coalesce SQL guidance says not to write one: this package's **Missing Column IDs** check stops a Dimension or Fact without it.
 * **Column added later:** make sure it gets its own `@id` too. If you're editing by hand, add a new, unique 6-hex-digit `@id("<value>")` along with the column; an agent can generate one for you. Don't reuse a value already on the node — a repeated value fails the **Duplicate Column IDs** check.
 * **Duplicate column names:** if the SELECT returns the same column name twice, Coalesce renames the extra copy (`SYSTEM_CREATE_DATE` → `SYSTEM_CREATE_DATE1`). The **Duplicate Column Names** check stops the deploy and the run, whether or not the copy has its own `@id`: a column named like another one plus a number, whose name is not written as an alias in the node's SQL, is a renamed copy. A deliberate alias such as `REGIONKEY1` is written in the SQL, so it is not reported (without an `@id` it is a missing ID).
 
@@ -2509,7 +2516,7 @@ GROUP BY `dc`.`region_name`, `dc`.`c_mktsegment`, toStartOfMonth(`f`.`o_orderdat
 
 ClickHouse has no `PIVOT`, `UNPIVOT` or `MATCH_RECOGNIZE`; a Work node does the same with ClickHouse functions. The sources in these examples are `sales` (`region`, `product`, `sale_date`, `amount`), `events` (`user_id`, `ts`, `event_type`) and `prices` (`product`, `valid_from`, `price`).
 
-Some ClickHouse functions return a type Coalesce cannot work out, so `coa validate` warns *UNKNOWN data type* and the create fails. `CAST` those columns, as the examples below do. This applies to `sumMap`, tuple elements (`` `kv`.1 ``), `sequenceMatch`, `sequenceCount`, `windowFunnel`, `dateName`, `toLastDayOfMonth`, `JSONExtract(..., '<type>')` and `JSONHas`.
+Some ClickHouse functions return a type Coalesce cannot work out, so `coa validate` warns *UNKNOWN data type* and the create fails. `CAST` those columns, as the examples below do. This applies to `sumMap`, tuple elements (`` `kv`.1 ``), `sequenceMatch`, `sequenceCount`, `windowFunnel`, `dateName`, `toLastDayOfMonth`, `JSONExtract(..., '<type>')`, `JSONHas` and date/time arithmetic with an interval (`toDate(...) + toIntervalDay(n)`).
 
 **Pivot** — one column per value with `sumIf`:
 
@@ -2845,6 +2852,8 @@ FROM {{ ref('SRC', 'partsupp') }} `partsupp`
 ##### Fact with Dimension Key Lookups
 
 A fact that looks up each dimension's surrogate key, pointing unmatched members at the zero key record, partitioned by month.
+
+> **Note:** A lookup on `SYSTEM_CURRENT_FLAG = 'Y'` points each fact at the member's *current* version. With `changeTracking` / `lastModified`, a new SCD Type 2 version re-points the existing facts on the next run. For as-of history, join on a business effective-date column of your own: `SYSTEM_CREATE_DATE` / `SYSTEM_END_DATE` are load times, not business dates.
 
 ```sql
 @description("Order line fact with customer and part keys; unmatched members point at the zero-key record")
