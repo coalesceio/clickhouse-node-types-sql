@@ -1822,6 +1822,7 @@ Adds an **Optimize Table** stage after the load and before **Post-SQL**, that ru
 
 * **Work:** *Not specified in the SQL editor → defaults to **truncateInsert**.* ClickHouse has no `INSERT OVERWRITE`, so truncate and insert are two separate stages, not one atomic statement — see [Known Limitations](#known-limitations).
 * **Dimension / Fact:** *Not specified in the SQL editor → defaults to **append**.*
+* ⚠️ Only `append` (any case) appends. Any other value, including a typo such as `"apend"`, is treated as `truncateInsert` with no warning: the table is truncated on every run.
 * **Note:** Ignored on Views.
 
 **Example:**
@@ -2173,7 +2174,7 @@ Key annotation terms (`@orderBy`, `@primaryKey`, `@partitionBy`) are written int
 | **Property** | **Description** |
 |---------|-------------|
 | `@not_null` | Fails on rows where the column is NULL.<br/>Example: `@not_null` |
-| `@uniqueness` | Fails when a value appears on more than one row.<br/>Example: `@uniqueness` |
+| `@uniqueness` | Fails when a value appears on more than one row. `NULL` counts as one value, so two `NULL` rows fail.<br/>Example: `@uniqueness` |
 | `@empty` | Fails on rows where the column is empty after `trimBoth(...)` removes leading and trailing spaces. Tabs and newlines aren't removed, so a value made only of them doesn't count as empty.<br/>On `FixedString` columns the test removes the zero bytes that pad the value first, so `''`, spaces and padding all count as empty.<br/>NULL values pass this test — they're caught by `@not_null` instead.<br/>For string columns only (`String`, `FixedString`, `LowCardinality(String)`, and their `Nullable` forms): on any other type ClickHouse rejects `trimBoth(...)` and the run fails with its error.<br/>Example: `@empty` |
 | `@accepted_values("<value>", ...)` | Fails on rows whose value is outside the allow list. NULL values pass.<br/>Repeatable — every occurrence on the column is merged into one list. Each call takes a comma-separated list or separate arguments —<br/>`accepted_values("1, 3, 5")`<br/>`accepted_values("1", "3", "5")`<br/>`accepted_values("1") accepted_values("3, 5")`<br/>Each value is pasted into the SQL verbatim, so write it as a valid SQL value for the column's data type —<br/>integer and `Float*`: with or without double quotes<br/>`Decimal` with a fractional part: as a string, single quotes inside double quotes, `"'12.3456'"` — an unquoted `12.3456` is a `Float64` in ClickHouse, and a `Decimal` value is not found in a list of `Float64` values unless the float is exact (`12.3456` is not found, `0.5` is), so the test fails rows that hold an accepted value (`rejected_values`: misses rows that hold a rejected value)<br/>string: single quotes inside double quotes, `"'<string>'"`<br/>boolean: `true`/`false`, with or without double quotes<br/>date/time: a literal in single quotes inside double quotes, or a function, e.g. `"'2026-01-01'"` or `"toDate('2026-01-01')"`<br/>Example: `@accepted_values("'ALGERIA', 'ARGENTINA'")` |
 | `@rejected_values("<value>", ...)` | Fails on rows whose value is in the deny list. NULL values pass.<br/>Same syntax and quoting rules as `accepted_values`.<br/>Example: `@rejected_values("'NA'")` |
